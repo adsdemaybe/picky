@@ -1,0 +1,25 @@
+# Local Postgres + pgvector for the catalog / recommender arms.
+#   make db-up     start (schema.sql runs once, on first start with an empty volume)
+#   make db-down   stop (data kept); `docker compose down -v` wipes it so schema.sql re-runs
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: picky-db
+    environment:
+      POSTGRES_USER: picky
+      POSTGRES_PASSWORD: picky
+      POSTGRES_DB: picky
+    ports:
+      - "5432:5432"
+    volumes:
+      - picky-pgdata:/var/lib/postgresql/data
+      - ./contracts/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U picky -d picky"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  picky-pgdata:

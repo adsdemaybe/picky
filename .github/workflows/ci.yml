@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: make check + make demo (fakes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PICKY_REAL_ARMS: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python 3.12
+        run: uv python install 3.12
+
+      - name: Sync env
+        run: uv sync --locked
+
+      - name: make check (lint, format, rules sync, tests)
+        run: make check
+
+      - name: make demo (all arms fake)
+        run: make demo
