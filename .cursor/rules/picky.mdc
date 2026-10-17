@@ -135,6 +135,10 @@ Rules:
   an issue only for a bug or a new idea. Touch another arm's folder only through a PR its owner reviews.
 - Checkboxes mean the same everywhere: `[x]` = works in the pipeline (`make demo`) with the arm's **real** impl;
   `[x] … (fake)` = works only in the fake so far; `[ ]` = not done.
+- **Pull constantly.** 11 arms move at once; stale branches are how merges break. Sync with
+  `git pull && git fetch && git merge origin/main` at the start of every session, before starting each new task,
+  before every push, after any PR merges to `main`, and at least every ~30 min while working. Fix conflicts right away
+  on your branch, then re-run `make check`.
 - Commit messages: `<arm>: <imperative summary>` (e.g. `routing: add OR-Tools orienteering with skip penalties`).
 
 ### Step by step
@@ -261,6 +265,9 @@ Hour-0 accounts (lead times, owners): see the checklist at the top of `docs/rese
 
 ## 10. How Claude works in this repo
 
+- **Pull first, pull often (§5).** Before reading or editing code, and again before each new task and each push:
+  `git fetch && git status`, then `git pull` and `git merge origin/main` into the current branch. Never work on top of
+  a stale branch; if the merge conflicts, resolve it (or ask) before doing anything else.
 - Before coding: read the arm's `README.md` and its contract in `contracts/`. Check the branch
   (`git branch --show-current`); if on `main`, switch to `arm/<arm>` (or the right `feat/`/`fix/` branch) first.
 - Stay inside the arm folder. Need a contract change → stop and propose a `contracts/` PR. Need a shared helper →
