@@ -1,0 +1,12 @@
+# Test fixture (online store).
+schema_version: 1
+store_id: online
+name: Picky Online
+shipping_cents: 599
+free_shipping_over_cents: 3500
+default_eta_hours: 24
+items:
+  - {sku: black_beans, price_cents: 149, qty: 100}
+  - {sku: cotija, qty: 40, eta_hours: 6}
+  - {sku: tortillas_corn, qty: 100}
+  - {sku: salsa_hot, qty: 50, deal: {kind: percent_off, price_cents: 399, percent_off: 11, reason: "Online promo"}}

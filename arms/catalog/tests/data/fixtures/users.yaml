@@ -1,0 +1,10 @@
+# Test fixture (one demo user; used by the seed test only).
+schema_version: 1
+users:
+  - user_id: maya
+    profile: {user_id: maya, display_name: Maya Test, phone: "+15555550100", home_store_id: store_ave, household_size: 2, prefs: {spicy: 0.4}, favorite_skus: [salsa_mild]}
+    mandate: {mandate_id: mnd_maya, user_id: maya, cap_cents: 6000, ask_above_cents: 1500, blocked_categories: [alcohol], expires_at: 2030-01-01T00:00:00Z}
+    purchases:
+      - {purchase_id: pur_1, user_id: maya, sku: salsa_mild, qty: 1, unit_price_cents: 399, store_id: store_ave, ts: 2026-10-01T18:00:00Z, rating: 3}
+    feedback:
+      - {feedback_id: fb_1, user_id: maya, sku: salsa_mild, rating: 3, text: "too mild", channel: photon, tags: [too_mild]}

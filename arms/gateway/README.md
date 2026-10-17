@@ -1,0 +1,116 @@
+# gateway
+
+**Purpose.** FastAPI backend in the middle of the pipeline (CLAUDE.md §2): the composition root that wires every arm
+(real or fake), runs the trip state machine end to end, publishes every user-visible event and serves REST + WebSockets
+to the frontend, the Isaac sim worker and the messaging channel. It is the only place arms meet.
+
+## Scope (CLAUDE.md §3)
+
+- [x] **P0** Arm registry: `PICKY_REAL_ARMS` picks real vs fake per arm; a real arm that fails to build falls back to its fake (`/health` says so)
+- [x] **P0** Trip orchestrator: `intent → list_ready → recs_ready → route_planned → awaiting_login → executing ⇄ awaiting_approval → checkout → paid → followup → done` (+ `failed`)
+- [x] **P0** Event bus → `/ws?trip_id=` (snapshot first, replay by `after_seq`, bus-wide `seq`, `robot.state` ≤ 2 Hz)
+- [x] **P0** ApprovalBroker (web / ws / Photon answers, first wins, timeouts, checkout approval bound to `cart_hash`, 409 on mismatch)
+- [x] **P0** Every REST endpoint in `contracts/api.md`
+- [x] **P0** Headless demo `make demo`: trip 1 → feedback → trip 2; asserts every pipeline state, no errors/failed
+  stops, and that trip 2 changes the salsa and the recs
+- [x] **P0** `/ws/sim`: token + contracts-version handshake → `SimLink` handed to the robot arm; disconnect fails in-flight commands
+- [x] **P0** Line approvals are bound to the line: `add_line(approval_id=...)` accepts only an unused, granted
+  over_threshold / recommendation / online_order / substitution approval for that sku (or a chosen rec of a batch)
+  covering the line total; never pick_choice or checkout
+- [x] **P0** Stays within budget: detours / checkout batch are fitted to the budget headroom (at most one over-budget
+  detour, whose ask says so); declined detours are excluded on the user's later trips
+- [x] **P0** Degrade, don't die: OOS → online line; `path_blocked`/`timeout` → re-plan + retry once; `disconnected` → robot fake; approval timeout → skip / freshest
+- [x] **P1** `/ws/frames` live view (face-blurred frames only, latest-only, full-rate `robot.state`)
+- [x] **P1** `/debug` no-build page: event log, state, cart, approvals, route over the planogram (SVG)
+- [x] **P1** `export_schemas` → OpenAPI + events + client-message JSON schemas for `make gen-types`
+- [ ] **P1** `/api/trips/{id}/voice` Deepgram STT → agent → TTS (implemented over httpx, untested without a key)
+- [ ] **P2** Batched shoppers (several users in one trip): `user_ids` are stored and routed, approvals go to the owner only
+- [ ] **P2** Trip persistence (trips live in memory; a restart forgets them)
+
+## Contract
+
+| | |
+|---|---|
+| Implements | `TripController` (`TripOrchestrator`), `ApprovalBroker` (`GatewayApprovalBroker`), `EventPublisher` (`GatewayPublisher` over `utils.events.EventBus`), `SimLink` (`SimLinkHub`) — `contracts/services.py`, `contracts/sim.py` |
+| Serves | every endpoint + WebSocket in `contracts/api.md`; client→server `/ws` messages = `api.ClientMessage` **plus** the extension `{"type":"login","user_id":...}` |
+| Emits | every event in `contracts/events.py` except `agent.message` (agent / messaging fake) and `error` (anyone; the gateway emits its own) |
+| Calls | `agent.expand_intent/source_list/respond/interpret_reply/compose_followup` · `catalog.get_planogram/get_locations/get_offers/get_product/list_stores/apply_scan/record_pick` · `recommender.get_profile/recommend/checkout_batch/record_feedback/record_purchase` · `routing.plan_route` · `robot.reset/navigate/scan/capture/pick/place_in_basket/states/frames` · `perception.blur_faces/identify/rank_freshness/verify_basket` · `trust.evaluate/checkout/record_transparency` · `messaging.start/on_inbound/send/send_approval_request` |
+| Gateway rules it enforces | `Cart.shipping_cents` via `online_shipping_cents`; `Trip.stop_status` survives re-plans; `Stop.detour_m/detour_s` → `Recommendation.extra_distance_m/extra_time_s`; transparency entry per rec (pending → accepted/declined); frames are blurred before streaming; the LLM never pays (checkout = mandate + explicit hash-bound approval) |
+
+Stop ids: mandatory `item:<sku>`, optional `rec:<rec_id>`. Optional detours are asked **before** the robot drives
+there (a "no" saves the walk and triggers `trips.replan`). Produce (category `produce` or perishable) gets the
+freshness top-3 `pick_choice`. In-store lines enter the cart when picked; online lines at sourcing.
+
+## Stack
+
+FastAPI + uvicorn, one process / **one worker** (the bus is in-process), asyncio tasks for planning/execution,
+`utils.fsm.StateMachine` over `contracts.shopping.TRIP_TRANSITIONS`. No extra deps (httpx for Deepgram).
+Gotchas (docs/research.md §9.11): never `--workers > 1`; blocking work belongs in arms (`asyncio.to_thread`); the sim
+worker dials **out** to `/ws/sim`, so the GPU box needs no inbound port.
+
+## Files
+
+| File | What |
+|---|---|
+| `registry.py` | `build_registry()` → `Registry` (services, bus, publisher, broker, SimLink hub, frame hub, orchestrator, modes) |
+| `orchestrator.py` | `TripOrchestrator` (TripController + pipeline driver), `OrchestratorConfig` |
+| `app.py` | `create_app()` / `app`: REST, `/ws`, `/ws/frames`, `/ws/sim`, `/debug` |
+| `demo.py` | `python -m arms.gateway.demo`: headless P0 scenario with a readable timeline |
+| `export_schemas.py` | `python -m arms.gateway.export_schemas [out_dir]` → `arms/frontend/schemas/*.json` |
+| `static/debug.html` | the `/debug` page |
+| `tests/` | broker, SimLink, registry, orchestrator (full scenario with fakes), app (TestClient) |
+
+## How to run
+
+```bash
+make demo                                   # all fakes, ~8 s, exits non-zero on failure
+PICKY_REAL_ARMS=routing make demo           # one arm real
+PICKY_LOG_LEVEL=INFO make demo              # with arm logs
+make dev                                    # API on :8000 → open http://localhost:8000/debug
+uv run python -m arms.gateway.export_schemas   # or: make gen-types
+uv run pytest arms/gateway
+```
+
+Sim worker: connect to `ws://<gateway>:8000/ws/sim` and send `SimHello(token=PICKY_SIM_TOKEN, contracts_version=...)`
+first. Then run with `PICKY_REAL_ARMS=robot` so the real `RobotService` drives the link (it falls back to the 2D
+fake on `disconnected`).
+
+## Demo-ready checklist (CLAUDE.md §6)
+
+- [x] Implements its Protocols fully; no `NotImplementedError` on demo paths
+- [x] `make demo` completes trip 1 + trip 2 with all fakes (< 20 s)
+- [ ] `make demo` with every arm real that has keys/extras (`PICKY_REAL_ARMS=all`) — run once all arms land
+- [x] Predictable failures degrade + emit `error` (OOS, path blocked, sim disconnect, payment decline, approval timeout, bad LLM output from the agent)
+- [x] Switch any arm back to its fake by env flag alone
+- [x] Tests pass with base deps
+- [ ] Frontend consumes `/ws` + schemas (frontend arm)
+- [x] README up to date
+
+## Known limitations
+
+- Trips, approvals and the event ring (last 1000 events) live in memory.
+- `make demo` fails on any `error` event, failed stop, skipped pipeline state, a trip paid over its budget without an
+  approved over-budget ask, or a trip 2 that keeps the same salsa or recommendations. The robot fake runs at 120x
+  there. For a real arm that is expected to degrade (e.g. robot with no sim worker), run
+  `make demo ARGS=--allow-errors`.
+- With a stated budget the demo cart is the list plus whatever extras fit: on store_ave the taco list projects to
+  $37.56 of $40, so trip 1 gets 2 detours (one fits, one is flagged over budget and declined) and no checkout batch.
+  Showing 3 detours incl. the guac-kit markdown within budget needs ~$7 more headroom (data prices / shipping).
+- With real messaging and no Photon reply the demo waits in `followup` until the timeout (nobody answers the
+  follow-up; approvals are still answered by the demo's web-shopper fallback).
+- Checkout-batch picks are added as in-store lines at the checkout counter (the robot does not drive back for them).
+- Approvals go to the trip owner only (batched trips).
+- `/ws` replays the whole trip history when `after_seq` is omitted (clients dedupe by `seq`).
+
+## Contributing to this arm
+
+1. Branch: `arm/gateway` (until merged), then `feat/gateway-<slug>` / `fix/gateway-<slug>` off `main` (CLAUDE.md §5).
+2. Stay in `arms/gateway/`. The gateway may import other arms **only** through their `__init__.py`
+   (`create` / `create_fake`, plus the robot's documented helpers), and only from `registry.py`.
+3. New endpoint or event? It must exist in `contracts/api.md` / `contracts/events.py` first (`contracts/<slug>` PR).
+4. Every new pipeline step: call services at call time via `self.services`, wrap it so a failure publishes `error`
+   and the trip continues, and add the event to `demo.describe()` so it shows in the timeline.
+5. Before the PR: `uv run ruff check --fix arms/gateway && uv run ruff format arms/gateway && uv run pytest arms/gateway`
+   then `make demo` and `PICKY_REAL_ARMS=<arm-you-touched> make demo`; run `make rules` after editing this README.
+
+Owner: TBD · Branch: `arm/gateway`

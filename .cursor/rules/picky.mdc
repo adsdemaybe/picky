@@ -60,7 +60,8 @@ user-visible is published as a `contracts.events` event → websocket → fronte
 
 ## 3. Spec — Things to Implement, by arm
 
-The team's source of truth. Track progress in the arm's GitHub issue, not here.
+The team's source of truth. Track progress on the arm's draft PR checklist (mirrored in `arms/<arm>/README.md`), not
+here.
 
 | Arm | Owns |
 |---|---|
@@ -129,26 +130,37 @@ Rules:
   demo-ready (§6).
 - After an arm has merged, every further change gets its own short-lived branch + PR:
   `feat/<arm>-<slug>` (new capability) · `fix/<arm>-<slug>` · `contracts/<slug>` · `utils/<slug>` · `chore/<slug>`.
-- One owner per arm (the assignee on its GitHub issue). Touch another arm's folder only through a PR they review.
+- **One owner per arm = the assignee on the arm's draft PR.** That PR is the claim and the progress checklist; the
+  scope in `arms/<arm>/README.md` is its in-repo copy (keep both ticked the same). There are no per-arm issues; open
+  an issue only for a bug or a new idea. Touch another arm's folder only through a PR its owner reviews.
+- Checkboxes mean the same everywhere: `[x]` = works in the pipeline (`make demo`) with the arm's **real** impl;
+  `[x] … (fake)` = works only in the fake so far; `[ ]` = not done.
 - Commit messages: `<arm>: <imperative summary>` (e.g. `routing: add OR-Tools orienteering with skip penalties`).
 
 ### Step by step
 1. **Set up once**
    ```bash
    gh repo clone adsdemaybe/picky && cd picky
-   make setup                 # uv sync: Python 3.11 env + dev tools
+   make setup                 # uv sync --locked: Python 3.12 env + dev tools (base deps only)
+   uv sync --extra <arm>      # your arm's heavy deps (pyproject extras); `uv sync --all-extras` for everything
    cp .env.example .env       # add only the keys your arm needs; .env is git-ignored
    make check && make demo    # both must pass on a fresh clone (all arms fake)
    ```
-2. **Claim your arm.** Every arm already has a **draft PR** from `arm/<arm>` whose checklist is its scope (mirrors §3):
-   `gh pr list --label arm:<arm>` → `gh pr edit <n> --add-assignee @me`. Tick boxes in the PR as items land.
+   `make setup` / plain `uv sync` is an exact sync and **removes extras**: re-run `uv sync --extra <arm>` after it.
+   Frontend owner: `cd arms/frontend && pnpm i`, then `make gen-types` (TS types from contracts) and `make web`.
+2. **Claim your arm** on its **draft PR** (from `arm/<arm>`; its checklist is the scope, mirroring §3):
+   `gh pr list --label arm:<arm>` → `gh pr edit <n> --add-assignee @me`. Tick boxes in the PR and in
+   `arms/<arm>/README.md` as items land (checkbox meaning: Rules above).
 3. **Check out the branch** (it already exists).
    ```bash
    git fetch && git switch arm/<arm> && git merge origin/main
    # new work after the arm has merged: git switch main && git pull && git switch -c feat/<arm>-<slug>
    ```
 4. **Build inside `arms/<arm>/` only.** Implement `service.py` against your Protocol in `contracts/services.py`; keep
-   `fake.py` working. Run your arm inside the full pipeline as you go: `PICKY_REAL_ARMS=<arm> make demo`.
+   `fake.py` working. Run your arm inside the full pipeline as you go: `PICKY_REAL_ARMS=<arm> make demo` (needs
+   `uv sync --extra <arm>` + your keys; the arm README's "How to run" lists them). If your real `create()` can't run
+   (extra or key missing), make it raise so the gateway boots the fake and `/health` says why. While your arm still
+   degrades on purpose (e.g. robot with no sim worker): `PICKY_REAL_ARMS=<arm> make demo ARGS=--allow-errors`.
 5. **Push early, stay current.**
    ```bash
    git push                                     # the draft PR picks it up: CI + visibility, NOT a request to merge
@@ -157,9 +169,11 @@ Rules:
    Resolve conflicts on your branch, never on `main`.
 6. **Get it demo-ready (§6).** Then run the pre-PR checks:
    ```bash
-   make check                                   # lint, format, rules sync, tests
-   PICKY_REAL_ARMS=<arm> make demo              # full trip with your arm real
+   make fmt                                     # auto-format + auto-fix (fixes a failing fmt-check / lint)
+   uv run pytest arms/<arm>                     # your tests, fast
    make rules                                   # if you edited CLAUDE.md or any arm README
+   make check                                   # lint, format, rules sync, all tests (what CI runs)
+   PICKY_REAL_ARMS=<arm> make demo              # full trip with your arm real (CI runs it all-fake)
    ```
    Update `arms/<arm>/README.md`: what works, known limitations, how to run, fallback flag.
 7. **Mark it ready:** tick the PR's scope + demo-ready checklists, add demo evidence (screenshot/GIF/log of the pipeline
@@ -201,13 +215,17 @@ Not required: every edge case, scale beyond the demo, perfect polish.
 - **Python 3.12 for dev** (Isaac Sim 6.2 runs Python 3.12); `requires-python >= 3.11`, so avoid 3.12-only syntax (PEP 695
   `type`/generics). `uv` for envs, `ruff` for lint/format, `pytest`, pydantic v2, `asyncio` services.
   Frontend: pnpm in `arms/frontend`; TS types are generated from contracts (`make gen-types`), never hand-written.
-- Commands: `make setup` (uv sync), `make check` (lint + format check + rules check + tests), `make dev` (gateway
-  API on :8000), `make demo` (full trip through the pipeline, fakes unless `PICKY_REAL_ARMS` is set), `make seed`
-  (DB from planograms), `make rules` (regenerate Cursor rules). Heavy per-arm deps go in that arm's optional extra in
-  `pyproject.toml` (`uv sync --extra routing`); base deps must be enough for contracts, utils, fakes and tests.
+- Commands: `make setup` (uv sync --locked), `make check` (lint + format check + rules check + tests), `make fmt`,
+  `make dev` (gateway API, host/port from `.env`, default :8000), `make demo` (full trip through the pipeline, fakes
+  unless `PICKY_REAL_ARMS` is set; extra flags via `make demo ARGS=--allow-errors`), `make db-up` + `make seed` (DB
+  from planograms; needs the catalog extra), `make rules` (regenerate Cursor rules). Heavy per-arm deps go in that
+  arm's optional extra in `pyproject.toml` (`uv sync --extra routing`); base deps must be enough for contracts, utils,
+  fakes and tests.
 - **Money is integer cents** (`int`), never float. **Units:** meters, radians, store world frame defined by the
   planogram origin. Poses are `contracts` `Pose2D`.
-- Config only via `utils.config.settings` (env/.env). Logging only via `utils.log.get_logger(__name__)`.
+- Config only via `utils.config.settings` (env/.env). Logging only via `utils.log.get_logger(__name__)`. Two tooling
+  knobs are process-env only (not in Settings, not read from `.env`): `PICKY_LOG_LEVEL` and `PICKY_ID_SEED`. DB access
+  only via `utils.db` (one shared pool).
   LLM calls go through `utils.llm` (one place for model ids, retries, JSON/tool helpers).
 - **Deterministic vs LLM:** money math, mandate checks, approval gating and payments are deterministic code. The LLM
   proposes; code decides. Nothing reaches checkout without the mandate engine and an explicit user approval.

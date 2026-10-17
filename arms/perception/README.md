@@ -1,0 +1,92 @@
+# perception
+
+**Purpose.** Turns the robot's camera frames into facts: faces blurred, products identified (scan reports that update
+the catalog), produce ranked by freshness (top-3 for the shopper), basket contents verified.
+Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_faces` / `identify`** → `catalog.apply_scan`
+→ `scan.result` → produce: **`rank_freshness`** → `pick.choices` → `robot.pick` → `place_in_basket` →
+**`verify_basket`** → `basket.verified`.
+
+## Scope (CLAUDE.md §3)
+- [x] **P0** Face blurring on every camera frame before it is stored, streamed or sent to an LLM (YuNet; synthetic-frame rule as fallback)
+- [x] **P0** Scan pass → `ScanReport` (detections, observed count, per-lot freshness, shelf-tag price, pose) that `catalog.apply_scan` consumes
+- [x] **P0** Ground-truth bypass (sim reports instance → SKU) so the pipeline always runs
+- [x] **P0** "Pick the exact item": rank produce by freshness, top-3 with reasons + instance_id for `robot.pick`
+- [x] **P0** Basket verified at drop (multiset diff vs expected)
+- [x] **P1** Barcode read (zxing-cpp) on crops → SKU (service.py, TODO 2 done; needs extra)
+- [ ] **P1** SigLIP 2 embedding match vs our label textures (TODO 3)
+- [ ] **P1** Claude vision (`claude-haiku-5-5`) pick-from-candidates on blurred crops (TODO 4)
+- [x] **P1** Face-free freshness thumbnails cropped from the blurred frame (TODO 5 done; needs pillow)
+- [ ] **P2** Freshness from pixels (multi-image Claude rank blended 0.6/0.4 with HSV heuristic) (TODO 6)
+- [ ] **P2** Basket verify from pixels (cascade per basket crop) (TODO 7)
+- [ ] **P2** Shelf-tag OCR for mispricing (TODO 8)
+
+## Contract
+- Implements `contracts.services.PerceptionService` (`blur_faces`, `identify`, `rank_freshness`, `verify_basket`).
+- In: RAW `contracts.sim.CameraFrame` (with ground-truth `instances`: sku, instance_id, lot_id, freshness, pixel bbox).
+- Out: blurred `CameraFrame` (`blurred=True`), `contracts.perception.ScanReport`, `PickChoice` (≤ `PICK_CHOICE_MAX`=3
+  `FreshnessCandidate`s, rank 1 = freshest), `BasketCheck` (`BasketCheck.compare`).
+- Events: **none published by this arm.** The gateway wraps results in `scan.result`, `pick.choices`,
+  `basket.verified`, `frame`.
+- Calls (call time only): `services.catalog.get_planogram`, `services.catalog.get_product`; falls back to
+  `utils.data` when catalog isn't wired. Real VLM step (TODO) goes through `utils.llm`.
+- Cheat sheet: [contracts/OVERVIEW.md](../../contracts/OVERVIEW.md) · models: [contracts/perception.py](../../contracts/perception.py)
+
+## Stack (docs/research.md §9.2)
+| | Pick | Fallback |
+|---|---|---|
+| Identify | zxing-cpp → open_clip SigLIP 2 `hf-hub:timm/ViT-B-16-SigLIP2` → `claude-haiku-5-5` vision | ground-truth bypass; CLIP `ViT-B-32`/`laion2b_s34b_b79k` |
+| Face blur | OpenCV YuNet `face_detection_yunet_2023mar.onnx` + Gaussian blur (20% pad) | synthetic-frame rule; MediaPipe BlazeFace |
+
+Gotchas: pin **`opencv-python-headless>=4.10,<5`** (5.x untested with 2023mar). SigLIP 2 needs `open-clip-torch>=2.31`,
+`timm>=1.0.15`; device `mps` on Mac. YuNet may miss low-poly sim faces. Claude vision is weak under 200 px and can't
+count identical items. Barcodes need ≥ ~300 px width + quiet zone. Run perception in the gateway process, not Isaac's
+Python; heavy work goes through `asyncio.to_thread`.
+
+**Blur rule (why the fake only blurs synthetic frames).** `blurred=True` is a privacy claim the gateway relies on before
+streaming. The fake has no detector, so it only certifies frames that can't contain a real face: frames carrying sim
+ground truth (`instances`) or whose `frame_id` starts with `sim`/`fake`/`synthetic`/`canned`. Anything else comes back
+`blurred=False` → the gateway must not stream/store it. The real service runs YuNet when available and falls back to
+the same rule (fail closed).
+
+## Files
+- `__init__.py` — `create(services)` → `RealPerception`, `create_fake(services)` → `FakePerception`
+- `fake.py` — ground-truth bypass (base deps only), helpers `is_synthetic_frame`, `freshness_reason`
+- `service.py` — YuNet blur + cascade skeleton (barcode done; SigLIP/VLM TODO) over the ground-truth report
+- `tests/test_perception.py` — Protocol conformance + demo behavior (avocado top-3, mispricing, empty slot, basket diff)
+
+## How to run
+```bash
+uv run pytest arms/perception                       # base deps; data test skips until data/planograms/store_ave.yaml exists
+make demo                                           # all fakes (perception = ground-truth bypass)
+uv sync --extra perception                          # opencv, pillow, zxing-cpp (+ open-clip-torch torch timm for TODO 3)
+curl -L -o models/face_detection_yunet_2023mar.onnx \
+  https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
+PICKY_REAL_ARMS=perception make demo                # real blur + cascade, ground truth fills the gaps
+```
+Fallback flag: drop `perception` from `PICKY_REAL_ARMS`.
+
+## Demo-ready checklist (CLAUDE.md §6)
+- [ ] Every Protocol method works with `PICKY_REAL_ARMS=perception`; no `NotImplementedError` reaches a demo path (stages raise internally, cascade skips them)
+- [ ] `make demo` completes a trip with perception real: scan → `scan.result`, avocados → `pick.choices` top-3, drop → `basket.verified ok`
+- [ ] Every frame on `/ws/frames` has `blurred=true`; a face billboard in the sim is visibly blurred
+- [ ] Undecodable JPEG, missing model/extra, unknown store, empty slot → degrade to ground truth, log, no crash
+- [ ] Switchable back to the fake by env flag alone
+- [ ] `uv run pytest arms/perception` green; README updated
+
+## Known limitations
+- Fake thumbnails are `None` (no image decoding with base deps); the real service crops them with pillow.
+- `identify` without ground truth and without a matching `frame.slot_id` echoes the planogram qty as a non-exact count
+  (so `apply_scan` won't zero stock on a blind frame).
+- `CameraFrame` has no `source` field, so "synthetic" is inferred from `instances` / `frame_id` prefix (see Blur rule).
+- `ScanReport.trip_id` is left `None` (not in the `identify` signature); the gateway can set it.
+- Freshness is ground truth only (P2 pixel freshness not built).
+
+## How to contribute (this arm)
+Full flow: CLAUDE.md §5. Short version: work on branch `arm/perception` (after merge: `feat/perception-<slug>` /
+`fix/perception-<slug>`), touch only `arms/perception/**`, never `contracts/` (that's a `contracts/<slug>` PR). Keep
+`fake.py` base-deps-only and green; heavy imports stay inside functions. Before pushing: `uv run ruff check --fix
+arms/perception && uv run ruff format arms/perception && uv run pytest arms/perception`, then
+`PICKY_REAL_ARMS=perception make demo`. Commit messages: `perception: <imperative summary>`. Tick the scope +
+demo-ready boxes in the arm's issue/PR as items land.
+
+**Owner:** TBD · **Branch:** `arm/perception`
