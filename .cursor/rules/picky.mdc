@@ -141,19 +141,18 @@ Rules:
    cp .env.example .env       # add only the keys your arm needs; .env is git-ignored
    make check && make demo    # both must pass on a fresh clone (all arms fake)
    ```
-2. **Claim your arm.** `gh issue list --label arm:<arm>` → `gh issue edit <n> --add-assignee @me`. The issue's checklist
-   is your scope (it mirrors §3).
-3. **Branch.**
+2. **Claim your arm.** Every arm already has a **draft PR** from `arm/<arm>` whose checklist is its scope (mirrors §3):
+   `gh pr list --label arm:<arm>` → `gh pr edit <n> --add-assignee @me`. Tick boxes in the PR as items land.
+3. **Check out the branch** (it already exists).
    ```bash
-   git switch main && git pull
-   git switch -c arm/<arm>           # first time; if it already exists: git switch arm/<arm> && git pull
+   git fetch && git switch arm/<arm> && git merge origin/main
+   # new work after the arm has merged: git switch main && git pull && git switch -c feat/<arm>-<slug>
    ```
 4. **Build inside `arms/<arm>/` only.** Implement `service.py` against your Protocol in `contracts/services.py`; keep
    `fake.py` working. Run your arm inside the full pipeline as you go: `PICKY_REAL_ARMS=<arm> make demo`.
 5. **Push early, stay current.**
    ```bash
-   git push -u origin HEAD                      # first push; then plain `git push`
-   gh pr create --draft --base main --fill      # optional: draft PR = CI + visibility, NOT a request to merge
+   git push                                     # the draft PR picks it up: CI + visibility, NOT a request to merge
    git fetch && git merge origin/main           # often, and always after a contracts change
    ```
    Resolve conflicts on your branch, never on `main`.
@@ -164,9 +163,10 @@ Rules:
    make rules                                   # if you edited CLAUDE.md or any arm README
    ```
    Update `arms/<arm>/README.md`: what works, known limitations, how to run, fallback flag.
-7. **Open the PR** (or flip the draft with `gh pr ready`): `gh pr create --base main --fill --label arm:<arm>`. Fill
-   the template: spec items (§3) completed, `Closes #<issue>`, demo evidence (screenshot/GIF/log of the pipeline with
-   your arm real), fallback flag, known limitations. **Arm PRs must not change `contracts/`.**
+7. **Mark it ready:** tick the PR's scope + demo-ready checklists, add demo evidence (screenshot/GIF/log of the pipeline
+   with your arm real), fallback flag and known limitations to the description, then `gh pr ready <n>`. New `feat/`/
+   `fix/` branches open their own PR: `gh pr create --base main --fill --label arm:<arm>` (fill the template).
+   **Arm PRs must not change `contracts/`.**
 8. **Review.** One reviewer from a different arm: `gh pr checkout <n> && make check && PICKY_REAL_ARMS=<arm> make demo`,
    then approve or request changes. Author squash-merges: `gh pr merge --squash --delete-branch`.
 9. **Next change** → back to step 3 with a `feat/`/`fix/` branch.
@@ -176,6 +176,8 @@ Rules:
   their fakes in the same PR so `main` stays green, and get a review from one affected arm owner. Announce in team chat.
 - **Shared helper:** `utils/<slug>` PR; keep it feature-agnostic (§4 rule 3).
 - **After feature freeze (~T-6 h):** only `fix/` PRs, still through a PR; any one teammate can approve.
+- **Foundation PR #1** is merged with a **merge commit** (not squash), because the arm PRs are stacked on it and
+  GitHub retargets them to `main` automatically when its branch is deleted.
 
 ### For AI assistants (Claude Code, Cursor)
 Follow the same flow. Before writing code, check the branch (`git branch --show-current`); if it is `main`, switch to
