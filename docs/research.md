@@ -1,5 +1,7 @@
 # picky: research and stack decisions (DubHacks 2026)
 
+> **Update 2026-10-17:** the team dropped the T-Mobile track; side tracks are Photon 2.0 and SideShift only.
+
 Synthesized 2026-10-17 from six research reports (payments/trust, Photon, agent stack, hackathon context,
 Isaac Sim, perception/data, routing) and two adversarial fact-check passes.
 
@@ -52,7 +54,7 @@ Ordered by lead time, longest or unknown first.
 | 1 | Deploy the **NVIDIA Brev Isaac launchable** as a trial | [launchable](https://brev.nvidia.com/launchable/deploy/now?launchableID=env-35JP2ywERLgqtD0b0MIeK1HnF46) | Signup takes minutes. The first build "can take a while" (⚠️ 15-45 min is unverified) | Docs give no Isaac version, GPU type or price. Record `pip show isaacsim`, the GPU and the $/hr once it is up. Stop it when idle. |
 | 2 | **Photon beta**: org, project, API key (`project:read`+`project:write`, shown once), assign a shared iMessage number, then **every teammate and demo phone texts it "ping"** | [photon.co/beta](https://photon.co/beta) -> [app.beta.photon.codes](https://app.beta.photon.codes) | ⚠️ No waitlist is documented, but this is not confirmed | The shared line cannot send the first message. Copy the Project ID (`pho_prj_...`). |
 | 3 | **Visa Developer** account, create a project, click "Request access" on Visa Intelligent Commerce / Visa Token Service | [developer.visa.com](https://developer.visa.com) | Account is instant. VIC approval time is unknown, so assume it **will not land this weekend** | Ask the Visa table for hackathon sandbox credentials. Never on the critical path. |
-| 4 | **Read the rules in a real browser** (the Notion pages are JS-rendered and unreadable to tools): dh26 page, DubHacks Hacker Guide, Photon guidelines. Ask the Visa / T-Mobile / SideShift / NVIDIA / Anthropic tables about rules, rubrics and credits | [dh26](https://dh26.dubhacks.co), [Hacker Guide](https://dubhacks.notion.site/), [Photon guidelines](https://somethingreat.notion.site/Hackathon-Guidelines-for-Photon-2-0-3f8e443f36bb81f9893fed0d08a4c01d) | 30 min | Team size, pre-existing-code rule, Devpost URL, track rubrics and the number of tracks you may enter are all unverified. |
+| 4 | **Read the rules in a real browser** (the Notion pages are JS-rendered and unreadable to tools): dh26 page, DubHacks Hacker Guide, Photon guidelines. Ask the Visa / SideShift / NVIDIA / Anthropic tables about rules, rubrics and credits | [dh26](https://dh26.dubhacks.co), [Hacker Guide](https://dubhacks.notion.site/), [Photon guidelines](https://somethingreat.notion.site/Hackathon-Guidelines-for-Photon-2-0-3f8e443f36bb81f9893fed0d08a4c01d) | 30 min | Team size, pre-existing-code rule, Devpost URL, track rubrics and the number of tracks you may enter are all unverified. |
 | 5 | (Only if AWS is a GPU backup) Service Quotas -> EC2 -> "Running On-Demand G and VT instances" >= 8 vCPU | [quotas](https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas) | Hours to days; can be denied | Third choice. Skip if Brev or RunPod works. |
 | 6 | **Anthropic Console**: org, API key, add funds, set a spend limit, check limits | [platform.claude.com](https://platform.claude.com/) | Minutes | ⚠️ New orgs may start in a lower "Evaluation" tier with undocumented limits. Check `platform.claude.com/usage/limits`. No DubHacks credits are confirmed. |
 | 7 | **Stripe** account (test mode) | [register](https://dashboard.stripe.com/register) | 5 min | `sk_test_` key. This is the critical-path checkout. Test mode needs no business verification. |
@@ -139,13 +141,13 @@ Isaac Sim** (this is inferred from omission, which is enough to plan on).
 - **Sunday:** breakfast 9-10:30, **SUBMISSIONS DUE 10:30 AM**, **JUDGING 11:30 AM-2:00 PM**, lunch 1-2:30, closing
   2:15-3:05. That leaves about **22-23.5 h of hacking**, not the 24-36 h in the original brief.
 - **Tracks on dh26:** Visa ("Reimagine Shopping"; ⚠️ the name is inferred from an image filename, and the page has no
-  description), Community Kitchen, Chef's Choice, Cook Smarter. **T-Mobile, Photon and SideShift tracks are not on the
+  description), Community Kitchen, Chef's Choice, Cook Smarter. **Photon and SideShift tracks are not on the
   dh26 page** ⚠️. They are known from the team brief and sponsor lists only.
 - **Unverified ⚠️:** submission platform (Devpost assumed) and URL, team-size cap, pre-existing-code rule, judging format
   (expo tables or timed demos), per-track rubrics. Last year's
   [Hacker Guide](https://dubhacks.notion.site/The-DubHacks-24-Hacker-Guide-16da323fc21b4c6c8c0c2fbca1b7755e) said code must
   be uploaded before the deadline and linked on Devpost, and that teams could enter **up to two sponsored tracks plus
-  the title track**. That is a prior-year rule; confirm it, because it may force a choice between T-Mobile, Photon and SideShift.
+  the title track**. That is a prior-year rule; confirm it, because it may force a choice between Photon and SideShift.
 - **Plan:** code freeze **8:00 AM Sunday**. Submit by 10:00. Rehearse the demo 3 times. Have a 30-second version for
   short judging slots. Contact: hello@dubhacks.co.
 
@@ -172,7 +174,6 @@ Trust only scores if it is **visible in the UI**.
 | Track | What we show | Status |
 |---|---|---|
 | **Photon 2.0** | Messaging arm built on Photon and live on iMessage (shared line), with Telegram as a second channel. Pre-trip list by text, mid-trip approval requests, post-purchase follow-up that updates the taste profile ("context persists across time and channels"). | Qualification is "built on Photon 2.0 + live on >= 1 Photon channel" (team brief / Notion). ⚠️ Prizes ($700 iMessage winner, $300 runner-up, $400 Best Voice Agent) and judging (Vision, Craft, Depth, Traction) come from the Notion page and may describe an earlier hackathon; confirm. |
-| **T-Mobile "Cart Whisperer: checkout suggestions that actually help"** | At checkout, 1-3 explained, budget-aware add-ons ("$4 under budget; 40% off, expires tomorrow, matches your tags"). Hard cap of 3, one-tap decline, and "ignore" feeds the profile. Show the accepted-suggestion rate. Reuses recommender + trust. | ⚠️ No public track text was found (a web search hit only an unrelated Shopify app). T-Mobile may want a network or messaging angle; ask at their table. |
 | **SideShift "Best Startup Idea"** | One business-model slide: free for shoppers. Grocers pay SaaS for shelf intelligence and personalized basket lift. **No pay-to-play placement.** 2x2 landscape (retailer-owned vs shopper-owned, passive scan vs active plan/approve). | ⚠️ Track text unverified. |
 
 ---
@@ -480,7 +481,7 @@ Sources: [models overview](https://platform.claude.com/docs/en/about-claude/mode
 
 | | |
 |---|---|
-| **Pick** | Local **sentence-transformers** `BAAI/bge-small-en-v1.5` (384-dim, no key, works offline on MPS/CPU). Embed `name \| brand \| category \| tags \| description` per product into pgvector `vector(384)`. The profile vector is a weighted mean of liked/purchased vectors minus disliked ones. Cosine top-k, then **Sonnet rerank** of the top few with a "why you'd like this" line. This produces the `interest` that routing turns into `penalty_m`. Cap 3-5 rec stops per trip and batch the rest into "want any of these?" at checkout (the Cart Whisperer feature). Show near-expiry markdowns only when a user's similarity is above a threshold. |
+| **Pick** | Local **sentence-transformers** `BAAI/bge-small-en-v1.5` (384-dim, no key, works offline on MPS/CPU). Embed `name \| brand \| category \| tags \| description` per product into pgvector `vector(384)`. The profile vector is a weighted mean of liked/purchased vectors minus disliked ones. Cosine top-k, then **Sonnet rerank** of the top few with a "why you'd like this" line. This produces the `interest` that routing turns into `penalty_m`. Cap 3-5 rec stops per trip and batch the rest into "want any of these?" at checkout (checkout batch). Show near-expiry markdowns only when a user's similarity is above a threshold. |
 | **Fallback / upgrade** | **Voyage `voyage-4-lite`** (1024-dim by default; `input_type="document"` for products, `"query"` for profiles; normalized vectors). The key comes from a **MongoDB Atlas** model API key: `VOYAGE_API_KEY`, endpoint `https://ai.mongodb.com/v1`, `voyageai >= 0.3.7`. ⚠️ Free tokens and pricing are unverified ([billing](https://www.mongodb.com/docs/voyageai/management/billing/)). For about 500 products an exact numpy scan needs no index. |
 | **Post-purchase** | Haiku parses the follow-up reply into structured ratings, which update the profile and its vector. Trip 2 then re-plans. |
 
@@ -657,7 +658,7 @@ Sources: [FastAPI SSE](https://fastapi.tiangolo.com/tutorial/server-sent-events/
 | Which Isaac version, GPU and $/hr does Brev give? | Trial deploy | Hour 1 |
 | DubHacks rules: team size, pre-existing code, Devpost URL, number of sponsor tracks, judging format | Hacker Guide in a browser, organizers | Hour 1 |
 | Visa track text and rubric; does Visa hand out sandbox keys or require a Visa API? | Visa table / Discord | Hour 2 |
-| T-Mobile Cart Whisperer and SideShift track text | Sponsor tables | Hour 2 |
+| SideShift track text | Sponsor tables | Hour 2 |
 | Photon: beta signup gating, which dashboard issues spectrum-ts creds, shared-line first-message behavior | Signup + Terminal echo + Discord | Hour 1 |
 | Anthropic Evaluation-tier limits; any credits | Console limits page, Anthropic table | Hour 1 |
 | `penalty_m` scale K (interest -> meters) | routing + recommender owners agree | Hour 4 |
@@ -680,7 +681,7 @@ Sources: [FastAPI SSE](https://fastapi.tiangolo.com/tutorial/server-sent-events/
    "penalty -1 = mandatory" claim is not in the docs, so drop it. `CLAUDE.md`'s "Isaac Python 3.11" holds only for 5.x.
 
 **⚠️ Unverified register (check before relying on it):**
-- DubHacks: rubric weights 25/25/20/15/15; the Visa track name (from an image filename); the T-Mobile/Photon/SideShift track text; team size,
+- DubHacks: rubric weights 25/25/20/15/15; the Visa track name (from an image filename); the Photon/SideShift track text; team size,
   pre-existing code, Devpost, judging format; the "two sponsored tracks" rule (prior year).
 - Photon: beta free with no waitlist; $100 credits; free plan of 25 shared assignments; prizes and judging criteria applying to DubHacks; spectrum-ts
   credential source; stable-docs first-message behavior; 5 req/s HTTP limit; Python method signatures (copy from the guide).

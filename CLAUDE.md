@@ -1,8 +1,7 @@
 # CLAUDE.md — Picky
 
 Picky is a personal AI shopping-assistant **robot** for physical stores, built at **DubHacks 2026 (UW)** for the
-**Visa "Reimagine Shopping"** track (side tracks: Photon 2.0 messaging agent, T-Mobile "Cart Whisperer", SideShift
-"Best Startup Idea"). Shoppers save preferences, lists, budgets and favorites online, log in to the robot in-store, and
+**Visa "Reimagine Shopping"** track (side tracks: Photon 2.0 messaging agent, SideShift "Best Startup Idea"). Shoppers save preferences, lists, budgets and favorites online, log in to the robot in-store, and
 continue where they left off. The robot (4-wheel base + arm + basket) uses camera, voice and arm to find products,
 compare prices, surface deals, manage the cart, stay within budget, and check out.
 
@@ -22,7 +21,7 @@ then `docs/research.md`, then ask.
 Visa rubric: **Innovation 25% · User Experience 25% · Technical Execution 20% · Commerce Impact 15% · Trust &
 Responsibility 15%.** When choosing between two approaches, prefer the one that is (a) visible in the demo, (b) reliable
 under pressure, (c) stronger on the rubric. Side tracks: Photon (must be built on Photon 2.0 and live on ≥1 Photon
-channel), T-Mobile (checkout suggestions that actually help), SideShift (startup story / distribution).
+channel), SideShift (startup story / distribution). We are **not** entering the T-Mobile track.
 
 ## 2. The pipeline
 
