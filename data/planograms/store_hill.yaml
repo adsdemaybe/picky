@@ -1,0 +1,627 @@
+# Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
+# Second store, 9 m x 14 m, 3 aisles. Overlapping assortment at different prices (no cilantro).
+schema_version: 1
+store_id: store_hill
+name: Picky Express - Capitol Hill
+address: 1500 Broadway, Seattle, WA (fictional demo store)
+bounds: {x: 0.0, y: 0.0, w: 9.0, h: 14.0}
+entrance: {x: 1.2, y: 1.0, theta: 1.571}
+checkout: {x: 7.0, y: 2.35, theta: -1.571}
+obstacles: []
+fixtures:
+- fixture_id: WALL-L
+  kind: shelf
+  label: Pantry wall
+  aisle_id: aisle_1
+  rect: {x: 0.0, y: 7.0, w: 0.6, h: 5.0}
+  yaw: 0.0
+  double_sided: false
+  height_m: 2.0
+  levels: 4
+  level_z_m: &id001 [0.15, 0.6, 1.05, 1.5]
+- fixture_id: G1
+  kind: shelf
+  label: 'Gondola 1: taco & mexican | snacks'
+  rect: {x: 2.2, y: 7.0, w: 1.2, h: 5.0}
+  yaw: 0.0
+  double_sided: true
+  height_m: 2.0
+  levels: 4
+  level_z_m: *id001
+- fixture_id: G2
+  kind: shelf
+  label: 'Gondola 2: breakfast | household'
+  rect: {x: 5.0, y: 7.0, w: 1.2, h: 5.0}
+  yaw: 0.0
+  double_sided: true
+  height_m: 2.0
+  levels: 4
+  level_z_m: *id001
+- fixture_id: FRIDGE-R
+  kind: fridge
+  label: Dairy, meat & deli wall
+  aisle_id: aisle_3
+  rect: {x: 8.2, y: 5.5, w: 0.8, h: 7.0}
+  yaw: 3.142
+  double_sided: false
+  height_m: 2.0
+  levels: 4
+  level_z_m: [0.3, 0.75, 1.2, 1.6]
+- fixture_id: PRODUCE-A
+  kind: produce_bin
+  label: Produce table
+  aisle_id: produce
+  rect: {x: 1.8, y: 3.8, w: 4.4, h: 1.2}
+  yaw: -1.571
+  double_sided: true
+  height_m: 0.95
+  levels: 1
+  level_z_m: [0.8]
+- fixture_id: CHECKOUT-1
+  kind: checkout
+  label: Checkout lane 1
+  rect: {x: 6.0, y: 0.8, w: 2.0, h: 0.8}
+  yaw: 1.571
+  double_sided: false
+  height_m: 0.9
+  levels: 1
+  level_z_m: [0.85]
+aisles:
+- aisle_id: produce
+  label: Produce
+  rect: {x: 0.6, y: 3.0, w: 7.6, h: 3.4}
+  categories: [produce]
+  fixture_ids: [PRODUCE-A]
+- aisle_id: aisle_1
+  label: Aisle 1 - Pantry & Mexican
+  rect: {x: 0.6, y: 7.0, w: 1.6, h: 5.0}
+  categories: [pantry, bakery]
+  fixture_ids: [WALL-L, G1]
+- aisle_id: aisle_2
+  label: Aisle 2 - Snacks & Breakfast
+  rect: {x: 3.4, y: 7.0, w: 1.6, h: 5.0}
+  categories: [snacks, pantry]
+  fixture_ids: [G1, G2]
+- aisle_id: aisle_3
+  label: Aisle 3 - Household & Dairy
+  rect: {x: 6.2, y: 7.0, w: 2.0, h: 5.0}
+  categories: [household, beverages, dairy, meat, deli]
+  fixture_ids: [G2, FRIDGE-R]
+slots:
+- slot_id: PRODUCE-A-S0-00
+  fixture_id: PRODUCE-A
+  aisle_id: produce
+  sku: AVOCADO
+  level: 0
+  index: 0
+  item_position: {x: 2.4, y: 3.8, z: 0.8}
+  approach_pose: {x: 2.4, y: 3.05, theta: 1.571}
+  facings: 2
+  capacity: 30
+  qty: 16
+  price_cents: 99
+  lots:
+  - {lot_id: hil-AVOCADO-L1, qty: 4, expiry: '2026-10-22', freshness: 0.9}
+  - {lot_id: hil-AVOCADO-L2, qty: 8, expiry: '2026-10-20', freshness: 0.66}
+  - {lot_id: hil-AVOCADO-L3, qty: 4, expiry: '2026-10-18', freshness: 0.35}
+- slot_id: PRODUCE-A-S0-01
+  fixture_id: PRODUCE-A
+  aisle_id: produce
+  sku: LIMES
+  level: 0
+  index: 1
+  item_position: {x: 3.3, y: 3.8, z: 0.8}
+  approach_pose: {x: 3.3, y: 3.05, theta: 1.571}
+  facings: 1
+  capacity: 30
+  qty: 30
+  price_cents: 39
+  lots:
+  - {lot_id: hil-LIMES-L1, qty: 18, expiry: '2026-10-29', freshness: 0.85}
+  - {lot_id: hil-LIMES-L2, qty: 12, expiry: '2026-10-23', freshness: 0.6}
+- slot_id: PRODUCE-A-S0-02
+  fixture_id: PRODUCE-A
+  aisle_id: produce
+  sku: ONION-WHITE
+  level: 0
+  index: 2
+  item_position: {x: 4.2, y: 3.8, z: 0.8}
+  approach_pose: {x: 4.2, y: 3.05, theta: 1.571}
+  facings: 1
+  capacity: 14
+  qty: 14
+  price_cents: 79
+  lots:
+  - {lot_id: hil-ONION-WHITE-L1, qty: 8, expiry: '2026-11-14', freshness: 0.9}
+  - {lot_id: hil-ONION-WHITE-L2, qty: 6, expiry: '2026-10-31', freshness: 0.7}
+- slot_id: PRODUCE-A-S0-03
+  fixture_id: PRODUCE-A
+  aisle_id: produce
+  sku: TOMATO-ROMA
+  level: 0
+  index: 3
+  item_position: {x: 5.4, y: 3.8, z: 0.8}
+  approach_pose: {x: 5.4, y: 3.05, theta: 1.571}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 229
+  lots:
+  - {lot_id: hil-TOMATO-ROMA-L1, qty: 5, expiry: '2026-10-23', freshness: 0.86}
+  - {lot_id: hil-TOMATO-ROMA-L2, qty: 5, expiry: '2026-10-20', freshness: 0.6}
+- slot_id: PRODUCE-A-N0-02
+  fixture_id: PRODUCE-A
+  aisle_id: produce
+  sku: JALAPENO
+  level: 0
+  index: 2
+  item_position: {x: 2.6, y: 5.0, z: 0.8}
+  approach_pose: {x: 2.6, y: 5.75, theta: -1.571}
+  facings: 1
+  capacity: 12
+  qty: 8
+  price_cents: 99
+  lots:
+  - {lot_id: hil-JALAPENO-L1, qty: 4, expiry: '2026-10-25', freshness: 0.88}
+  - {lot_id: hil-JALAPENO-L2, qty: 4, expiry: '2026-10-20', freshness: 0.5}
+- slot_id: PRODUCE-A-N0-01
+  fixture_id: PRODUCE-A
+  aisle_id: produce
+  sku: BANANAS
+  level: 0
+  index: 1
+  item_position: {x: 4.0, y: 5.0, z: 0.8}
+  approach_pose: {x: 4.0, y: 5.75, theta: -1.571}
+  facings: 1
+  capacity: 12
+  qty: 12
+  price_cents: 159
+  lots:
+  - {lot_id: hil-BANANAS-L1, qty: 6, expiry: '2026-10-22', freshness: 0.9}
+  - {lot_id: hil-BANANAS-L2, qty: 6, expiry: '2026-10-19', freshness: 0.55}
+- slot_id: PRODUCE-A-N0-00
+  fixture_id: PRODUCE-A
+  aisle_id: produce
+  sku: LETTUCE-ROMAINE
+  level: 0
+  index: 0
+  item_position: {x: 5.4, y: 5.0, z: 0.8}
+  approach_pose: {x: 5.4, y: 5.75, theta: -1.571}
+  facings: 1
+  capacity: 12
+  qty: 6
+  price_cents: 329
+  lots:
+  - {lot_id: hil-LETTUCE-ROMAINE-L1, qty: 4, expiry: '2026-10-23', freshness: 0.84}
+  - {lot_id: hil-LETTUCE-ROMAINE-L2, qty: 2, expiry: '2026-10-19', freshness: 0.5}
+- slot_id: WALL-L-E0-00
+  fixture_id: WALL-L
+  aisle_id: aisle_1
+  sku: RICE-WHITE
+  level: 0
+  index: 0
+  item_position: {x: 0.6, y: 8.6, z: 0.15}
+  approach_pose: {x: 1.4, y: 8.6, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 279
+  lots:
+  - {lot_id: hil-RICE-WHITE-L1, qty: 10}
+- slot_id: WALL-L-E1-00
+  fixture_id: WALL-L
+  aisle_id: aisle_1
+  sku: PASTA
+  level: 1
+  index: 0
+  item_position: {x: 0.6, y: 9.7, z: 0.6}
+  approach_pose: {x: 1.4, y: 9.7, theta: -3.142}
+  facings: 1
+  capacity: 14
+  qty: 14
+  price_cents: 179
+  lots:
+  - {lot_id: hil-PASTA-L1, qty: 14}
+- slot_id: WALL-L-E1-01
+  fixture_id: WALL-L
+  aisle_id: aisle_1
+  sku: OLIVE-OIL
+  level: 1
+  index: 1
+  item_position: {x: 0.6, y: 10.8, z: 0.6}
+  approach_pose: {x: 1.4, y: 10.8, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 6
+  price_cents: 1099
+  lots:
+  - {lot_id: hil-OLIVE-OIL-L1, qty: 6}
+- slot_id: WALL-L-E1-02
+  fixture_id: WALL-L
+  aisle_id: aisle_1
+  sku: BEANS-BLACK
+  level: 1
+  index: 2
+  item_position: {x: 0.6, y: 11.6, z: 0.6}
+  approach_pose: {x: 1.4, y: 11.6, theta: -3.142}
+  facings: 1
+  capacity: 20
+  qty: 20
+  price_cents: 109
+  lots:
+  - {lot_id: hil-BEANS-BLACK-L1, qty: 20}
+- slot_id: G1-W1-04
+  fixture_id: G1
+  aisle_id: aisle_1
+  sku: TORT-CORN
+  level: 1
+  index: 4
+  item_position: {x: 2.2, y: 7.5, z: 0.6}
+  approach_pose: {x: 1.4, y: 7.5, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 299
+  lots:
+  - {lot_id: hil-TORT-CORN-L1, qty: 5, expiry: '2026-10-26'}
+  - {lot_id: hil-TORT-CORN-L2, qty: 5, expiry: '2026-10-31'}
+- slot_id: G1-W2-02
+  fixture_id: G1
+  aisle_id: aisle_1
+  sku: TORT-FLOUR
+  level: 2
+  index: 2
+  item_position: {x: 2.2, y: 7.5, z: 1.05}
+  approach_pose: {x: 1.4, y: 7.5, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 8
+  price_cents: 349
+  lots:
+  - {lot_id: hil-TORT-FLOUR-L1, qty: 4, expiry: '2026-10-30'}
+  - {lot_id: hil-TORT-FLOUR-L2, qty: 4, expiry: '2026-11-07'}
+- slot_id: G1-W1-03
+  fixture_id: G1
+  aisle_id: aisle_1
+  sku: TACO-SEASONING
+  level: 1
+  index: 3
+  item_position: {x: 2.2, y: 8.6, z: 0.6}
+  approach_pose: {x: 1.4, y: 8.6, theta: 0.0}
+  facings: 1
+  capacity: 18
+  qty: 18
+  price_cents: 129
+  lots:
+  - {lot_id: hil-TACO-SEASONING-L1, qty: 18}
+- slot_id: G1-W1-02
+  fixture_id: G1
+  aisle_id: aisle_1
+  sku: SALSA-MILD
+  level: 1
+  index: 2
+  item_position: {x: 2.2, y: 9.7, z: 0.6}
+  approach_pose: {x: 1.4, y: 9.7, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 329
+  lots:
+  - {lot_id: hil-SALSA-MILD-L1, qty: 10}
+- slot_id: G1-W1-01
+  fixture_id: G1
+  aisle_id: aisle_1
+  sku: SALSA-CHIPOTLE
+  level: 1
+  index: 1
+  item_position: {x: 2.2, y: 10.8, z: 0.6}
+  approach_pose: {x: 1.4, y: 10.8, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 8
+  price_cents: 429
+  lots:
+  - {lot_id: hil-SALSA-CHIPOTLE-L1, qty: 8}
+  deal: {kind: percent_off, price_cents: 386, original_cents: 429, percent_off: 10, reason: 'Weekend special: 10% off', valid_until: '2026-10-19T23:59:00Z'}
+- slot_id: G1-W2-01
+  fixture_id: G1
+  aisle_id: aisle_1
+  sku: HOTSAUCE-RED
+  level: 2
+  index: 1
+  item_position: {x: 2.2, y: 9.7, z: 1.05}
+  approach_pose: {x: 1.4, y: 9.7, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 12
+  price_cents: 279
+  lots:
+  - {lot_id: hil-HOTSAUCE-RED-L1, qty: 12}
+- slot_id: G1-W2-00
+  fixture_id: G1
+  aisle_id: aisle_1
+  sku: HOTSAUCE-GHOST
+  level: 2
+  index: 0
+  item_position: {x: 2.2, y: 10.8, z: 1.05}
+  approach_pose: {x: 1.4, y: 10.8, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 4
+  price_cents: 749
+  lots:
+  - {lot_id: hil-HOTSAUCE-GHOST-L1, qty: 4}
+- slot_id: G1-W1-00
+  fixture_id: G1
+  aisle_id: aisle_1
+  sku: BEANS-REFRIED
+  level: 1
+  index: 0
+  item_position: {x: 2.2, y: 11.6, z: 0.6}
+  approach_pose: {x: 1.4, y: 11.6, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 12
+  price_cents: 189
+  lots:
+  - {lot_id: hil-BEANS-REFRIED-L1, qty: 12}
+- slot_id: G1-E2-00
+  fixture_id: G1
+  aisle_id: aisle_2
+  sku: CHIPS-TORTILLA
+  level: 2
+  index: 0
+  item_position: {x: 3.4, y: 8.6, z: 1.05}
+  approach_pose: {x: 4.2, y: 8.6, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 12
+  price_cents: 349
+  lots:
+  - {lot_id: hil-CHIPS-TORTILLA-L1, qty: 12}
+- slot_id: G1-E2-01
+  fixture_id: G1
+  aisle_id: aisle_2
+  sku: CHIPS-SPICY-LIME
+  level: 2
+  index: 1
+  item_position: {x: 3.4, y: 9.7, z: 1.05}
+  approach_pose: {x: 4.2, y: 9.7, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 8
+  price_cents: 479
+  lots:
+  - {lot_id: hil-CHIPS-SPICY-LIME-L1, qty: 8}
+- slot_id: G1-E1-00
+  fixture_id: G1
+  aisle_id: aisle_2
+  sku: POPCORN
+  level: 1
+  index: 0
+  item_position: {x: 3.4, y: 10.8, z: 0.6}
+  approach_pose: {x: 4.2, y: 10.8, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 8
+  price_cents: 349
+  lots:
+  - {lot_id: hil-POPCORN-L1, qty: 8}
+- slot_id: G2-W2-01
+  fixture_id: G2
+  aisle_id: aisle_2
+  sku: CEREAL-OATS
+  level: 2
+  index: 1
+  item_position: {x: 5.0, y: 8.6, z: 1.05}
+  approach_pose: {x: 4.2, y: 8.6, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 8
+  price_cents: 459
+  lots:
+  - {lot_id: hil-CEREAL-OATS-L1, qty: 8}
+- slot_id: G2-W2-00
+  fixture_id: G2
+  aisle_id: aisle_2
+  sku: COFFEE
+  level: 2
+  index: 0
+  item_position: {x: 5.0, y: 9.7, z: 1.05}
+  approach_pose: {x: 4.2, y: 9.7, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 6
+  price_cents: 1149
+  lots:
+  - {lot_id: hil-COFFEE-L1, qty: 6}
+- slot_id: G2-W1-00
+  fixture_id: G2
+  aisle_id: aisle_2
+  sku: PEANUT-BUTTER
+  level: 1
+  index: 0
+  item_position: {x: 5.0, y: 10.8, z: 0.6}
+  approach_pose: {x: 4.2, y: 10.8, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 399
+  lots:
+  - {lot_id: hil-PEANUT-BUTTER-L1, qty: 10}
+- slot_id: G2-E0-00
+  fixture_id: G2
+  aisle_id: aisle_3
+  sku: PAPER-TOWELS
+  level: 0
+  index: 0
+  item_position: {x: 6.2, y: 8.6, z: 0.15}
+  approach_pose: {x: 7.0, y: 8.6, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 6
+  price_cents: 849
+  lots:
+  - {lot_id: hil-PAPER-TOWELS-L1, qty: 6}
+- slot_id: G2-E1-00
+  fixture_id: G2
+  aisle_id: aisle_3
+  sku: PAPER-PLATES
+  level: 1
+  index: 0
+  item_position: {x: 6.2, y: 9.7, z: 0.6}
+  approach_pose: {x: 7.0, y: 9.7, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 8
+  price_cents: 449
+  lots:
+  - {lot_id: hil-PAPER-PLATES-L1, qty: 8}
+- slot_id: G2-E1-01
+  fixture_id: G2
+  aisle_id: aisle_3
+  sku: NAPKINS
+  level: 1
+  index: 1
+  item_position: {x: 6.2, y: 10.8, z: 0.6}
+  approach_pose: {x: 7.0, y: 10.8, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 279
+  lots:
+  - {lot_id: hil-NAPKINS-L1, qty: 10}
+- slot_id: G2-E0-01
+  fixture_id: G2
+  aisle_id: aisle_3
+  sku: COLA
+  level: 0
+  index: 1
+  item_position: {x: 6.2, y: 11.6, z: 0.15}
+  approach_pose: {x: 7.0, y: 11.6, theta: -3.142}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 279
+  lots:
+  - {lot_id: hil-COLA-L1, qty: 10}
+- slot_id: FRIDGE-R-W1-05
+  fixture_id: FRIDGE-R
+  aisle_id: aisle_3
+  sku: BEEF-GROUND
+  level: 1
+  index: 5
+  item_position: {x: 8.2, y: 6.2, z: 0.75}
+  approach_pose: {x: 7.2, y: 6.2, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 529
+  lots:
+  - {lot_id: hil-BEEF-GROUND-L1, qty: 5, expiry: '2026-10-20'}
+  - {lot_id: hil-BEEF-GROUND-L2, qty: 5, expiry: '2026-10-22'}
+- slot_id: FRIDGE-R-W2-00
+  fixture_id: FRIDGE-R
+  aisle_id: aisle_3
+  sku: TURKEY-GROUND
+  level: 2
+  index: 0
+  item_position: {x: 8.2, y: 6.2, z: 1.2}
+  approach_pose: {x: 7.2, y: 6.2, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 6
+  price_cents: 579
+  lots:
+  - {lot_id: hil-TURKEY-GROUND-L1, qty: 3, expiry: '2026-10-20'}
+  - {lot_id: hil-TURKEY-GROUND-L2, qty: 3, expiry: '2026-10-22'}
+- slot_id: FRIDGE-R-W1-04
+  fixture_id: FRIDGE-R
+  aisle_id: aisle_3
+  sku: SOYRIZO
+  level: 1
+  index: 4
+  item_position: {x: 8.2, y: 7.3, z: 0.75}
+  approach_pose: {x: 7.2, y: 7.3, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 6
+  price_cents: 499
+  lots:
+  - {lot_id: hil-SOYRIZO-L1, qty: 3, expiry: '2026-11-04'}
+  - {lot_id: hil-SOYRIZO-L2, qty: 3, expiry: '2026-11-16'}
+- slot_id: FRIDGE-R-W1-03
+  fixture_id: FRIDGE-R
+  aisle_id: aisle_3
+  sku: CHEESE-MEX
+  level: 1
+  index: 3
+  item_position: {x: 8.2, y: 8.4, z: 0.75}
+  approach_pose: {x: 7.2, y: 8.4, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 399
+  lots:
+  - {lot_id: hil-CHEESE-MEX-L1, qty: 5, expiry: '2026-11-04'}
+  - {lot_id: hil-CHEESE-MEX-L2, qty: 5, expiry: '2026-11-16'}
+- slot_id: FRIDGE-R-W1-02
+  fixture_id: FRIDGE-R
+  aisle_id: aisle_3
+  sku: GUAC-KIT
+  level: 1
+  index: 2
+  item_position: {x: 8.2, y: 9.5, z: 0.75}
+  approach_pose: {x: 7.2, y: 9.5, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 4
+  price_cents: 629
+  lots:
+  - {lot_id: hil-GUAC-KIT-L1, qty: 2, expiry: '2026-10-21'}
+  - {lot_id: hil-GUAC-KIT-L2, qty: 2, expiry: '2026-10-23'}
+- slot_id: FRIDGE-R-W1-01
+  fixture_id: FRIDGE-R
+  aisle_id: aisle_3
+  sku: EGGS
+  level: 1
+  index: 1
+  item_position: {x: 8.2, y: 10.6, z: 0.75}
+  approach_pose: {x: 7.2, y: 10.6, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 10
+  price_cents: 479
+  lots:
+  - {lot_id: hil-EGGS-L1, qty: 5, expiry: '2026-11-03'}
+  - {lot_id: hil-EGGS-L2, qty: 5, expiry: '2026-11-14'}
+- slot_id: FRIDGE-R-W0-00
+  fixture_id: FRIDGE-R
+  aisle_id: aisle_3
+  sku: MILK-2PCT
+  level: 0
+  index: 0
+  item_position: {x: 8.2, y: 11.7, z: 0.3}
+  approach_pose: {x: 7.2, y: 11.7, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 8
+  price_cents: 379
+  lots:
+  - {lot_id: hil-MILK-2PCT-L1, qty: 4, expiry: '2026-10-25'}
+  - {lot_id: hil-MILK-2PCT-L2, qty: 4, expiry: '2026-10-29'}
+- slot_id: FRIDGE-R-W1-00
+  fixture_id: FRIDGE-R
+  aisle_id: aisle_3
+  sku: YOGURT-GREEK
+  level: 1
+  index: 0
+  item_position: {x: 8.2, y: 11.7, z: 0.75}
+  approach_pose: {x: 7.2, y: 11.7, theta: 0.0}
+  facings: 1
+  capacity: 12
+  qty: 6
+  price_cents: 549
+  lots:
+  - {lot_id: hil-YOGURT-GREEK-L1, qty: 3, expiry: '2026-10-30'}
+  - {lot_id: hil-YOGURT-GREEK-L2, qty: 3, expiry: '2026-11-07'}

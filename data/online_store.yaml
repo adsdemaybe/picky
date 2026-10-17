@@ -1,0 +1,34 @@
+# Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
+# Mock online store (no planogram). price_cents omitted = base price.
+schema_version: 1
+store_id: online
+name: Picky Online
+shipping_cents: 299
+free_shipping_over_cents: 2500
+default_eta_hours: 24.0
+items:
+- {sku: CILANTRO, price_cents: 129, qty: 40, eta_hours: 2.0}
+- {sku: SOUR-CREAM, price_cents: 279, qty: 30, eta_hours: 2.0}
+- {sku: GUAC-KIT, price_cents: 649, qty: 20, eta_hours: 2.0}
+- {sku: TORT-CORN, price_cents: 329, qty: 60}
+- {sku: TORT-FLOUR, price_cents: 359, qty: 60}
+- {sku: BEANS-BLACK, price_cents: 119, qty: 200}
+- {sku: BEANS-REFRIED, price_cents: 209, qty: 120}
+- {sku: SALSA-MILD, price_cents: 379, qty: 50}
+- {sku: SALSA-CHIPOTLE, price_cents: 469, qty: 50}
+- {sku: SALSA-HOT, price_cents: 529, qty: 40}
+- sku: HOTSAUCE-GHOST
+  price_cents: 649
+  qty: 30
+  deal: {kind: percent_off, price_cents: 584, original_cents: 649, percent_off: 10, reason: 'Online exclusive: 10% off small-batch
+      hot sauce', valid_until: '2026-10-31T23:59:00Z'}
+- {sku: TACO-SEASONING, price_cents: 159, qty: 200}
+- {sku: RICE-WHITE, price_cents: 289, qty: 100}
+- {sku: COFFEE, price_cents: 949, qty: 80}
+- {sku: PAPER-TOWELS, price_cents: 849, qty: 60}
+- {sku: PAPER-PLATES, price_cents: 469, qty: 80}
+- {sku: MOLCAJETE, qty: 12, eta_hours: 48.0}
+- {sku: OREGANO-MEX, qty: 40}
+- sku: CHILE-LIME-SEASONING
+  qty: 60
+  deal: {kind: bogo, price_cents: 175, original_cents: 349, percent_off: 50, reason: 'Online BOGO: 2 for $3.49', valid_until: '2026-10-27T23:59:00Z'}

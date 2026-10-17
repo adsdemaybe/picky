@@ -1,0 +1,1447 @@
+# Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
+# Product master. Prices are integer cents. Barcodes are valid EAN-13 in the in-store 200 prefix.
+# asset: sim prop hints (item frame x=width, y=depth, z=height; label on the -y face).
+schema_version: 1
+products:
+- sku: TORT-CORN
+  name: Corn Tortillas 30 ct
+  brand: La Milpa
+  category: bakery
+  subcategory: tortillas
+  description: Stone-ground white corn tortillas, 6 inch.
+  tags: [taco, mexican, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 279
+  unit: pack
+  size: 30 ct
+  barcode: '2000000010076'
+  perishable: true
+  shelf_life_days: 14
+  asset:
+    shape: box
+    dims_m: [0.2, 0.05, 0.22]
+    label_color: '#e8c15a'
+    mass_kg: 0.9
+- sku: TORT-FLOUR
+  name: Flour Tortillas 10 ct
+  brand: La Milpa
+  category: bakery
+  subcategory: tortillas
+  description: Soft taco-size flour tortillas, 8 inch.
+  tags: [taco, mexican, kid_friendly, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat]
+  price_cents: 329
+  unit: pack
+  size: 10 ct
+  barcode: '2000000010144'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.22, 0.04, 0.24]
+    label_color: '#f3e3b5'
+    mass_kg: 0.6
+- sku: TACO-SHELLS
+  name: Crunchy Taco Shells 12 ct
+  brand: La Milpa
+  category: pantry
+  subcategory: tortillas
+  description: Pre-formed crunchy corn taco shells.
+  tags: [taco, mexican, kid_friendly, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 299
+  unit: pack
+  size: 12 ct
+  barcode: '2000000010212'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.17, 0.08, 0.14]
+    label_color: '#f0a830'
+    mass_kg: 0.15
+- sku: BEANS-BLACK
+  name: Black Beans 15 oz
+  brand: Casa Verde
+  category: pantry
+  subcategory: canned
+  description: Black beans in lightly salted water.
+  tags: [taco, mexican, protein, budget, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 129
+  unit: each
+  size: 15 oz
+  barcode: '2000000010281'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.11]
+    label_color: '#2b2b3a'
+    mass_kg: 0.45
+- sku: BEANS-PINTO
+  name: Pinto Beans 15 oz
+  brand: Casa Verde
+  category: pantry
+  subcategory: canned
+  description: Pinto beans, ready to heat.
+  tags: [taco, mexican, protein, budget, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 129
+  unit: each
+  size: 15 oz
+  barcode: '2000000010359'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.11]
+    label_color: '#a5643a'
+    mass_kg: 0.45
+- sku: BEANS-REFRIED
+  name: Refried Beans 16 oz
+  brand: Casa Verde
+  category: pantry
+  subcategory: canned
+  description: Traditional refried pinto beans, vegetarian.
+  tags: [taco, mexican, protein, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 199
+  unit: each
+  size: 16 oz
+  barcode: '2000000010427'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.115]
+    label_color: '#8a4b2a'
+    mass_kg: 0.47
+- sku: SALSA-MILD
+  name: Mild Chunky Salsa 16 oz
+  brand: Sol de Casa
+  category: pantry
+  subcategory: salsa
+  description: Chunky tomato salsa, mild.
+  tags: [taco, mexican, salsa, mild, kid_friendly, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 1
+  price_cents: 349
+  unit: each
+  size: 16 oz
+  barcode: '2000000010496'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.085, 0.085, 0.13]
+    label_color: '#4caf50'
+    mass_kg: 0.6
+- sku: SALSA-VERDE
+  name: Tomatillo Salsa Verde 16 oz
+  brand: Sol de Casa
+  category: pantry
+  subcategory: salsa
+  description: Roasted tomatillo and serrano salsa, medium.
+  tags: [taco, mexican, salsa, tangy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 2
+  price_cents: 429
+  unit: each
+  size: 16 oz
+  barcode: '2000000010564'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.085, 0.085, 0.13]
+    label_color: '#7cb342'
+    mass_kg: 0.6
+- sku: SALSA-CHIPOTLE
+  name: Smoky Chipotle Salsa 16 oz
+  brand: Fuego Ridge
+  category: pantry
+  subcategory: salsa
+  description: Fire-roasted tomatoes with smoked chipotle peppers, hot.
+  tags: [taco, mexican, salsa, spicy, smoky, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 3
+  price_cents: 449
+  unit: each
+  size: 16 oz
+  barcode: '2000000010632'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.085, 0.085, 0.13]
+    label_color: '#8d2b1e'
+    mass_kg: 0.6
+- sku: SALSA-HOT
+  name: Habanero Fire Salsa 16 oz
+  brand: Fuego Ridge
+  category: pantry
+  subcategory: salsa
+  description: Habanero and mango salsa, very hot.
+  tags: [taco, mexican, salsa, spicy, extra_hot, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 5
+  price_cents: 499
+  unit: each
+  size: 16 oz
+  barcode: '2000000010700'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.085, 0.085, 0.13]
+    label_color: '#ff6f00'
+    mass_kg: 0.6
+- sku: HOTSAUCE-RED
+  name: Classic Red Hot Sauce 5 oz
+  brand: Diablo Rojo
+  category: pantry
+  subcategory: hot_sauce
+  description: Arbol and guajillo pepper table sauce.
+  tags: [taco, mexican, hot_sauce, spicy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 3
+  price_cents: 299
+  unit: each
+  size: 5 oz
+  barcode: '2000000010779'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.045, 0.045, 0.17]
+    label_color: '#c62828'
+    mass_kg: 0.2
+- sku: HOTSAUCE-JALAPENO
+  name: Green Jalapeno Hot Sauce 5 oz
+  brand: Diablo Rojo
+  category: pantry
+  subcategory: hot_sauce
+  description: Bright green jalapeno and lime sauce.
+  tags: [taco, mexican, hot_sauce, spicy, tangy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 2
+  price_cents: 349
+  unit: each
+  size: 5 oz
+  barcode: '2000000010847'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.045, 0.045, 0.17]
+    label_color: '#558b2f'
+    mass_kg: 0.2
+- sku: HOTSAUCE-GHOST
+  name: Ghost Pepper Hot Sauce 5 oz
+  brand: Fuego Ridge
+  category: pantry
+  subcategory: hot_sauce
+  description: Small-batch smoked ghost pepper sauce. Seriously hot.
+  tags: [hot_sauce, spicy, extra_hot, smoky, small_batch, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 5
+  price_cents: 699
+  unit: each
+  size: 5 oz
+  barcode: '2000000010915'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.045, 0.045, 0.17]
+    label_color: '#212121'
+    mass_kg: 0.2
+- sku: TACO-SEASONING
+  name: Taco Seasoning Mix 1 oz
+  brand: Casa Verde
+  category: pantry
+  subcategory: spices
+  description: Chili, cumin and garlic seasoning packet.
+  tags: [taco, mexican, spices, budget, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 2
+  price_cents: 149
+  unit: each
+  size: 1 oz
+  barcode: '2000000010984'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.02, 0.13]
+    label_color: '#ef6c00'
+    mass_kg: 0.03
+- sku: ENCHILADA-SAUCE
+  name: Red Enchilada Sauce 10 oz
+  brand: Casa Verde
+  category: pantry
+  subcategory: sauces
+  description: Mild red chile enchilada sauce.
+  tags: [mexican, sauce, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: []
+  spice_level: 2
+  price_cents: 249
+  unit: each
+  size: 10 oz
+  barcode: '2000000011059'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.07, 0.07, 0.1]
+    label_color: '#b71c1c'
+    mass_kg: 0.32
+- sku: RICE-WHITE
+  name: Long Grain White Rice 2 lb
+  brand: Golden Paddy
+  category: pantry
+  subcategory: grains
+  description: Enriched long grain white rice.
+  tags: [staple, budget, mexican, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 299
+  unit: bag
+  size: 2 lb
+  barcode: '2000000011127'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.15, 0.06, 0.24]
+    label_color: '#fafafa'
+    mass_kg: 0.91
+- sku: OLIVE-OIL
+  name: Extra Virgin Olive Oil 500 ml
+  brand: Villa Oliva
+  category: pantry
+  subcategory: oils
+  description: Cold-pressed extra virgin olive oil.
+  tags: [staple, cooking, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 999
+  unit: each
+  size: 500 ml
+  barcode: '2000000011196'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.07, 0.07, 0.28]
+    label_color: '#827717'
+    mass_kg: 0.75
+- sku: PEANUT-BUTTER
+  name: Creamy Peanut Butter 16 oz
+  brand: Nutty Acres
+  category: pantry
+  subcategory: spreads
+  description: Creamy roasted peanut butter.
+  tags: [breakfast, snack, kid_friendly, protein, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: [peanuts]
+  price_cents: 449
+  unit: each
+  size: 16 oz
+  barcode: '2000000011264'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.09, 0.09, 0.12]
+    label_color: '#a1887f'
+    mass_kg: 0.5
+- sku: PASTA
+  name: Spaghetti 16 oz
+  brand: Nonna Bella
+  category: pantry
+  subcategory: pasta
+  description: Durum wheat spaghetti.
+  tags: [staple, budget, kid_friendly, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [wheat]
+  price_cents: 199
+  unit: each
+  size: 16 oz
+  barcode: '2000000011332'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.08, 0.04, 0.27]
+    label_color: '#1565c0'
+    mass_kg: 0.45
+- sku: MARINARA
+  name: Marinara Sauce 24 oz
+  brand: Nonna Bella
+  category: pantry
+  subcategory: sauces
+  description: Slow-simmered tomato basil marinara.
+  tags: [sauce, kid_friendly, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 0
+  price_cents: 399
+  unit: each
+  size: 24 oz
+  barcode: '2000000011400'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.085, 0.085, 0.16]
+    label_color: '#d32f2f'
+    mass_kg: 0.8
+- sku: BEEF-GROUND
+  name: Ground Beef 85/15 1 lb
+  brand: Prairie Ranch
+  category: meat
+  subcategory: beef
+  description: 85% lean ground beef.
+  tags: [taco, protein, gluten_free]
+  dietary: [gluten_free]
+  allergens: []
+  price_cents: 549
+  unit: pack
+  size: 1 lb
+  barcode: '2000000011479'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.2, 0.14, 0.05]
+    label_color: '#b71c1c'
+    mass_kg: 0.48
+- sku: TURKEY-GROUND
+  name: Ground Turkey 93/7 1 lb
+  brand: Prairie Ranch
+  category: meat
+  subcategory: poultry
+  description: 93% lean ground turkey.
+  tags: [taco, protein, lean, gluten_free]
+  dietary: [gluten_free]
+  allergens: []
+  price_cents: 599
+  unit: pack
+  size: 1 lb
+  barcode: '2000000011547'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.2, 0.14, 0.05]
+    label_color: '#f8bbd0'
+    mass_kg: 0.48
+- sku: SOYRIZO
+  name: Soy Chorizo 12 oz
+  brand: Verde Cocina
+  category: deli
+  subcategory: plant_protein
+  description: Spiced plant-based chorizo. Crumble and fry.
+  tags: [taco, mexican, protein, spicy, plant_based, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [soy]
+  spice_level: 2
+  price_cents: 449
+  unit: each
+  size: 12 oz
+  barcode: '2000000011615'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: cylinder
+    dims_m: [0.05, 0.05, 0.2]
+    label_color: '#e65100'
+    mass_kg: 0.35
+- sku: CHEESE-MEX
+  name: Mexican Blend Shredded Cheese 8 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cheese
+  description: Shredded cheddar, monterey jack, queso quesadilla.
+  tags: [taco, mexican, cheese, kid_friendly, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 379
+  unit: bag
+  size: 8 oz
+  barcode: '2000000011684'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: box
+    dims_m: [0.16, 0.03, 0.22]
+    label_color: '#ffb300'
+    mass_kg: 0.25
+- sku: CHEESE-COTIJA
+  name: Crumbled Cotija 8 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cheese
+  description: Salty aged Mexican crumbling cheese.
+  tags: [taco, mexican, cheese, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 499
+  unit: each
+  size: 8 oz
+  barcode: '2000000011752'
+  perishable: true
+  shelf_life_days: 45
+  asset:
+    shape: cylinder
+    dims_m: [0.1, 0.1, 0.07]
+    label_color: '#fff8e1'
+    mass_kg: 0.25
+- sku: SOUR-CREAM
+  name: Sour Cream 16 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cultured
+  description: Cultured sour cream.
+  tags: [taco, mexican, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 249
+  unit: each
+  size: 16 oz
+  barcode: '2000000011820'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: cylinder
+    dims_m: [0.1, 0.1, 0.09]
+    label_color: '#e3f2fd'
+    mass_kg: 0.48
+- sku: GUAC-KIT
+  name: Fresh Guacamole Kit
+  brand: Verde Cocina
+  category: deli
+  subcategory: dips
+  description: Two avocados, pico, lime and seasoning. Mash and serve.
+  tags: [taco, mexican, dip, party, fresh, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 1
+  price_cents: 599
+  unit: each
+  size: serves 4
+  barcode: '2000000011899'
+  perishable: true
+  shelf_life_days: 6
+  asset:
+    shape: box
+    dims_m: [0.18, 0.12, 0.08]
+    label_color: '#43a047'
+    mass_kg: 0.6
+- sku: PICO-FRESH
+  name: Fresh Pico de Gallo 12 oz
+  brand: Verde Cocina
+  category: deli
+  subcategory: salsa
+  description: Fresh-cut tomato, onion, jalapeno and cilantro.
+  tags: [taco, mexican, salsa, fresh, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 2
+  price_cents: 449
+  unit: each
+  size: 12 oz
+  barcode: '2000000011967'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: cylinder
+    dims_m: [0.11, 0.11, 0.07]
+    label_color: '#e53935'
+    mass_kg: 0.34
+- sku: QUESO-DIP
+  name: White Queso Dip 15 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: dips
+  description: Creamy white queso with green chiles.
+  tags: [mexican, dip, party, cheese, kid_friendly, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  spice_level: 1
+  price_cents: 549
+  unit: each
+  size: 15 oz
+  barcode: '2000000012032'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: cylinder
+    dims_m: [0.1, 0.1, 0.08]
+    label_color: '#fff59d'
+    mass_kg: 0.43
+- sku: EGGS
+  name: Large Brown Eggs 12 ct
+  brand: Sunny Coop
+  category: dairy
+  subcategory: eggs
+  description: Cage-free large brown eggs.
+  tags: [breakfast, protein, staple, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [egg]
+  price_cents: 449
+  unit: pack
+  size: 12 ct
+  barcode: '2000000012100'
+  perishable: true
+  shelf_life_days: 28
+  asset:
+    shape: box
+    dims_m: [0.3, 0.1, 0.07]
+    label_color: '#bcaaa4'
+    mass_kg: 0.7
+- sku: MILK-2PCT
+  name: 2% Milk Half Gallon
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: milk
+  description: Reduced fat 2% milk.
+  tags: [breakfast, staple, kid_friendly, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 399
+  unit: each
+  size: 64 oz
+  barcode: '2000000012179'
+  perishable: true
+  shelf_life_days: 12
+  asset:
+    shape: box
+    dims_m: [0.095, 0.095, 0.25]
+    label_color: '#1e88e5'
+    mass_kg: 1.9
+- sku: OAT-MILK
+  name: Oat Milk Original 64 oz
+  brand: Oatly Day
+  category: dairy
+  subcategory: plant_milk
+  description: Creamy oat milk.
+  tags: [breakfast, plant_based, vegetarian, vegan, dairy_free]
+  dietary: [vegetarian, vegan, dairy_free]
+  allergens: []
+  price_cents: 479
+  unit: each
+  size: 64 oz
+  barcode: '2000000012247'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: box
+    dims_m: [0.095, 0.095, 0.25]
+    label_color: '#5d4037'
+    mass_kg: 1.9
+- sku: YOGURT-GREEK
+  name: Plain Greek Yogurt 32 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: yogurt
+  description: Thick plain nonfat greek yogurt. Great sour cream swap.
+  tags: [breakfast, protein, healthy, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 599
+  unit: each
+  size: 32 oz
+  barcode: '2000000012315'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: cylinder
+    dims_m: [0.12, 0.12, 0.11]
+    label_color: '#90caf9'
+    mass_kg: 0.95
+- sku: BUTTER
+  name: Salted Butter 4 sticks
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: butter
+  description: Sweet cream salted butter.
+  tags: [staple, baking, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 549
+  unit: pack
+  size: 16 oz
+  barcode: '2000000012384'
+  perishable: true
+  shelf_life_days: 60
+  asset:
+    shape: box
+    dims_m: [0.13, 0.07, 0.07]
+    label_color: '#fdd835'
+    mass_kg: 0.47
+- sku: OJ
+  name: Orange Juice No Pulp 52 oz
+  brand: Sunny Grove
+  category: beverages
+  subcategory: juice
+  description: 100% not-from-concentrate orange juice.
+  tags: [breakfast, kid_friendly, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 449
+  unit: each
+  size: 52 oz
+  barcode: '2000000012452'
+  perishable: true
+  shelf_life_days: 14
+  asset:
+    shape: box
+    dims_m: [0.09, 0.09, 0.24]
+    label_color: '#ff9800'
+    mass_kg: 1.6
+- sku: HORCHATA
+  name: Cinnamon Horchata 32 oz
+  brand: Verde Cocina
+  category: beverages
+  subcategory: drinks
+  description: Rice and cinnamon horchata, ready to drink.
+  tags: [mexican, party, sweet, vegetarian, vegan, dairy_free, gluten_free]
+  dietary: [vegetarian, vegan, dairy_free, gluten_free]
+  allergens: []
+  price_cents: 399
+  unit: each
+  size: 32 oz
+  barcode: '2000000012520'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.08, 0.08, 0.2]
+    label_color: '#efebe9'
+    mass_kg: 1.0
+- sku: AVOCADO
+  name: Hass Avocado
+  brand: Picky Farms
+  category: produce
+  subcategory: fruit
+  description: Ripe-and-ready Hass avocados.
+  tags: [taco, mexican, fresh, healthy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 129
+  unit: each
+  size: 1 ct
+  barcode: '2000000012599'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: cylinder
+    dims_m: [0.08, 0.08, 0.11]
+    label_color: '#33691e'
+    mass_kg: 0.2
+- sku: LIMES
+  name: Lime
+  brand: Picky Farms
+  category: produce
+  subcategory: fruit
+  description: Juicy Persian lime.
+  tags: [taco, mexican, fresh, tangy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 45
+  unit: each
+  size: 1 ct
+  barcode: '2000000012667'
+  perishable: true
+  shelf_life_days: 14
+  asset:
+    shape: cylinder
+    dims_m: [0.055, 0.055, 0.06]
+    label_color: '#7cb342'
+    mass_kg: 0.07
+- sku: ONION-WHITE
+  name: White Onion
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Crisp white onion.
+  tags: [taco, mexican, fresh, staple, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 89
+  unit: each
+  size: 1 ct
+  barcode: '2000000012735'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: cylinder
+    dims_m: [0.09, 0.09, 0.08]
+    label_color: '#f5f5f5'
+    mass_kg: 0.25
+- sku: TOMATO-ROMA
+  name: Roma Tomatoes 1 lb Pack
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Firm roma tomatoes.
+  tags: [taco, fresh, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 199
+  unit: pack
+  size: 1 lb
+  barcode: '2000000012803'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.18, 0.12, 0.07]
+    label_color: '#e53935'
+    mass_kg: 0.45
+- sku: CILANTRO
+  name: Cilantro Bunch
+  brand: Picky Farms
+  category: produce
+  subcategory: herbs
+  description: Fresh cilantro bunch.
+  tags: [taco, mexican, fresh, herbs, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 99
+  unit: bunch
+  size: 1 bunch
+  barcode: '2000000012872'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.1, 0.04, 0.25]
+    label_color: '#2e7d32'
+    mass_kg: 0.08
+- sku: JALAPENO
+  name: Jalapeno Peppers 4 ct
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Fresh green jalapenos.
+  tags: [taco, mexican, fresh, spicy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 3
+  price_cents: 129
+  unit: pack
+  size: 4 ct
+  barcode: '2000000012940'
+  perishable: true
+  shelf_life_days: 10
+  asset:
+    shape: box
+    dims_m: [0.14, 0.1, 0.05]
+    label_color: '#388e3c'
+    mass_kg: 0.15
+- sku: LETTUCE-ROMAINE
+  name: Romaine Hearts 3 ct
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Crisp romaine hearts.
+  tags: [taco, fresh, healthy, salad, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 349
+  unit: pack
+  size: 3 ct
+  barcode: '2000000013015'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.14, 0.1, 0.26]
+    label_color: '#9ccc65'
+    mass_kg: 0.6
+- sku: PEPPER-RED
+  name: Red Bell Pepper
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Sweet red bell pepper.
+  tags: [fresh, healthy, fajita, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 0
+  price_cents: 149
+  unit: each
+  size: 1 ct
+  barcode: '2000000013084'
+  perishable: true
+  shelf_life_days: 10
+  asset:
+    shape: cylinder
+    dims_m: [0.09, 0.09, 0.1]
+    label_color: '#d50000'
+    mass_kg: 0.2
+- sku: BANANAS
+  name: Bananas Bunch
+  brand: Picky Farms
+  category: produce
+  subcategory: fruit
+  description: Bunch of 5-7 bananas.
+  tags: [breakfast, fresh, kid_friendly, healthy, snack, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 179
+  unit: bunch
+  size: ~2.5 lb
+  barcode: '2000000013152'
+  perishable: true
+  shelf_life_days: 6
+  asset:
+    shape: box
+    dims_m: [0.22, 0.12, 0.1]
+    label_color: '#fdd835'
+    mass_kg: 1.1
+- sku: APPLES
+  name: Honeycrisp Apples 3 lb Bag
+  brand: Picky Farms
+  category: produce
+  subcategory: fruit
+  description: Crisp honeycrisp apples.
+  tags: [fresh, kid_friendly, healthy, snack, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 599
+  unit: bag
+  size: 3 lb
+  barcode: '2000000013220'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: box
+    dims_m: [0.22, 0.12, 0.25]
+    label_color: '#c62828'
+    mass_kg: 1.36
+- sku: BREAD-SOURDOUGH
+  name: Sourdough Loaf
+  brand: Harbor Bakehouse
+  category: bakery
+  subcategory: bread
+  description: Naturally leavened sourdough, baked daily.
+  tags: [fresh, artisan, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [wheat]
+  price_cents: 499
+  unit: each
+  size: 24 oz
+  barcode: '2000000013299'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.25, 0.12, 0.12]
+    label_color: '#d7a86e'
+    mass_kg: 0.68
+- sku: BREAD-WHEAT
+  name: Whole Wheat Sandwich Bread
+  brand: Harbor Bakehouse
+  category: bakery
+  subcategory: bread
+  description: 100% whole wheat sliced bread.
+  tags: [breakfast, kid_friendly, staple, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [wheat]
+  price_cents: 399
+  unit: each
+  size: 20 oz
+  barcode: '2000000013367'
+  perishable: true
+  shelf_life_days: 9
+  asset:
+    shape: box
+    dims_m: [0.12, 0.12, 0.28]
+    label_color: '#8d6e63'
+    mass_kg: 0.57
+- sku: CEREAL-OATS
+  name: Honey Oat Clusters Cereal
+  brand: Morning Mill
+  category: pantry
+  subcategory: cereal
+  description: Crunchy honey oat clusters.
+  tags: [breakfast, kid_friendly, sweet, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat]
+  price_cents: 499
+  unit: each
+  size: 14 oz
+  barcode: '2000000013435'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.2, 0.07, 0.29]
+    label_color: '#ffca28'
+    mass_kg: 0.4
+- sku: GRANOLA
+  name: Almond Maple Granola 12 oz
+  brand: Morning Mill
+  category: pantry
+  subcategory: cereal
+  description: Organic oats, almonds and maple syrup.
+  tags: [breakfast, healthy, organic, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: [tree_nuts]
+  price_cents: 549
+  unit: bag
+  size: 12 oz
+  barcode: '2000000013503'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.15, 0.06, 0.24]
+    label_color: '#a1887f'
+    mass_kg: 0.34
+- sku: OATMEAL
+  name: Old Fashioned Oats 42 oz
+  brand: Morning Mill
+  category: pantry
+  subcategory: cereal
+  description: Whole grain rolled oats.
+  tags: [breakfast, healthy, budget, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: []
+  price_cents: 449
+  unit: each
+  size: 42 oz
+  barcode: '2000000013572'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.13, 0.13, 0.24]
+    label_color: '#6d4c41'
+    mass_kg: 1.2
+- sku: COFFEE
+  name: Medium Roast Ground Coffee 12 oz
+  brand: Rainier Roasters
+  category: pantry
+  subcategory: coffee
+  description: Smooth medium roast, ground.
+  tags: [breakfast, caffeine, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 999
+  unit: bag
+  size: 12 oz
+  barcode: '2000000013640'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.12, 0.07, 0.22]
+    label_color: '#3e2723'
+    mass_kg: 0.34
+- sku: CHIPS-TORTILLA
+  name: Restaurant Style Tortilla Chips 13 oz
+  brand: La Milpa
+  category: snacks
+  subcategory: chips
+  description: Thin, crispy white corn tortilla chips.
+  tags: [taco, mexican, snack, party, salty, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 399
+  unit: bag
+  size: 13 oz
+  barcode: '2000000013718'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.25, 0.1, 0.33]
+    label_color: '#ffe082'
+    mass_kg: 0.37
+- sku: CHIPS-SPICY-LIME
+  name: Chile Lime Tortilla Chips 9 oz
+  brand: La Milpa
+  category: snacks
+  subcategory: chips
+  description: Rolled tortilla chips with hot chile and lime.
+  tags: [mexican, snack, party, spicy, tangy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 3
+  price_cents: 449
+  unit: bag
+  size: 9 oz
+  barcode: '2000000013787'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.23, 0.1, 0.3]
+    label_color: '#c0ca33'
+    mass_kg: 0.26
+- sku: CHIPS-POTATO
+  name: Sea Salt Kettle Chips 8 oz
+  brand: Crunch Co
+  category: snacks
+  subcategory: chips
+  description: Kettle-cooked potato chips.
+  tags: [snack, salty, kid_friendly, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 449
+  unit: bag
+  size: 8 oz
+  barcode: '2000000013855'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.22, 0.09, 0.3]
+    label_color: '#1976d2'
+    mass_kg: 0.23
+- sku: POPCORN
+  name: Butter Popcorn 6 ct
+  brand: Crunch Co
+  category: snacks
+  subcategory: popcorn
+  description: Microwave butter popcorn.
+  tags: [snack, kid_friendly, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 399
+  unit: pack
+  size: 6 ct
+  barcode: '2000000013923'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.18, 0.11, 0.14]
+    label_color: '#fbc02d'
+    mass_kg: 0.5
+- sku: TRAIL-MIX
+  name: Trail Mix 16 oz
+  brand: Nutty Acres
+  category: snacks
+  subcategory: nuts
+  description: Peanuts, almonds, raisins and chocolate.
+  tags: [snack, healthy, protein, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [peanuts, tree_nuts]
+  price_cents: 599
+  unit: bag
+  size: 16 oz
+  barcode: '2000000013992'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.18, 0.06, 0.25]
+    label_color: '#795548'
+    mass_kg: 0.45
+- sku: CHOC-DARK
+  name: Dark Chocolate Bar 72%
+  brand: Cacao Coast
+  category: snacks
+  subcategory: candy
+  description: Fair-trade organic 72% dark chocolate.
+  tags: [snack, sweet, organic, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 349
+  unit: each
+  size: 3.5 oz
+  barcode: '2000000014067'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.08, 0.015, 0.16]
+    label_color: '#4e342e'
+    mass_kg: 0.1
+- sku: SPARKLING-LIME
+  name: Lime Sparkling Water 12 pk
+  brand: Cascade Springs
+  category: beverages
+  subcategory: water
+  description: Unsweetened lime sparkling water.
+  tags: [party, healthy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 599
+  unit: pack
+  size: 12 x 12 oz
+  barcode: '2000000014135'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.27, 0.2, 0.13]
+    label_color: '#4caf50'
+    mass_kg: 4.4
+- sku: COLA
+  name: Cola 2 L
+  brand: Fizz Peak
+  category: beverages
+  subcategory: soda
+  description: Classic cola.
+  tags: [party, sweet, kid_friendly, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 299
+  unit: each
+  size: 2 L
+  barcode: '2000000014203'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.11, 0.11, 0.33]
+    label_color: '#b71c1c'
+    mass_kg: 2.1
+- sku: COLA-CANE
+  name: Cane Sugar Cola 4 pk Glass
+  brand: Fizz Peak
+  category: beverages
+  subcategory: soda
+  description: Made with real cane sugar, in glass bottles.
+  tags: [mexican, party, sweet, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 599
+  unit: pack
+  size: 4 x 12 oz
+  barcode: '2000000014272'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.13, 0.13, 0.25]
+    label_color: '#880e4f'
+    mass_kg: 1.8
+- sku: LAGER-6PK
+  name: Mexican Lager 6 pk
+  brand: Playa Brewing
+  category: alcohol
+  subcategory: beer
+  description: Crisp pale lager. ID required.
+  tags: [mexican, party, 21_plus, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [wheat]
+  price_cents: 1099
+  unit: pack
+  size: 6 x 12 oz
+  barcode: '2000000014340'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.2, 0.13, 0.24]
+    label_color: '#fbc02d'
+    mass_kg: 4.2
+- sku: PAPER-TOWELS
+  name: Paper Towels 6 Rolls
+  brand: HomeBase
+  category: household
+  subcategory: paper
+  description: Select-a-size paper towels.
+  tags: [household, cleaning]
+  dietary: []
+  allergens: []
+  price_cents: 899
+  unit: pack
+  size: 6 rolls
+  barcode: '2000000014418'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.3, 0.2, 0.28]
+    label_color: '#e0e0e0'
+    mass_kg: 1.3
+- sku: NAPKINS
+  name: Party Napkins 100 ct
+  brand: HomeBase
+  category: household
+  subcategory: paper
+  description: 2-ply white napkins.
+  tags: [household, party]
+  dietary: []
+  allergens: []
+  price_cents: 299
+  unit: pack
+  size: 100 ct
+  barcode: '2000000014487'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.17, 0.17, 0.06]
+    label_color: '#ffffff'
+    mass_kg: 0.35
+- sku: PAPER-PLATES
+  name: Paper Plates 40 ct
+  brand: HomeBase
+  category: household
+  subcategory: paper
+  description: Sturdy 9 inch paper plates.
+  tags: [household, party]
+  dietary: []
+  allergens: []
+  price_cents: 499
+  unit: pack
+  size: 40 ct
+  barcode: '2000000014555'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.25, 0.25, 0.08]
+    label_color: '#ffcc80'
+    mass_kg: 0.9
+- sku: DISH-SOAP
+  name: Dish Soap Lemon 24 oz
+  brand: HomeBase
+  category: household
+  subcategory: cleaning
+  description: Grease-cutting lemon dish soap.
+  tags: [household, cleaning]
+  dietary: []
+  allergens: []
+  price_cents: 399
+  unit: each
+  size: 24 oz
+  barcode: '2000000014623'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.08, 0.08, 0.23]
+    label_color: '#ffee58'
+    mass_kg: 0.75
+- sku: TRASH-BAGS
+  name: Kitchen Trash Bags 40 ct
+  brand: HomeBase
+  category: household
+  subcategory: bags
+  description: 13 gallon drawstring trash bags.
+  tags: [household]
+  dietary: []
+  allergens: []
+  price_cents: 999
+  unit: pack
+  size: 40 ct
+  barcode: '2000000014692'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.15, 0.12, 0.18]
+    label_color: '#424242'
+    mass_kg: 1.0
+- sku: ICE-CREAM
+  name: Vanilla Bean Ice Cream 48 oz
+  brand: Polar Creamery
+  category: frozen
+  subcategory: dessert
+  description: Classic vanilla bean ice cream.
+  tags: [dessert, sweet, kid_friendly, vegetarian, gluten_free]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 549
+  unit: each
+  size: 48 oz
+  barcode: '2000000014760'
+  perishable: false
+  shelf_life_days: 180
+  asset:
+    shape: cylinder
+    dims_m: [0.15, 0.15, 0.13]
+    label_color: '#fff3e0'
+    mass_kg: 1.4
+- sku: CORN-FROZEN
+  name: Fire-Roasted Corn 16 oz
+  brand: Polar Creamery
+  category: frozen
+  subcategory: vegetables
+  description: Flame-roasted sweet corn, frozen.
+  tags: [mexican, healthy, budget, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 249
+  unit: bag
+  size: 16 oz
+  barcode: '2000000014838'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.17, 0.05, 0.24]
+    label_color: '#ffd54f'
+    mass_kg: 0.45
+- sku: BURRITOS-FROZEN
+  name: Bean & Cheese Burritos 8 ct
+  brand: Verde Cocina
+  category: frozen
+  subcategory: meals
+  description: Quick microwave bean and cheese burritos.
+  tags: [mexican, kid_friendly, budget, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat, milk]
+  spice_level: 1
+  price_cents: 699
+  unit: pack
+  size: 8 ct
+  barcode: '2000000014906'
+  perishable: false
+  shelf_life_days: 180
+  asset:
+    shape: box
+    dims_m: [0.25, 0.06, 0.2]
+    label_color: '#ff7043'
+    mass_kg: 1.6
+- sku: MOLCAJETE
+  name: Volcanic Stone Molcajete
+  brand: Casa Verde
+  category: household
+  subcategory: kitchen
+  description: Traditional basalt mortar for salsas and guacamole.
+  tags: [mexican, kitchen, gift]
+  dietary: []
+  allergens: []
+  price_cents: 3499
+  unit: each
+  size: 8 inch
+  barcode: '2000000014975'
+  perishable: false
+  online_only: true
+  asset:
+    shape: cylinder
+    dims_m: [0.2, 0.2, 0.12]
+    label_color: '#424242'
+    mass_kg: 3.5
+- sku: OREGANO-MEX
+  name: Mexican Oregano 0.75 oz
+  brand: Casa Verde
+  category: pantry
+  subcategory: spices
+  description: Organic dried Mexican oregano.
+  tags: [mexican, spices, organic, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 499
+  unit: each
+  size: 0.75 oz
+  barcode: '2000000015040'
+  perishable: false
+  online_only: true
+  asset:
+    shape: cylinder
+    dims_m: [0.05, 0.05, 0.1]
+    label_color: '#689f38'
+    mass_kg: 0.05
+- sku: CHILE-LIME-SEASONING
+  name: Chile Lime Seasoning 5 oz
+  brand: Fuego Ridge
+  category: pantry
+  subcategory: spices
+  description: Chile, lime and sea salt for fruit and elotes.
+  tags: [mexican, spices, spicy, tangy, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  spice_level: 2
+  price_cents: 349
+  unit: each
+  size: 5 oz
+  barcode: '2000000015118'
+  perishable: false
+  online_only: true
+  asset:
+    shape: cylinder
+    dims_m: [0.05, 0.05, 0.12]
+    label_color: '#d84315'
+    mass_kg: 0.15
