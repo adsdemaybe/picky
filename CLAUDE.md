@@ -73,16 +73,28 @@ The team's source of truth. Track progress in the arm's GitHub issue, not here.
 Demo safety (everyone): thin end-to-end loop working by hour 8–10; feature freeze ~6 h before judging; backup video
 of a full trip; a second trip that is visibly smarter because of post-purchase feedback.
 
+**Timeline (PT, DubHacks Oct 17–18 2026):** Sat ~12:30 PM hacking starts · **Sat ~9–10 PM thin E2E loop on `main`** ·
+**Sun ~5:30 AM feature freeze** (fix PRs only) + record backup video · **Sun 8:00 AM code freeze**, rehearse ×3 ·
+**Sun 10:00 AM submit** (hard deadline 10:30 AM) · Sun 11:30 AM–2:00 PM judging. Prioritize P0 (the demo trip) over
+P1/P2 polish every time.
+
 ## 4. Repo layout & architecture rules
 
 ```
-CLAUDE.md            this file
+CLAUDE.md            this file (AI + human rules). Cursor mirror: .cursor/rules/*.mdc — generated, run `make rules`
 contracts/           LOCKED interfaces: pydantic models, service Protocols, events, LLM tool schemas, DB schema, API list
-utils/               central shared helpers (config, logging, db, llm client, money, geometry, ids, event bus, planogram loader)
-arms/<arm>/          one folder per feature arm (see §3): README.md, service.py (real), fake.py (fake), tests/
-data/planograms/     store layouts — single source of truth for sim scene, DB seed, occupancy grid
-data/fixtures/       demo users, profiles, mandates, online-store catalog
-scripts/             dev/demo entrypoints (seed, demo trip, type generation)
+utils/               central shared helpers (config, logging, db, llm client, money, geometry, ids, event bus, data loaders)
+arms/<arm>/          one folder per feature arm (see §3)
+  README.md            scope, contract, how to run, demo-ready checklist, known limitations
+  __init__.py          public API: exports create() and create_fake()
+  service.py           real implementation of the arm's contracts Protocol → create(services)
+  fake.py              deterministic fake of the same Protocol → create_fake(services)
+  tests/               pytest; must pass with base deps (use pytest.importorskip for extras)
+data/products.yaml   product master (sku, name, price, tags, shape/label for sim assets, barcode, shelf life)
+data/planograms/     one YAML per physical store: layout, fixtures, slots (sku → aisle/shelf/slot), stock lots
+data/online_store.yaml   mock online store catalog
+data/fixtures/       demo users, profiles, mandates, purchase history
+scripts/             repo tooling only (e.g. sync_agent_rules.py). Run arm entrypoints with `python -m arms.<arm>.<module>`
 docs/                research.md, architecture notes, demo script
 ```
 
@@ -96,22 +108,72 @@ Rules:
 4. **`contracts/` is locked.** Change it only in a `contracts/<slug>` PR that bumps `CONTRACTS_VERSION` and names the
    affected arms. Never change contracts inside an arm PR.
 5. **Planogram is the source of truth.** Sim scene, DB seed and occupancy grid are generated from
-   `data/planograms/*`. Never hand-edit a generated artifact; fix the planogram or the generator.
+   `data/products.yaml` + `data/planograms/*`. Never hand-edit a generated artifact; fix the data or the generator.
 6. **Every arm ships a fake.** `arms/<arm>/fake.py` implements the same Protocol with deterministic data so the
-   pipeline always runs. The gateway uses the real implementation only for arms listed in `PICKY_REAL_ARMS`.
+   pipeline always runs. The gateway uses the real implementation only for arms listed in `PICKY_REAL_ARMS`
+   (comma-separated, e.g. `PICKY_REAL_ARMS=catalog,routing`); every other arm runs its fake.
+7. **Rules files stay in sync.** After editing `CLAUDE.md` or any `arms/<arm>/README.md`, run `make rules` and commit
+   the regenerated `.cursor/rules/`. CI fails if they drift.
 
-## 5. Git workflow (mandatory)
+## 5. How to contribute
 
-- `main` is always demo-able. **Never commit or push directly to `main`.** Everything lands through a PR.
-- **A new arm = one branch `arm/<arm>`** off `main`. Build the whole arm there; open the PR into `main` when it is
-  demo-ready (§6). Merge `main` into your arm branch often — always after a contracts change.
-- After an arm has merged, further work uses short-lived branches, each through a PR:
-  `feat/<arm>-<slug>` (new capability), `fix/<arm>-<slug>`, `contracts/<slug>`, `utils/<slug>`, `chore/<slug>`.
-- A PR must: fill the template, link its arm issue, pass CI (`make check`), show demo evidence (screenshot/GIF/log of
-  the pipeline running with the arm real), and update the arm README.
-- Squash-merge. One reviewer from another arm approves.
-- Claude: never push to `main`, never force-push a branch you didn't create, never merge a PR unless the user asks.
-  Commit messages: `<arm>: <imperative summary>`.
+### Rules (mandatory)
+- `main` is always demo-able. **Never commit or push directly to `main`.** Every change lands through a PR.
+- **A new arm = one branch `arm/<arm>`** off `main`. The whole arm is built there and merged by one PR when it is
+  demo-ready (§6).
+- After an arm has merged, every further change gets its own short-lived branch + PR:
+  `feat/<arm>-<slug>` (new capability) · `fix/<arm>-<slug>` · `contracts/<slug>` · `utils/<slug>` · `chore/<slug>`.
+- One owner per arm (the assignee on its GitHub issue). Touch another arm's folder only through a PR they review.
+- Commit messages: `<arm>: <imperative summary>` (e.g. `routing: add OR-Tools orienteering with skip penalties`).
+
+### Step by step
+1. **Set up once**
+   ```bash
+   gh repo clone adsdemaybe/picky && cd picky
+   make setup                 # uv sync: Python 3.11 env + dev tools
+   cp .env.example .env       # add only the keys your arm needs; .env is git-ignored
+   make check && make demo    # both must pass on a fresh clone (all arms fake)
+   ```
+2. **Claim your arm.** `gh issue list --label arm:<arm>` → `gh issue edit <n> --add-assignee @me`. The issue's checklist
+   is your scope (it mirrors §3).
+3. **Branch.**
+   ```bash
+   git switch main && git pull
+   git switch -c arm/<arm>           # first time; if it already exists: git switch arm/<arm> && git pull
+   ```
+4. **Build inside `arms/<arm>/` only.** Implement `service.py` against your Protocol in `contracts/services.py`; keep
+   `fake.py` working. Run your arm inside the full pipeline as you go: `PICKY_REAL_ARMS=<arm> make demo`.
+5. **Push early, stay current.**
+   ```bash
+   git push -u origin HEAD                      # first push; then plain `git push`
+   gh pr create --draft --base main --fill      # optional: draft PR = CI + visibility, NOT a request to merge
+   git fetch && git merge origin/main           # often, and always after a contracts change
+   ```
+   Resolve conflicts on your branch, never on `main`.
+6. **Get it demo-ready (§6).** Then run the pre-PR checks:
+   ```bash
+   make check                                   # lint, format, rules sync, tests
+   PICKY_REAL_ARMS=<arm> make demo              # full trip with your arm real
+   make rules                                   # if you edited CLAUDE.md or any arm README
+   ```
+   Update `arms/<arm>/README.md`: what works, known limitations, how to run, fallback flag.
+7. **Open the PR** (or flip the draft with `gh pr ready`): `gh pr create --base main --fill --label arm:<arm>`. Fill
+   the template: spec items (§3) completed, `Closes #<issue>`, demo evidence (screenshot/GIF/log of the pipeline with
+   your arm real), fallback flag, known limitations. **Arm PRs must not change `contracts/`.**
+8. **Review.** One reviewer from a different arm: `gh pr checkout <n> && make check && PICKY_REAL_ARMS=<arm> make demo`,
+   then approve or request changes. Author squash-merges: `gh pr merge --squash --delete-branch`.
+9. **Next change** → back to step 3 with a `feat/`/`fix/` branch.
+
+### Special cases
+- **Contracts change:** separate `contracts/<slug>` PR. Bump `CONTRACTS_VERSION`, list the affected arms in the PR, update
+  their fakes in the same PR so `main` stays green, and get a review from one affected arm owner. Announce in team chat.
+- **Shared helper:** `utils/<slug>` PR; keep it feature-agnostic (§4 rule 3).
+- **After feature freeze (~T-6 h):** only `fix/` PRs, still through a PR; any one teammate can approve.
+
+### For AI assistants (Claude Code, Cursor)
+Follow the same flow. Before writing code, check the branch (`git branch --show-current`); if it is `main`, switch to
+the right `arm/`/`feat/`/`fix/` branch first. Never push to `main`, never force-push a branch you didn't create, and
+never merge a PR or mark a draft ready unless the user asks. Open PRs with `gh pr create` and fill the template.
 
 ## 6. Definition of demo-ready (the PR bar)
 
@@ -128,10 +190,13 @@ Not required: every edge case, scale beyond the demo, perfect polish.
 
 ## 7. Engineering conventions
 
-- **Python ≥ 3.11 compatible** (Isaac Sim's bundled Python is 3.11): no PEP 695 `type`/generic syntax. `uv` for envs,
-  `ruff` for lint/format, `pytest`, pydantic v2, `asyncio` services.
-- Commands: `make setup` (uv sync), `make check` (lint + tests), `make dev` (gateway), `make demo` (full fake trip),
-  `make seed` (DB from planograms). Per-arm heavy deps go in that arm's optional extra in `pyproject.toml`.
+- **Python 3.12 for dev** (Isaac Sim 6.2 runs Python 3.12); `requires-python >= 3.11`, so avoid 3.12-only syntax (PEP 695
+  `type`/generics). `uv` for envs, `ruff` for lint/format, `pytest`, pydantic v2, `asyncio` services.
+  Frontend: pnpm in `arms/frontend`; TS types are generated from contracts (`make gen-types`), never hand-written.
+- Commands: `make setup` (uv sync), `make check` (lint + format check + rules check + tests), `make dev` (gateway
+  API on :8000), `make demo` (full trip through the pipeline, fakes unless `PICKY_REAL_ARMS` is set), `make seed`
+  (DB from planograms), `make rules` (regenerate Cursor rules). Heavy per-arm deps go in that arm's optional extra in
+  `pyproject.toml` (`uv sync --extra routing`); base deps must be enough for contracts, utils, fakes and tests.
 - **Money is integer cents** (`int`), never float. **Units:** meters, radians, store world frame defined by the
   planogram origin. Poses are `contracts` `Pose2D`.
 - Config only via `utils.config.settings` (env/.env). Logging only via `utils.log.get_logger(__name__)`.
@@ -149,7 +214,24 @@ Not required: every edge case, scale beyond the demo, perfect polish.
 
 ## 9. Stack decisions
 
-See `docs/research.md` for options, setup steps and sources. (Summary added once research lands.)
+Defaults from `docs/research.md` (options, versions, setup steps, sources, ⚠️ unverified flags). Use the pick; switch
+to the fallback when the time-box in §10 is hit. Changing a pick needs a one-line note in the arm README.
+
+| Arm | Pick | Fallback |
+|---|---|---|
+| catalog | `data/` YAML → seed local Postgres (Docker `pgvector/pgvector:pg17`) via SQLAlchemy async + psycopg 3; ~60 hand-written SKUs first, Open Food Facts enrichment later | Supabase via the same `DATABASE_URL`; SQLite + numpy if Docker fails |
+| perception | Cascade: zxing-cpp barcode → open_clip SigLIP 2 (`ViT-B-16-SigLIP2`) match vs our label textures → `claude-haiku-5-5` vision pick-from-candidates. Face blur: OpenCV YuNet (`opencv-python-headless>=4.10,<5`). Runs in the backend, not Isaac's Python | Ground-truth bypass (sim reports prim→SKU); CLIP ViT-B-32; MediaPipe faces |
+| sim | Isaac Sim 6.2 (pip `isaacsim[all,extscache]==6.2.0.0`, Python 3.12) headless worker; scene generated from the planogram with `pxr`; camera → JPEG over WS. Worker connects **outbound** to the gateway | **2D top-down sim (robot fake) is built first and is the demo fallback**; recorded Isaac video |
+| robot | Ridgeback-Franka; pure-pursuit on a kinematic base; scripted "magic grasp" + FixedJoint attach → reparent into basket. Avoid deprecated `wheeled_robots`/`lula` APIs in 6.x | Franka on a box base; cuMotion RMPflow pick-place as stretch |
+| routing | Planogram → 0.05 m grid (inflated by robot radius) → skimage `MCP_Geometric` distance matrix between aisle approach poses → OR-Tools 9.15 (mandatory = no disjunction, recs = `AddDisjunction` penalty in the same integer cm units) PATH_CHEAPEST_ARC + GLS, 1–2 s limit; re-solve after each yes/no | Greedy insertion on a 2-opt tour; cached demo route |
+| agent | `claude-sonnet-5-5` brain, `claude-haiku-5-5` for voice/vision/classification, hand-written async tool loop (anthropic SDK), ≤8 iterations, prompt caching; intent expansion via structured output into `ShoppingList`. Voice: Deepgram STT/TTS, push-to-talk | Browser Web Speech API; env-var model fallback |
+| recommender | `BAAI/bge-small-en-v1.5` (384-dim, local) in pgvector; profile vector from likes/purchases; Sonnet rerank + "why"; 3–5 rec stops per trip, rest batched at checkout (max 3) | numpy cosine scan |
+| trust | Deterministic AP2-style mandates (intent/cart mandates, signed, reason codes, audit log); approval bound to the cart hash; **Stripe test mode on the critical path** behind a `VisaIntelligentCommerce` adapter (Visa sandbox access is unlikely this weekend) | Mock signed receipt |
+| messaging | Photon 2.0 via `photonhq-api` 0.5.0 (Python), poll + idempotent send on the beta shared iMessage line; demo phones text the number first; YES/NO approvals | spectrum-ts sidecar; Telegram; web chat |
+| frontend | Next.js 16 + React 19 + Tailwind 4 + shadcn/ui + zustand + Recharts; hand-written SVG store map (world meters); live view = JPEG frames over WS | Vite + React; recorded video loop |
+| gateway | FastAPI single process, async; `/ws` per client; in-process event bus; explicit trip state machine; `PICKY_REAL_ARMS` picks real vs fake | — |
+
+Hour-0 accounts (lead times, owners): see the checklist at the top of `docs/research.md`.
 
 ## 10. How Claude works in this repo
 
@@ -161,4 +243,4 @@ See `docs/research.md` for options, setup steps and sources. (Summary added once
   fallback and record it in the arm README.
 - Scope is §3. Don't build things outside it without asking; do suggest cheap additions that clearly raise a rubric
   score.
-- Before opening a PR: `make check` and `make demo` must pass.
+- Before opening a PR: run the pre-PR checks in §5 step 6.
