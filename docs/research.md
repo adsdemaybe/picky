@@ -401,22 +401,31 @@ Setup and core:
 ```python
 # uv add 'ortools==9.15.*' numpy 'scipy>=1.18' scikit-image pathfinding     (scipy 1.18 needs Python >= 3.12)
 from ortools.constraint_solver import pywrapcp, routing_enums_pb2 as enums
+
 SCALE = 100  # meters -> integer cm; penalties MUST use the same unit
+
+
 def plan(D, optional, penalty_m, start, end, max_m=None, secs=2):
     Di = (D * SCALE).round().astype(int).tolist()
-    mgr = pywrapcp.RoutingIndexManager(len(Di), 1, [start], [end]); r = pywrapcp.RoutingModel(mgr)
+    mgr = pywrapcp.RoutingIndexManager(len(Di), 1, [start], [end])
+    r = pywrapcp.RoutingModel(mgr)
     cb = r.RegisterTransitCallback(lambda i, j: Di[mgr.IndexToNode(i)][mgr.IndexToNode(j)])
     r.SetArcCostEvaluatorOfAllVehicles(cb)
-    if max_m: r.AddDimension(cb, 0, int(max_m * SCALE), True, "Dist")
-    for n in optional: r.AddDisjunction([mgr.NodeToIndex(n)], int(penalty_m[n] * SCALE))
+    if max_m:
+        r.AddDimension(cb, 0, int(max_m * SCALE), True, "Dist")
+    for n in optional:
+        r.AddDisjunction([mgr.NodeToIndex(n)], int(penalty_m[n] * SCALE))
     p = pywrapcp.DefaultRoutingSearchParameters()
     p.first_solution_strategy = enums.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     p.local_search_metaheuristic = enums.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
     p.time_limit.FromSeconds(secs)
     s = r.SolveWithParameters(p)
-    if not s: return None                       # e.g. max_m too small for the mandatory stops
+    if not s:
+        return None  # e.g. max_m too small for the mandatory stops
     route, i = [], r.Start(0)
-    while not r.IsEnd(i): route.append(mgr.IndexToNode(i)); i = s.Value(r.NextVar(i))
+    while not r.IsEnd(i):
+        route.append(mgr.IndexToNode(i))
+        i = s.Value(r.NextVar(i))
     dropped = [n for n in optional if s.Value(r.NextVar(mgr.NodeToIndex(n))) == mgr.NodeToIndex(n)]
     return route + [mgr.IndexToNode(i)], dropped
 ```
