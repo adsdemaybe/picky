@@ -17,8 +17,10 @@ Usage::
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from utils.config import get_settings
@@ -71,3 +73,28 @@ async def dispose_all() -> None:
 
 
 __all__ = ["DatabaseUnavailable", "connect", "dispose_all", "get_engine", "session"]
+
+
+# ---- SQLite (stdlib, base deps): small per-feature stores that must work in the fakes / make demo ------------------
+def sqlite_path(path: str) -> str:
+    """``':memory:'`` stays; a relative path resolves against the repo root (parent dirs created)."""
+    if path == ":memory:" or path.startswith("file:"):
+        return path
+    p = Path(path).expanduser()
+    if not p.is_absolute():
+        p = get_settings().repo_root / p
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return str(p)
+
+
+def sqlite_connect(path: str) -> sqlite3.Connection:
+    """One SQLite connection (``check_same_thread=False``: callers serialize access and run queries off the event
+    loop with ``asyncio.to_thread``); rows as ``sqlite3.Row``; WAL for file databases."""
+    conn = sqlite3.connect(sqlite_path(path), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    if path != ":memory:":
+        try:
+            conn.execute("pragma journal_mode=wal")
+        except sqlite3.DatabaseError:
+            pass
+    return conn

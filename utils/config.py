@@ -127,6 +127,29 @@ class Settings(BaseSettings):
     picky_product_image_dir: str = ""
     """Optional folder of product photos / renders ('<SKU>.jpg|png') served by GET /api/products/{sku}/image.jpg;
     blank or missing file = a label-card render of the sim prop."""
+    picky_unload_by_arm: bool = True
+    """0.2.4 judges' demo: at checkout the arm takes every unit out of the basket and puts it on the counter (planned
+    per unit, verified); False = the handoff unloads the basket at once (the 0.2.3 behaviour)."""
+    picky_verify_items: bool = True
+    """Send the shopper a photo of every purchased unit (verification card: correct / wrong) after each pick."""
+    picky_verify_auto_accept_s: float = 20.0
+    """No answer to a verification card within this many seconds -> 'auto-accepted' (labelled as such)."""
+    picky_verify_max_rejections: int = 1
+    """'wrong' answers per unit before the robot skips that unit (each 'wrong' = put back + pick another)."""
+    picky_produce_review_timeout_s: float = 30.0
+    """Produce review ('Which avocados?') with photos: no answer within this -> the robot's best guess (labelled)."""
+    picky_purchases_db: str = "var/purchases.sqlite"
+    """Purchase-history database (SQLite file, relative to the repo root; ':memory:' = per process). Seeded with
+    months of demo history on first use; every completed checkout appends its lines."""
+    picky_suggestions_llm: bool = True
+    """Rank suggestion candidates + write their one-line reasons with the LLM (utils.llm, grounded in the signals
+    only); False / no key / any LLM error = deterministic order + templated reasons."""
+    picky_payment_agent: bool = True
+    """Run checkout through the Visa payment agent (cart mandate -> intent check -> passkey -> agentic token -> auth
+    + capture -> signed receipt, as payment.agent_step events). Always a sandbox: mock Visa Intelligent Commerce, or
+    Stripe test mode when STRIPE_SECRET_KEY is set."""
+    picky_payment_agent_llm: bool = True
+    """LLM narration of the payment agent's steps (one line each, grounded in the step facts); else templates."""
     gateway_host: str = "0.0.0.0"
     gateway_port: int = 8000
     picky_gateway_url: str = "http://localhost:8000"
