@@ -350,3 +350,47 @@ then escalates). A place accepted on an uncertain basket check commits with `pro
 | Verifier badge / mode switch | `GET /api/verifier`, `PUT /api/verifier/mode`, `GET /api/verifier/providers` | `verdict.decided_by`, `verdict.provider.attribution`, `verdict.degraded` |
 | Judge button "check the basket" | `POST /api/verify` (preset `basket`) | – |
 | Presenter panel | `GET/POST/DELETE /api/dev/faults`, `POST /api/dev/faults/scenario` | `demo.fault` |
+
+## Judges' demo (contracts 0.2.3 + 0.2.4)
+
+The judges' flow: suggestion cards from the purchase-history database → "order these" → the robot shops (photo
+check of every unit, produce review with photos) → at the counter the arm unloads the basket unit by unit → the Visa
+payment agent pays (sandbox) → the purchase rows land in the database. The Isaac view is livestreamed as MJPEG.
+
+### REST
+
+| Method | Path | Body / query | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/users/{user_id}/suggestions` | `?store_id=&limit=8&all=false` | `profile.ReplenishSuggestion[]` | kinds `replenish` ("You bought this 12 days ago — you usually buy it every 10 days"), `substitute` (due item out of stock here), `complement` (bought together), `deal` (on deal here + bought / liked); only in-stock items at the store; `score`, `signals`, `ranked_by` (`rules` / `llm`: the LLM only re-ranks and rewrites `reason` from `signals`) |
+| GET | `/api/users/{user_id}/purchases` | `?limit=200` | `profile.PurchaseRecord[]` newest first | the purchase-history database (`source` seed / checkout, `photo_urls` = the robot's verification photos) |
+| GET | `/api/products/{sku}/image.jpg` | `?w=320` | JPEG | product thumbnail (render / photo, else the sim prop's label card) |
+| POST | `/api/requests` | `{"user_id","items":[{"sku","qty"}],"store_id"}` | `fleet.RequestPlan` | structured order (0.2.3): one shop goal for exactly those SKUs, auto-executing trip, plan mode, checkout approval still required |
+| GET | `/api/verifications` | `?trip_id=&user_id=&status=pending` | `trust.ItemVerification[]` | photo cards, newest first |
+| POST | `/api/verifications/{id}` | `{"decision":"correct"\|"wrong"}` | `trust.ItemVerification` | `wrong` = put back + re-pick; 404 unknown, 409 already closed; no answer within `PICKY_VERIFY_AUTO_ACCEPT_S` → `auto_accepted` |
+| GET | `/api/trips/{trip_id}/payment` | – | `trust.PaymentAgentStep[]` | the Visa payment agent timeline (always `simulated`) |
+| GET | `/api/cameras/{camera_id}/stream.mjpg` | `?fps=&w=` | MJPEG | `<robot>.director` (chase view, 10 fps default), `<robot>.front.perceived` / `<robot>.wrist.perceived` (Perceptron Mk1.5 boxes, "ground truth" fallback) |
+
+Produce review = the existing `approval.requested` (kind `pick_choice`) + `pick.choices`: options carry a cropped,
+blurred photo per unit (`thumbnail_b64`) and ripeness labels; no answer within `PICKY_PRODUCE_REVIEW_TIMEOUT_S` → the
+robot takes the #1 freshness pick (labelled "best guess" in its brain step).
+
+### Events (`/ws`)
+
+| Type | Producer | Payload |
+|---|---|---|
+| `checkout.unload` | agent | `plan_id, step_id, n, total, sku, name, status (started / placed / verified / skipped / done), counter_spot, photo_url, text` ("Unloading 3/9: Mild Chunky Salsa → counter ✓") |
+| `item.verification` | agent | `verification: ItemVerification` (created `pending`, then `accepted` / `rejected` / `auto_accepted`); counter photos arrive as `auto_accepted` cards |
+| `payment.agent_step` | gateway | `step: PaymentAgentStep` (`n, name, status, title, detail, narration, narrated_by, provider mock_vic / stripe_test, label "Sandbox / simulated — no real money"`) |
+
+The approval behind a photo card is a normal `approval.requested` of kind `verify_item` (options `correct` / `wrong`,
+`payload.photo_url`); answer it with `POST /api/verifications/{id}` (or `POST /api/approvals/{id}`).
+
+### Checkout unload in the plan (planner → VLA → verifier)
+
+After the basket audit and the drive to the counter the plan holds, PER UNIT, a group `unload:<n>`:
+`ground_target` (camera `basket`, `TargetSpec.slot_id` None: Perceptron points at the unit in the basket, ground
+truth fallback) → `grasp` (`source: "basket"`, T0 on every backend: the learned T1 policies are shelf-trained) →
+`place` (`destination: "counter"`, `counter`: a `planogram.CounterSpot`, laid out left → right) → `verify`
+(`item_on_counter` + gripper empty). Then `handoff` = "Basket empty: hand off for payment" (`BasketContains({}, exact)`),
+and only then the trip's checkout (payment agent) starts. Isaac workers without the `basket_unload` capability skip
+the unload groups (the handoff unloads at once, as in 0.2.3).

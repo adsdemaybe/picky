@@ -58,7 +58,8 @@ def build_loop_services(
     s.verifier = FakeVerifier(s, mode=verifier_mode)  # type: ignore[arg-type]
     s.vla = FakeVla(s, simulate_t1=simulate_t1)
     s.planner = planner_cls(s)
-    s.runner = PlanLoop(s, heartbeat_s=heartbeat_s, policy=policy or DEFAULT_RETRY_POLICY)
+    # the loop's own tests answer every question generically; the 0.2.4 photo cards have their own tests
+    s.runner = PlanLoop(s, heartbeat_s=heartbeat_s, policy=policy or DEFAULT_RETRY_POLICY, verify_items=False)
     return s
 
 

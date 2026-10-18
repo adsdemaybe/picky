@@ -86,6 +86,24 @@ class OrchestratorConfig:
     """Detour recs per trip; None = PICKY_REC_MAX_STOPS."""
     robot_state_hz: float = 2.0
     """robot.state rate on the sequenced bus (/ws); full rate goes to /ws/frames."""
+    payment_agent: bool | None = None
+    """Checkout through the Visa payment agent (payment.agent_step timeline); None = PICKY_PAYMENT_AGENT."""
+    payment_step_pause_s: float = 0.35
+    """Beat between payment agent steps (the web app's timeline fills in visibly); tests use 0."""
+
+
+def _ask_expiry(request: ApprovalRequest, timeout: float) -> float:
+    """Approval expiry per kind: photo verification cards keep their own auto-accept window (0.2.4); produce reviews
+    time out after PICKY_PRODUCE_REVIEW_TIMEOUT_S (the robot then takes its best guess); the rest the config's."""
+    if request.kind == ApprovalKind.VERIFY_ITEM:
+        return request.expires_s
+    if request.kind == ApprovalKind.PICK_CHOICE:
+        try:
+            produce = float(get_settings().picky_produce_review_timeout_s)
+        except Exception:  # noqa: BLE001
+            produce = 60.0
+        return max(1.0, min(timeout, produce))
+    return timeout
 
 
 class TripOrchestrator:
@@ -99,6 +117,8 @@ class TripOrchestrator:
     ) -> None:
         self.services = services
         self.config = config or OrchestratorConfig()
+        self.photo_lookup: Any = None
+        """(trip_id, sku) -> verification photo urls for the purchase rows (set by the registry: JudgesIndex)."""
         self._trips: dict[str, Trip] = {}
         self._fsm: dict[str, StateMachine] = {}
         self._locks: dict[str, asyncio.Lock] = {}
@@ -299,7 +319,7 @@ class TripOrchestrator:
             "robot_id": request.robot_id or trip.robot_id,
             "goal_id": request.goal_id or trip.goal_id,
             "channels": list(self.config.approval_channels),
-            "expires_s": min(timeout, 60.0) if request.kind == ApprovalKind.PICK_CHOICE else timeout,
+            "expires_s": _ask_expiry(request, timeout),
         }
         rec = self._find_rec(trip, request.rec_id)
         if request.kind == ApprovalKind.RECOMMENDATION and not request.multi:
@@ -1220,19 +1240,28 @@ class TripOrchestrator:
         if resp.cart_hash is None:
             resp = resp.model_copy(update={"cart_hash": cart_hash})
         trust = self.services.require("trust")
+        checkout_req = CheckoutRequest(
+            trip_id=trip_id,
+            user_id=trip.user_id,
+            cart=trip.cart.model_copy(deep=True),
+            cart_hash=cart_hash,
+            budget_cents=trip.budget_cents,
+            approval_request=request,
+            approval=resp,
+            idempotency_key=f"{trip_id}:{cart_hash[:16]}",
+        )
         try:
-            receipt = await trust.checkout(
-                CheckoutRequest(
-                    trip_id=trip_id,
-                    user_id=trip.user_id,
-                    cart=trip.cart.model_copy(deep=True),
-                    cart_hash=cart_hash,
-                    budget_cents=trip.budget_cents,
-                    approval_request=request,
-                    approval=resp,
-                    idempotency_key=f"{trip_id}:{cart_hash[:16]}",
+            if self._payment_agent_on(trust):
+                from arms.trust import run_payment_agent
+
+                async def on_step(step: Any) -> None:
+                    await self._publish("payment.agent_step", trip_id, step=step)
+
+                receipt = await run_payment_agent(
+                    trust, checkout_req, on_step, pause_s=self.config.payment_step_pause_s
                 )
-            )
+            else:
+                receipt = await trust.checkout(checkout_req)
         except Exception as exc:  # noqa: BLE001
             await self._error(trip_id, "trust", f"payment error: {exc}")
             await self._transition(trip, S.EXECUTING, "payment error")
@@ -1248,19 +1277,29 @@ class TripOrchestrator:
         if self.config.auto_followup:
             await self.send_followup(trip_id)
 
+    def _payment_agent_on(self, trust: Any) -> bool:
+        """The Visa payment agent needs a TrustCore (mandates + adapter + audit chain): the fake and the real trust."""
+        on = self.config.payment_agent
+        if on is None:
+            on = bool(get_settings().picky_payment_agent)
+        return bool(on) and hasattr(trust, "audit") and hasattr(trust, "get_mandate")
+
     async def _record_purchases(self, trip: Trip) -> None:
         rec_svc = self.services.recommender
         if rec_svc is None:
             return
+        photos = self.photo_lookup or (lambda _trip_id, _sku: [])
         records = [
             PurchaseRecord(
                 purchase_id=new_id("pur"),
                 user_id=ln.user_id or trip.user_id,
                 sku=ln.sku,
+                name=ln.name,
                 qty=ln.qty,
                 unit_price_cents=ln.unit_price_cents,
                 store_id=ln.store_id,
                 trip_id=trip.trip_id,
+                photo_urls=photos(trip.trip_id, ln.sku),
             )
             for ln in trip.cart.active_lines()
         ]

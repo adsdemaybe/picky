@@ -20,6 +20,7 @@ from contracts.bridge import (
 )
 from contracts.cameras import (
     DEFAULT_ROBOT_CAMERA_MOUNTS,
+    PERCEIVED_SOURCE_KINDS,
     ROBOT_CAMERA_KINDS,
     CameraInfo,
     CameraKind,
@@ -27,7 +28,10 @@ from contracts.cameras import (
     ObservedItem,
     RobotCameraKind,
     VisionObservation,
+    director_camera_id,
     parse_camera_id,
+    perceived_camera_id,
+    perceived_source,
     robot_camera_id,
     store_camera_id,
 )
@@ -105,7 +109,10 @@ from contracts.events import (
     LOOP_P0_EVENT_TYPES,
     THROTTLED_EVENT_TYPES,
     WS_FILTER_KEYS,
+    CheckoutUnload,
     Event,
+    ItemVerificationEvent,
+    PaymentAgentStepEvent,
     event_matches,
     goal_envelope,
     make_event,
@@ -149,6 +156,7 @@ from contracts.fleet import (
     GoalStatus,
     GoalUpdate,
     RequestDraft,
+    RequestItem,
     RequestPlan,
     RobotInfo,
     StoreChoice,
@@ -185,6 +193,7 @@ from contracts.plan import (
     STEP_EXECUTORS,
     STEP_KIND_ALIASES,
     TIER_PREFERENCE,
+    UNLOAD_UNIT_MACRO,
     VLA_STEP_KINDS,
     AlignStep,
     AllOf,
@@ -202,6 +211,7 @@ from contracts.plan import (
     GripperHolding,
     GroundTargetStep,
     HandoffStep,
+    ItemOnCounter,
     ItemOnShelf,
     LabelMatches,
     NavigateToStep,
@@ -239,6 +249,7 @@ from contracts.planogram import (
     Aisle,
     CategoriesFile,
     CategoryDef,
+    CounterSpot,
     Fixture,
     FixturesFile,
     OnlineCatalog,
@@ -248,6 +259,7 @@ from contracts.planogram import (
     RobotSpec,
     Slot,
     StoreCameraSpec,
+    counter_spots,
 )
 from contracts.policy import (
     ACTION_INSERTS,
@@ -272,7 +284,7 @@ from contracts.policy import (
     failure_from_verdict,
     failure_from_vla,
 )
-from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, UserProfile
+from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, ReplenishSuggestion, UserProfile
 from contracts.routing import GridSpec, Route, RouteLeg, RouteRequest, Stop, StopStatus
 from contracts.services import (
     ARM_NAMES,
@@ -313,6 +325,7 @@ from contracts.sim import (
     ARM_IK_CAPABILITY,
     ARM_JOINTS_CAPABILITY,
     ARM_JOINTS_MAX_STEPS,
+    BASKET_UNLOAD_CAPABILITY,
     POLICY_CAMERAS,
     ArmIkCmd,
     ArmJointsCmd,
@@ -322,6 +335,8 @@ from contracts.sim import (
     IkSolution,
     IkTarget,
     ItemInstance,
+    PickFromBasketCmd,
+    PlaceOnCounterCmd,
     PolicyFrame,
     RobotError,
     RobotState,
@@ -360,6 +375,7 @@ from contracts.tools import (
 )
 from contracts.trip import Trip
 from contracts.trust import (
+    PAYMENT_SANDBOX_LABEL,
     ApprovalKind,
     ApprovalRequest,
     ApprovalResponse,
@@ -367,10 +383,12 @@ from contracts.trust import (
     CartMandate,
     CheckoutRequest,
     IntentMandate,
+    ItemVerification,
     MandateDecision,
     MandateReason,
     MandateVerdict,
     MandateViolation,
+    PaymentAgentStep,
     Receipt,
     TransparencyEntry,
     TrustLedger,
@@ -415,7 +433,7 @@ from contracts.vla import (
     resolve_tier,
 )
 
-CONTRACTS_VERSION = "0.2.2"
+CONTRACTS_VERSION = "0.2.4"
 
 __all__ = [
     "ACTION_INSERTS",
@@ -423,6 +441,19 @@ __all__ = [
     "APPROACH_DIST_MIN_M",
     "ARM_IK_CAPABILITY",
     "ARM_JOINTS_CAPABILITY",
+    "BASKET_UNLOAD_CAPABILITY",
+    "PAYMENT_SANDBOX_LABEL",
+    "UNLOAD_UNIT_MACRO",
+    "CheckoutUnload",
+    "CounterSpot",
+    "ItemOnCounter",
+    "ItemVerification",
+    "ItemVerificationEvent",
+    "PaymentAgentStep",
+    "PaymentAgentStepEvent",
+    "PickFromBasketCmd",
+    "PlaceOnCounterCmd",
+    "counter_spots",
     "ARM_JOINTS_MAX_STEPS",
     "ARM_MOUNT_X_M",
     "ARM_NAMES",
@@ -471,6 +502,7 @@ __all__ = [
     "MAX_GOAL_ATTEMPTS",
     "MIRROR_MODEL",
     "ONLINE_STORE_ID",
+    "PERCEIVED_SOURCE_KINDS",
     "PERCEPTRON_CALLS",
     "PICK_CHOICE_MAX",
     "POLICY_CAMERAS",
@@ -662,7 +694,9 @@ __all__ = [
     "Rect2D",
     "ReplanRequest",
     "ReplyInterpretation",
+    "ReplenishSuggestion",
     "RequestDraft",
+    "RequestItem",
     "RequestPlan",
     "RestockRequest",
     "RetryPolicy",
@@ -769,6 +803,7 @@ __all__ = [
     "compute_cart_hash",
     "decide_recovery",
     "default_conditions",
+    "director_camera_id",
     "default_low_threshold",
     "evaluate_on_state",
     "evaluate_on_truth",
@@ -792,6 +827,8 @@ __all__ = [
     "online_shipping_cents",
     "parse_brain_tool_input",
     "parse_camera_id",
+    "perceived_camera_id",
+    "perceived_source",
     "parse_event",
     "parse_gateway_to_sim",
     "parse_sim_message",

@@ -39,6 +39,7 @@ from contracts.plan import (
     DEFAULT_PLAN_TIMEOUT_S,
     VLA_STEP_KINDS,
     AlignStep,
+    AllOf,
     AskUserStep,
     BasketContains,
     Condition,
@@ -48,6 +49,7 @@ from contracts.plan import (
     GripperHolding,
     GroundTargetStep,
     HandoffStep,
+    ItemOnCounter,
     NavigateToStep,
     PlaceStep,
     PlannerInfo,
@@ -70,6 +72,7 @@ from contracts.plan import (
     plan_errors,
     recovery_step_id,
 )
+from contracts.planogram import counter_spots
 from contracts.policy import (
     ACTION_INSERTS,
     ACTION_RERUNS_STEP,
@@ -93,7 +96,15 @@ from contracts.policy import (
 from contracts.services import exec_mode, run_vla_to_terminal
 from contracts.shopping import CartLine
 from contracts.sim import ItemInstance, RobotError
-from contracts.trust import ApprovalKind, ApprovalOption, ApprovalRequest, ApprovalResponse
+from contracts.trust import (
+    VERIFY_CORRECT,
+    VERIFY_WRONG,
+    ApprovalKind,
+    ApprovalOption,
+    ApprovalRequest,
+    ApprovalResponse,
+    ItemVerification,
+)
 from contracts.verify import (
     GroundingResult,
     GroundRequest,
@@ -126,6 +137,25 @@ def _basket_capacity(robot_id: str) -> int:
         return int(load_robot(robot_id).basket_capacity)
     except Exception:  # noqa: BLE001 - unknown robot / no fixtures: the default rover basket
         return DEFAULT_BASKET_CAPACITY
+
+
+def _ripeness(score: float) -> str:
+    """Shopper words for a freshness score (produce review labels)."""
+    if score >= 0.85:
+        return "ripe: eat today or tomorrow"
+    if score >= 0.7:
+        return "ready in 2-3 days"
+    return "firm: ripens in about 4 days"
+
+
+def _verify_items_on() -> bool:
+    """PICKY_VERIFY_ITEMS (default on): photo verification cards for every purchased unit."""
+    return bool(setting("picky_verify_items", True))
+
+
+def _unload_group(step: Any) -> bool:
+    """A step of the 0.2.4 checkout unload sequence (group 'unload:<n>')."""
+    return bool(step.group_id and step.group_id.startswith("unload:"))
 
 
 async def _run_to_completion(coro: Awaitable[Any]) -> Any:
@@ -185,6 +215,13 @@ class _Run:
         self.scan_frames: dict[str, Any] = {}  # slot_id -> last BLURRED scan frame (pick_choice ranking)
         self.unloaded: Counter[str] = Counter()  # sku -> units dropped off at the checkout mid-run (basket full)
         self.dropoffs = 0
+        # 0.2.4 checkout unload by the arm: unit number per 'unload:<n>' group, total, gate checked once
+        self.unload_total = sum(
+            1 for st in plan.steps if isinstance(st, GraspStep) and getattr(st, "source", "shelf") == "basket"
+        )
+        self.unload_gate = False
+        self.unload_numbers: dict[str, int] = {}  # 'unload:<n>' group -> unit number after the gate's re-layout
+        self.rejections: Counter[tuple[str | None, int | None]] = Counter()  # (item_id, unit) -> 'wrong' answers
 
 
 class PlanLoop:
@@ -200,8 +237,11 @@ class PlanLoop:
         heartbeat_s: float = DEFAULT_HEARTBEAT_S,
         plan_timeout_s: float = DEFAULT_PLAN_TIMEOUT_S,
         on_brain_step: BrainStepHook | None = None,
+        verify_items: bool | None = None,
     ) -> None:
         self.s = services
+        self.verify_items = verify_items
+        """0.2.4 photo verification cards (None = PICKY_VERIFY_ITEMS)."""
         self.on_brain_step = on_brain_step
         """Called with every mirrored ``brain.step`` (the brain keeps them in its per-robot ring for recent_steps)."""
         self.plan_timeout_s = plan_timeout_s
@@ -370,8 +410,19 @@ class PlanLoop:
 
     async def _run_step(self, run: _Run, i: int) -> str:
         plan, step = run.plan, run.plan.steps[i]
+        if _unload_group(step) and not run.unload_gate:
+            run.unload_gate = True
+            await self._unload_gate(run)
+            return "again"  # the gate may skip / insert steps at i: re-read the plan
         # mandate / budget gate before the FIRST unit of an item (plan mode; tools mode: the v0.2 executor does it)
-        if isinstance(step, GraspStep) and run.mode == "plan" and step.item_id and step.item_id not in run.line_checked:
+        from_shelf = not (isinstance(step, GraspStep) and getattr(step, "source", "shelf") == "basket")
+        if (
+            isinstance(step, GraspStep)
+            and from_shelf
+            and run.mode == "plan"
+            and step.item_id
+            and step.item_id not in run.line_checked
+        ):
             gate = await self._check_line(run, step)
             if gate == "deny":
                 step.status = StepStatus.FAILED
@@ -389,7 +440,7 @@ class PlanLoop:
             if gate == "ask":
                 plan.steps.insert(i, self._threshold_question(run, step))
                 return "again"
-        if isinstance(step, GraspStep) and run.mode == "plan" and run.held is None:
+        if isinstance(step, GraspStep) and from_shelf and run.mode == "plan" and run.held is None:
             dropoff = await self._dropoff_steps(run, step)
             if dropoff:
                 plan.steps[i:i] = dropoff
@@ -415,6 +466,8 @@ class PlanLoop:
             tier=planned,
             inserted_by=step.inserted_by,
         )
+        if isinstance(step, GraspStep) and not from_shelf and attempt == 1:
+            await self._unload_event(run, step, "started")
         ctx = ExecContext(
             goal_id=plan.goal_id,
             plan_id=plan.plan_id,
@@ -581,6 +634,21 @@ class PlanLoop:
                 )
                 assert f is not None
                 return await self._recover(run, i, f, att, baseline=baseline)
+        # 3b. 0.2.4: the shopper checks a photo of the unit in the gripper (correct / wrong; auto-accept on silence)
+        if isinstance(step, GraspStep) and from_shelf and run.mode == "plan" and self._verify_on():
+            answer = await self._verify_item(run, step, att)
+            if answer == VERIFY_WRONG:
+                f = StepFailure(
+                    plan_id=plan.plan_id,
+                    step_id=step.step_id,
+                    step_kind=step.kind,
+                    attempt=attempt,
+                    kind="postcondition",
+                    code="wrong_item_grasped",
+                    message="the shopper says it is the wrong item (photo check): putting it back",
+                    item_id=step.item_id,
+                )
+                return await self._recover(run, i, f, att, baseline=baseline)
         # 4. commit
         return await self._succeed(run, step, att)
 
@@ -597,6 +665,11 @@ class PlanLoop:
         if provisional:
             run.state.provisional_open = True
         await self._complete(run, step, att, effects, note=note)
+        if isinstance(step, VerifyStep) and _unload_group(step):
+            await self._unload_event(run, step, "verified", verdict=att.post)
+            await self._counter_card(run, step, att)
+        elif isinstance(step, HandoffStep) and step.group_id == "checkout" and run.unload_gate and run.unload_total:
+            await self._unload_event(run, step, "done")
         return "next"
 
     async def _complete(
@@ -622,6 +695,8 @@ class PlanLoop:
         kinds = COMMIT_ON_VERIFIED.get(step.kind, ())
         if isinstance(step, PlaceStep) and step.destination == "shelf":
             kinds = ("return_to_shelf",)
+        elif isinstance(step, PlaceStep) and step.destination == "counter":
+            kinds = ("unload_to_counter",)
         out: list[EffectRecord] = []
         for kind in kinds:
             scope = (step.item_id or step.step_id) if kind == "add_cart_line" else step.step_id
@@ -718,6 +793,13 @@ class PlanLoop:
                 return None
             unsure = provisional or any(r.provisional and r.item_id == item.item_id for r in run.ledger.values())
             return await self._add_line(run, item, item.qty, provisional=unsure)
+        if kind == "unload_to_counter":
+            assert isinstance(step, PlaceStep)
+            unit = run.held
+            run.held = None
+            spot = step.counter.index if step.counter is not None else None
+            await self._unload_event(run, step, "placed")
+            return {"sku": step.sku, "instance_id": unit.instance_id if unit else None, "counter_spot": spot}
         if kind in ("unload_basket", "return_to_shelf"):
             return {}
         return {}
@@ -875,6 +957,8 @@ class PlanLoop:
             mode=run.mode,
         )
         decision = decide_recovery(policy, rctx)
+        if _unload_group(step):
+            decision = await self._unload_decision(run, step, failure, decision)
         rid = decision.rule_id or "_fallback"
         run.rule_failures[step.step_id][rid] = run.rule_failures[step.step_id].get(rid, 0) + 1
         att.decision = decision
@@ -927,6 +1011,10 @@ class PlanLoop:
             step.status = StepStatus.FAILED
             await self._close_item(run, step.item_id, "unavailable", decision.reason)
             await self._complete(run, step, att, [], note="ordering online")
+            return "next"
+        if action == "skip_item" and _unload_group(step):  # the unit stays in the basket: the handoff bags it
+            await self._skip_unload_group(run, step, decision.reason)
+            await self._complete(run, step, att, [], note="left in the basket for the handoff")
             return "next"
         if action == "skip_item":
             optional = bool(item and item.optional) or step.optional
@@ -1354,9 +1442,11 @@ class PlanLoop:
         robot = self.s.require("robot")
         st = await robot.state(run.plan.robot_id)
         held_sku = None
-        if st.holding:
+        counter: Counter[str] = Counter()
+        if st.holding or run.unload_total:
             units = await robot.list_instances(run.plan.robot_id)
-            held_sku = next((u.sku for u in units if u.instance_id == st.holding), None)
+            held_sku = next((u.sku for u in units if u.instance_id == st.holding), None) if st.holding else None
+            counter = Counter(u.sku for u in units if getattr(u, "on_counter", False))
         if run.slot_geom is None:
             run.slot_geom = {}
             catalog = getattr(self.s, "catalog", None)
@@ -1378,6 +1468,7 @@ class PlanLoop:
             holding_instance_id=st.holding,
             holding_sku=held_sku,
             basket_counts=dict(Counter(st.basket_skus)),
+            counter_counts=dict(counter),
             approvals=dict(run.answers),
             slots=run.slot_geom,
         )
@@ -1633,6 +1724,44 @@ class PlanLoop:
         run.answers[req.approval_id] = resp.approved
         return resp
 
+    @staticmethod
+    def _with_thumbnails(run: _Run, slot_id: str, choice: PickChoice) -> PickChoice:
+        """Produce review photos: candidates without a thumbnail get a crop of the last BLURRED scan frame of the
+        slot (the unit's pixel box), so the shopper sees the actual units ('Which avocados?')."""
+        frame = run.scan_frames.get(slot_id)
+        if frame is None or all(c.thumbnail_b64 for c in choice.candidates):
+            return choice
+        if not getattr(frame, "blurred", False):
+            return choice  # section 8: only blurred pixels leave the backend
+        boxes = {i.instance_id: i.bbox for i in getattr(frame, "instances", []) if i.bbox is not None}
+        try:
+            import base64
+            import io
+
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(base64.b64decode(frame.jpeg_b64))).convert("RGB")
+        except Exception:  # noqa: BLE001 - no Pillow / bad JPEG: options without photos
+            return choice
+        out = []
+        for c in choice.candidates:
+            box = c.bbox or boxes.get(c.instance_id)
+            if c.thumbnail_b64 or box is None:
+                out.append(c)
+                continue
+            pad = 0.25
+            x0, y0 = max(0, int(box.x - box.w * pad)), max(0, int(box.y - box.h * pad))
+            x1, y1 = min(img.width, int(box.x + box.w * (1 + pad))), min(img.height, int(box.y + box.h * (1 + pad)))
+            if x1 - x0 < 4 or y1 - y0 < 4:
+                out.append(c)
+                continue
+            crop = img.crop((x0, y0, x1, y1))
+            crop.thumbnail((160, 160))
+            buf = io.BytesIO()
+            crop.save(buf, format="JPEG", quality=80)
+            out.append(c.model_copy(update={"thumbnail_b64": base64.b64encode(buf.getvalue()).decode()}))
+        return choice.model_copy(update={"candidates": out})
+
     async def _pick_choice(self, run: _Run, step: AskUserStep, item: Any) -> PickChoice:
         """Freshness top-k for produce: v0.2 ``perception.rank_freshness`` on the last blurred scan frame (thumbnails +
         reasons), else the sim ground truth ranking (deterministic)."""
@@ -1664,13 +1793,16 @@ class PlanLoop:
         multi = False
         on_request = None
         open_units: list[int] = []
+        choice: PickChoice | None = None
         if step.ask_kind == "pick_choice" and item is not None and item.slot_id and item.sku:
             choice = await self._pick_choice(run, step, item)
+            choice = self._with_thumbnails(run, item.slot_id, choice)
             options = [
                 ApprovalOption(
                     option_id=c.instance_id,
-                    label=f"#{c.rank} freshness {c.score:.2f}",
-                    detail=c.reason or None,
+                    label=f"#{c.rank} {_ripeness(c.score)}",
+                    detail=(c.reason if c.reason and c.reason != "sim ground truth" else None)
+                    or f"freshness {c.score:.2f} (sim ground truth)",
                     thumbnail_b64=c.thumbnail_b64,
                 )
                 for c in sorted(choice.candidates, key=lambda c: c.rank)
@@ -1691,9 +1823,16 @@ class PlanLoop:
         resp = await self._ask(
             run, step.ask_kind, step.question, options, item, step, multi=multi, on_request=on_request
         )
-        if step.ask_kind == "pick_choice" and resp.approved and resp.chosen():
+        picks = resp.chosen() if step.ask_kind == "pick_choice" and resp.approved else []
+        if step.ask_kind == "pick_choice" and not picks and choice is not None and choice.candidates:
+            # 0.2.4 produce review: no answer (timeout) -> the robot's best guess, labelled as such
+            best = [c.instance_id for c in sorted(choice.candidates, key=lambda c: c.rank)]
+            picks = best[: max(1, len(open_units))]
+            why = "no answer in time" if resp.decision == "timeout" else "no choice made"
+            await self._mirror(run, step, f"{why}: taking #1 freshness pick (robot's best guess)")
+        if step.ask_kind == "pick_choice" and picks:
             # chosen unit k -> the k-th remaining unit, on BOTH its ground_target and its grasp (a re-ground keeps it)
-            for unit, choice_id in zip(open_units, resp.chosen(), strict=False):
+            for unit, choice_id in zip(open_units, picks, strict=False):
                 for s in run.plan.steps:
                     if (
                         s.item_id == step.item_id
@@ -1778,6 +1917,362 @@ class PlanLoop:
     # =================================================================================================================
     # misc
     # =================================================================================================================
+    # =================================================================================================================
+    # 0.2.4 photo verification of every purchased unit
+    # =================================================================================================================
+    async def _photo(self, run: _Run, att: StepAttempt | None, cameras: list[str]) -> Any:
+        """A blurred, retained photo for a verification card: the step's own evidence frames first (already taken
+        for the verifier), else a fresh capture through ``services.evidence`` (face-blurred before it is kept)."""
+        frames = list(att.post.frames) if att is not None and att.post is not None else []
+        for cam in cameras:
+            ref = next((f for f in frames if f.camera_id.endswith(f".{cam}") and f.blurred), None)
+            if ref is not None:
+                return ref
+        evidence = getattr(self.s, "evidence", None)
+        if evidence is None:
+            return None
+        try:
+            refs = await asyncio.wait_for(
+                evidence.capture_refs(run.plan.robot_id, cameras[:1], context={"purpose": "verification_photo"}), 4.0
+            )
+        except Exception as exc:  # noqa: BLE001 - a card without a photo still asks
+            log.debug("verification photo failed: %s", exc)
+            return None
+        return next((r for r in refs if r.blurred), None)
+
+    async def _verify_item(self, run: _Run, step: GraspStep, att: StepAttempt) -> str:
+        """Send the shopper the wrist photo of the unit just grasped ('Is this the right Mild Chunky Salsa?') and wait
+        for correct / wrong; no answer within PICKY_VERIFY_AUTO_ACCEPT_S -> 'auto-accepted' (labelled). Beyond
+        PICKY_VERIFY_MAX_REJECTIONS 'wrong' answers for one unit, or on a backend without a put-back primitive, a
+        'wrong' is noted and the unit kept (staff swap it at the counter). Returns VERIFY_CORRECT / VERIFY_WRONG."""
+        plan = run.plan
+        item = plan.item(step.item_id)
+        name = (item.name if item is not None else None) or step.target.description or step.target.sku
+        key = (step.item_id, step.unit)
+        auto_s = max(1.0, float(setting("picky_verify_auto_accept_s", 20.0) or 20.0))
+        ref = await self._photo(run, att, ["wrist", "front"])
+        held = run.held
+        vid = f"ver-{plan.plan_id}-{step.step_id}-a{step.attempts}"
+        ver = ItemVerification(
+            verification_id=vid,
+            trip_id=plan.trip_id,
+            goal_id=None if plan.goal_id.startswith("adhoc-") else plan.goal_id,
+            robot_id=plan.robot_id,
+            store_id=plan.store_id,
+            user_id=plan.user_id or STAFF_USER_ID,
+            sku=step.target.sku,
+            name=name,
+            item_id=step.item_id,
+            unit=step.unit,
+            question=f"Is this the right {name}?",
+            photo_url=f"/api/evidence/{ref.frame_id}.jpg" if ref is not None else None,
+            frame_id=ref.frame_id if ref is not None else None,
+            camera_id=ref.camera_id if ref is not None else None,
+            auto_accept_s=auto_s,
+            attempt=run.rejections[key] + 1,
+        )
+        await self._pub(run, "item.verification", verification=ver)
+        req = ApprovalRequest(
+            approval_id=vid,
+            trip_id=plan.trip_id,
+            goal_id=ver.goal_id,
+            robot_id=plan.robot_id,
+            store_id=plan.store_id,
+            user_id=ver.user_id,
+            kind=ApprovalKind.VERIFY_ITEM,
+            title=ver.question,
+            sku=step.target.sku,
+            options=[
+                ApprovalOption(option_id=VERIFY_CORRECT, label="✓ Correct"),
+                ApprovalOption(option_id=VERIFY_WRONG, label="✗ Wrong item"),
+            ],
+            expires_s=auto_s,
+            payload={
+                "photo_url": ver.photo_url,
+                "frame_id": ver.frame_id,
+                "instance_id": held.instance_id if held is not None else None,
+                "verification": True,
+            },
+        )
+        resp = await self._ask_raw(run, req)
+        if resp.decision == "timeout":
+            status, by, answer = "auto_accepted", "auto", VERIFY_CORRECT
+        elif resp.approved and VERIFY_WRONG not in resp.chosen():
+            status, by, answer = "accepted", "user", VERIFY_CORRECT
+        else:
+            status, by, answer = "rejected", "user", VERIFY_WRONG
+        await self._pub(
+            run,
+            "item.verification",
+            verification=ver.model_copy(update={"status": status, "decided_by": by, "decided_at": utcnow()}),
+        )
+        if answer == VERIFY_WRONG:
+            run.rejections[key] += 1
+            caps = await self._caps(run)
+            t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
+            limit = int(setting("picky_verify_max_rejections", 1) or 1)
+            if run.rejections[key] > limit or (t0 is not None and not t0.place_back):
+                await self._mirror(run, step, "marked wrong: keeping it for staff to swap at the counter")
+                return VERIFY_CORRECT
+        else:
+            await self._mirror(run, step, f"photo check {status.replace('_', '-')}")
+        return answer
+
+    async def _counter_card(self, run: _Run, step: PlanStep, att: StepAttempt) -> None:
+        """Unload: the photo of the unit on the counter as a verification card (non-blocking: it is bought already;
+        auto-accepted after PICKY_VERIFY_AUTO_ACCEPT_S unless the shopper flags it)."""
+        if not self._verify_on():
+            return
+        sku = next(
+            (st.target.sku for st in run.plan.steps if st.group_id == step.group_id and isinstance(st, GraspStep)), ""
+        )
+        item = run.plan.item(step.item_id)
+        name = (item.name if item is not None else None) or sku
+        ref = await self._photo(run, att, ["front"])
+        auto_s = max(1.0, float(setting("picky_verify_auto_accept_s", 20.0) or 20.0))
+        ver = ItemVerification(
+            verification_id=f"ver-{run.plan.plan_id}-{step.step_id}",
+            trip_id=run.plan.trip_id,
+            robot_id=run.plan.robot_id,
+            store_id=run.plan.store_id,
+            user_id=run.plan.user_id or STAFF_USER_ID,
+            sku=sku,
+            name=name,
+            item_id=step.item_id,
+            unit=step.unit,
+            question=f"{name} is on the counter — looks right?",
+            photo_url=f"/api/evidence/{ref.frame_id}.jpg" if ref is not None else None,
+            frame_id=ref.frame_id if ref is not None else None,
+            camera_id=ref.camera_id if ref is not None else None,
+            status="auto_accepted",
+            decided_by="auto",
+            auto_accept_s=auto_s,
+            decided_at=utcnow(),
+        )
+        await self._pub(run, "item.verification", verification=ver)
+
+    def _verify_on(self) -> bool:
+        return _verify_items_on() if self.verify_items is None else self.verify_items
+
+    async def _ask_raw(self, run: _Run, req: ApprovalRequest) -> ApprovalResponse:
+        """Ask through the trip flow (keeps ``expires_s`` for verify_item), the broker, or the injected answer."""
+        trips = getattr(self.s, "trips", None)
+        approvals = getattr(self.s, "approvals", None)
+        try:
+            if trips is not None and run.plan.trip_id:
+                resp = await trips.ask(run.plan.trip_id, req)
+            elif approvals is not None:
+                resp = await approvals.request(req)
+            else:
+                resp = await self.answer(req)
+        except asyncio.CancelledError:
+            if approvals is not None:
+                try:
+                    await asyncio.shield(approvals.cancel(req.approval_id, "plan cancelled"))
+                except Exception:  # noqa: BLE001
+                    pass
+            raise
+        run.answers[req.approval_id] = resp.approved
+        return resp
+
+    # =================================================================================================================
+    # 0.2.4 checkout unload by the arm
+    # =================================================================================================================
+    async def _unload_gate(self, run: _Run) -> bool:
+        """Before the first unload step (0.2.4 checkout unload):
+
+        1. no basket -> counter primitive on this backend (an Isaac worker older than 0.2.4): skip every unload step,
+           the handoff unloads the basket at once;
+        2. reconcile with the REAL basket: unload groups of a SKU beyond the units actually in it (dropped off mid-trip
+           when the basket was full, item skipped / ordered online after the plan was made) are skipped silently;
+        3. re-lay the kept units on the counter spots left -> right from spot 1 (``planogram.counter_spots``), renumber
+           them 'Unloading k/n', recompute the per-SKU on-counter counts and re-insert the short drives along the
+           counter where the next spot is in another bay.
+        Returns True when nothing is left to unload by arm."""
+        plan = run.plan
+        caps = await self._caps(run)
+        t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
+        order: list[str] = []
+        for st in plan.steps:
+            if _unload_group(st) and st.status not in CLOSED_STEP_STATUSES and st.group_id not in order:
+                order.append(st.group_id or "")
+        members = {gid: [st for st in plan.steps if st.group_id == gid] for gid in order}
+
+        def skip(gid: str) -> None:
+            for st in members[gid]:
+                if st.status not in CLOSED_STEP_STATUSES:
+                    st.status = StepStatus.SKIPPED
+
+        if t0 is not None and not t0.basket_unload:
+            for gid in order:
+                skip(gid)
+            run.unload_total = 0
+            if order:
+                await self._mirror(
+                    run, members[order[0]][0], "no basket-unload primitive here: the handoff unloads the basket at once"
+                )
+            return True
+        try:
+            basket = Counter((await self.s.require("robot").state(plan.robot_id)).basket_skus)
+            spots = counter_spots(await self.s.require("catalog").get_planogram(plan.store_id))
+        except Exception as exc:  # noqa: BLE001 - keep the compiled layout; the verifier still checks every unit
+            log.warning("unload reconcile failed: %s", exc)
+            return False
+        seen: Counter[str] = Counter()
+        keep: list[str] = []
+        for gid in order:
+            grasp = next((st for st in members[gid] if isinstance(st, GraspStep)), None)
+            sku = grasp.target.sku if grasp is not None else ""
+            seen[sku] += 1
+            if grasp is None or seen[sku] > basket.get(sku, 0) or len(keep) >= len(spots):
+                skip(gid)
+            else:
+                keep.append(gid)
+        total = len(keep)
+        run.unload_total = total
+        if not total:
+            return True
+        on_counter: Counter[str] = Counter()
+        prev = spots[0].approach_pose
+        for k, gid in enumerate(keep):
+            spot, n = spots[k], k + 1
+            run.unload_numbers[gid] = n
+            grasp = next(st for st in members[gid] if isinstance(st, GraspStep))
+            sku = grasp.target.sku
+            on_counter[sku] += 1
+            name = (plan.item(grasp.item_id).name if plan.item(grasp.item_id) else None) or sku
+            head = f"Unloading {n}/{total}: {name}"
+            first: PlanStep | None = None
+            for st in members[gid]:
+                if isinstance(st, NavigateToStep):  # re-inserted below where the bay changes
+                    st.status = StepStatus.SKIPPED
+                    continue
+                first = first or st
+                st.group_label = head
+                if isinstance(st, GroundTargetStep):
+                    st.title = f"{head}: find it in the basket"
+                elif isinstance(st, GraspStep):
+                    st.title = f"{head}: grasp it from the basket"
+                elif isinstance(st, PlaceStep):
+                    st.counter = spot
+                    st.title = f"{head} → counter spot {spot.index + 1}"
+                    st.preconditions, st.postconditions = default_conditions(
+                        "place", sku=sku, destination="counter", counter_count=on_counter[sku]
+                    )
+                elif isinstance(st, VerifyStep):
+                    st.title = f"{head} → counter ✓"
+                    st.condition = AllOf(
+                        of=[
+                            ItemOnCounter(sku=sku, min_count=on_counter[sku], note=f"{name} on the counter"),
+                            GripperEmpty(note="not in the gripper"),
+                        ]
+                    )
+            if first is not None and spot.approach_pose.distance_to(prev) > 1e-6:
+                pre, post = default_conditions("navigate_to", goal_pose=spot.approach_pose)
+                nav = NavigateToStep(
+                    step_id=f"{first.step_id}.bay",
+                    title=f"{head}: shift along the counter",
+                    target="checkout",
+                    goal_pose=spot.approach_pose,
+                    preconditions=pre,
+                    postconditions=post,
+                    item_id=first.item_id,
+                    unit=first.unit,
+                    group_id=gid,
+                    group_label=head,
+                    optional=True,
+                    origin="replan",
+                )
+                plan.steps.insert(plan.steps.index(first), nav)
+            prev = spot.approach_pose
+        return False
+
+    async def _skip_unload_group(self, run: _Run, step: PlanStep, reason: str) -> None:
+        gid = step.group_id
+        for st in run.plan.steps:
+            if st.group_id == gid and st.status not in CLOSED_STEP_STATUSES and st is not step:
+                st.status = StepStatus.SKIPPED
+        if step.status not in CLOSED_STEP_STATUSES:
+            step.status = StepStatus.SKIPPED
+        await self._unload_event(run, step, "skipped", note=reason)
+
+    async def _unload_decision(
+        self, run: _Run, step: PlanStep, failure: StepFailure, decision: RecoveryDecision
+    ) -> RecoveryDecision:
+        """Unload steps never re-pick from a shelf or close the (already bought) item: one free re-try of the step,
+        adopt a unit already in the gripper, else skip this unit's unload (it stays in the basket for the handoff)."""
+        if failure.code == "already_holding":
+            return decision.model_copy(update={"action": "adopt_held", "reason": "already holding it"})
+        if failure.kind == "verifier_uncertain" and step.kind in ("place", "verify"):
+            return decision.model_copy(
+                update={"action": "accept_provisional", "insert": [], "reason": "counter view unclear: accepted"}
+            )
+        if failure.code in ("disconnected", "busy", "not_ready") or run.charged[step.step_id] <= 1:
+            return decision.model_copy(
+                update={"action": "retry", "rerun_failed_step": True, "insert": [], "reason": f"{decision.reason}"}
+            )
+        return decision.model_copy(
+            update={
+                "action": "skip_item",
+                "rerun_failed_step": False,
+                "insert": [],
+                "reason": "leaving it for the handoff",
+            }
+        )
+
+    async def _unload_event(
+        self, run: _Run, step: PlanStep, status: str, *, verdict: Verdict | None = None, note: str = ""
+    ) -> None:
+        """``checkout.unload``: 'Unloading 3/9: Mild Chunky Salsa → counter ✓' for the live page and the plan list."""
+        gid = step.group_id or ""
+        try:
+            n = int(gid.split(":", 1)[1]) if gid.startswith("unload:") else run.unload_total
+        except ValueError:
+            n = 1
+        n = run.unload_numbers.get(gid, n)
+        sku = getattr(getattr(step, "target", None), "sku", None) or getattr(step, "sku", None)
+        if sku is None:
+            for st in run.plan.steps:
+                if st.group_id == gid and isinstance(st, GraspStep):
+                    sku = st.target.sku
+                    break
+        name = (run.plan.item(step.item_id).name if run.plan.item(step.item_id) else None) or sku or "item"
+        spot = next(
+            (
+                st.counter.index
+                for st in run.plan.steps
+                if st.group_id == gid and isinstance(st, PlaceStep) and st.counter is not None
+            ),
+            None,
+        )
+        photo = None
+        if verdict is not None:
+            photo = next((f"/api/evidence/{f.frame_id}.jpg" for f in verdict.frames if f.blurred), None)
+        total = run.unload_total
+        texts = {
+            "started": f"Unloading {n}/{total}: {name}",
+            "grasped": f"Unloading {n}/{total}: {name} out of the basket",
+            "placed": f"Unloading {n}/{total}: {name} → counter",
+            "verified": f"Unloading {n}/{total}: {name} → counter ✓",
+            "skipped": f"Unloading {n}/{total}: {name} left in the basket ({note})",
+            "failed": f"Unloading {n}/{total}: {name} failed",
+            "done": f"Basket empty: {total} item{'s' if total != 1 else ''} on the counter",
+        }
+        await self._pub(
+            run,
+            "checkout.unload",
+            plan_id=run.plan.plan_id,
+            step_id=step.step_id,
+            n=max(1, min(n, max(total, 1))) if status != "done" else max(1, total),
+            total=total,
+            sku=sku or "",
+            name=name,
+            status=status,
+            counter_spot=spot,
+            photo_url=photo,
+            text=texts.get(status, status),
+        )
+
     async def _caps(self, run: _Run) -> list[VlaCapabilities]:
         if run.caps is None:
             vla = getattr(self.s, "vla", None)

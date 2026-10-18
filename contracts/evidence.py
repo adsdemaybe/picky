@@ -103,6 +103,9 @@ class TruthSnapshot(Model):
     battery_pct: float | None = None
     holding: ItemInstance | None = Field(None, description="What is ACTUALLY in the gripper.")
     basket: list[ItemInstance] = Field(default_factory=list)
+    counter: list[ItemInstance] = Field(
+        default_factory=list, description="0.2.4: units this robot unloaded onto the checkout counter (on_counter)."
+    )
     slots: dict[SlotId, SlotTruth] = Field(default_factory=dict, description="Requested slots + the one in view.")
     visible_slots: dict[CameraId, list[SlotId]] = Field(default_factory=dict)
     occluded: list[CameraId] = Field(default_factory=list, description="Cameras whose frames show nothing useful.")
@@ -115,6 +118,9 @@ class TruthSnapshot(Model):
 
     def basket_counts(self) -> dict[Sku, int]:
         return dict(Counter(i.sku for i in self.basket))
+
+    def counter_counts(self) -> dict[Sku, int]:
+        return dict(Counter(i.sku for i in self.counter))
 
     def truth_hash(self) -> str:
         """Deterministic seed: the same truth gives byte-identical fake frames (fake frame ids embed it)."""

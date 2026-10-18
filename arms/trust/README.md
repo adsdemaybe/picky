@@ -75,6 +75,15 @@ uv sync --extra trust && STRIPE_SECRET_KEY=sk_test_... PICKY_REAL_ARMS=trust mak
 - [ ] Ledger screen shows mandate, decisions, transparency (no sponsored), receipts, audit chain
 - [x] No secrets committed; env vars already in `.env.example` (`STRIPE_SECRET_KEY`, `VISA_*`, `PICKY_SIGNING_KEY`)
 
+## Judges' demo (contracts 0.2.4)
+
+- `agent.py`: the Visa payment agent. Wraps `TrustCore.checkout` (mandate re-check, adapter, signed receipt, audit
+  chain) in a `payment.agent_step` timeline: cart mandate → intent check → passkey requested / verified → mock Visa
+  Intelligent Commerce agentic token (no PAN, amount-capped, 10 min) → authorized → captured → receipt signed →
+  ledger. The LLM only narrates (grounded; `PICKY_PAYMENT_AGENT_LLM`). `PICKY_PAYMENT_AGENT=false` = plain checkout.
+- Limitation: the VIC token / auth are simulated (Visa sandbox access pending); Stripe test mode runs the charge when
+  `STRIPE_SECRET_KEY` is set.
+
 ## Known limitations
 - Ledger, used approvals and idempotency keys live in memory (lost on restart).
 - Category matching is exact (case-insensitive) on `CartLine.category`; no taxonomy.

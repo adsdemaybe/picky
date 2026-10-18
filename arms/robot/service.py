@@ -33,7 +33,7 @@ from arms.robot.fake import FakeRobot
 from arms.robot.rover import Battery, heading_to_dock, on_dock
 from arms.robot.world import live_planogram, load_scene
 from contracts.cameras import parse_camera_id
-from contracts.common import CameraId, InstanceId, Pose2D, RobotId, Sku, SlotId, StoreId, TripId
+from contracts.common import CameraId, InstanceId, Point3, Pose2D, RobotId, Sku, SlotId, StoreId, TripId
 from contracts.events import make_event
 from contracts.planogram import Planogram, RobotSpec
 from contracts.services import Services
@@ -41,6 +41,7 @@ from contracts.sim import (
     ARM_IK_CAPABILITY,
     ARM_JOINTS_CAPABILITY,
     ARM_JOINTS_HZ,
+    BASKET_UNLOAD_CAPABILITY,
     MOTION_COMMANDS,
     POLICY_CAMERAS,
     ArmIkCmd,
@@ -53,7 +54,9 @@ from contracts.sim import (
     ListInstancesCmd,
     NavigateCmd,
     PickCmd,
+    PickFromBasketCmd,
     PlaceInBasketCmd,
+    PlaceOnCounterCmd,
     ResetCmd,
     RobotError,
     RobotState,
@@ -271,6 +274,10 @@ class SimRobot:
             owner, kind = parse_camera_id(camera_id)
         except ValueError as exc:
             raise RobotError("unknown_robot", str(exc)) from exc
+        if kind == "director":
+            return await self._capture_director(owner, camera_id)
+        if kind == "perceived":
+            raise RobotError("unknown_robot", f"{camera_id!r} is produced by the cameras service, not the robot")
         if kind != "ceiling":
             return await self.capture(owner, kind)
         store_id = owner
@@ -287,6 +294,17 @@ class SimRobot:
         frame = res.frame.model_copy(update={"camera_id": camera_id, "store_id": store_id, "camera": "ceiling"})
         self._frame_cache[camera_id] = frame
         return frame
+
+    async def _capture_director(self, robot_id: RobotId, camera_id: CameraId) -> CameraFrame:
+        """``<robot>.director`` (0.2.3): the Isaac worker's chase camera (worker run with PICKY_SIM_DIRECTOR), else the
+        2D fake's follow view."""
+        spec = self._spec(robot_id)
+        if not await self._use_isaac(spec.store_id, robot_id):
+            return await self.fake.capture_camera(camera_id)
+        res = await self._isaac(spec, CaptureCmd(cmd_id=new_id("cmd"), robot_id=robot_id, camera_id=camera_id))
+        if res.frame is None:
+            raise RobotError("internal", f"capture({camera_id}) returned no frame")
+        return self._frame_from(res.frame.model_copy(update={"camera": "director"}), spec, camera="director")
 
     async def list_instances(self, robot_id: RobotId, slot_id: SlotId | None = None) -> list[ItemInstance]:
         spec = self._spec(robot_id)
@@ -329,6 +347,49 @@ class SimRobot:
             return await self.fake.unload_basket(robot_id)
         res = await self._isaac(spec, UnloadBasketCmd(cmd_id=new_id("cmd"), robot_id=robot_id))
         return [i.model_copy(update={"store_id": i.store_id or spec.store_id}) for i in res.instances]
+
+    # ---- 0.2.4 checkout unload by the arm (optional extension; arms/robot/vla.py) -----------------------------------
+    def can_unload_to_counter(self, robot_id: RobotId) -> bool:
+        """True on the 2D fake and on an Isaac worker advertising ``basket_unload`` (older workers: False, so the
+        runner skips the per-unit unload and the handoff unloads the basket at once)."""
+        if self._on_isaac(robot_id):
+            return BASKET_UNLOAD_CAPABILITY in self._hello_caps
+        return True
+
+    async def pick_from_basket(
+        self, robot_id: RobotId, sku: Sku | None = None, instance_id: InstanceId | None = None
+    ) -> ItemInstance:
+        spec = self._spec(robot_id)
+        if not await self._use_isaac(spec.store_id, robot_id):
+            return await self.fake.pick_from_basket(robot_id, sku, instance_id)
+        if BASKET_UNLOAD_CAPABILITY not in self._hello_caps:
+            raise RobotError("not_ready", "this Isaac worker predates contracts 0.2.4 (no basket_unload)")
+        self._bat(robot_id).check_motion(robot_id)
+        cmd = PickFromBasketCmd(cmd_id=new_id("cmd"), robot_id=robot_id, sku=sku, instance_id=instance_id)
+        res = await self._isaac(spec, cmd)
+        picked_id = res.instance_id or instance_id
+        inst = next((i for i in res.instances if i.instance_id == picked_id), None) or (
+            res.instances[0] if res.instances else self._instances.get(picked_id or "")
+        )
+        if inst is None:
+            raise RobotError("internal", "pick_from_basket succeeded but returned no instance")
+        return inst.model_copy(update={"store_id": inst.store_id or spec.store_id})
+
+    async def place_on_counter(
+        self, robot_id: RobotId, position: Point3, yaw: float = 0.0, spot: int | None = None
+    ) -> RobotState:
+        spec = self._spec(robot_id)
+        if not await self._use_isaac(spec.store_id, robot_id):
+            return await self.fake.place_on_counter(robot_id, position, yaw, spot)
+        if BASKET_UNLOAD_CAPABILITY not in self._hello_caps:
+            raise RobotError("not_ready", "this Isaac worker predates contracts 0.2.4 (no basket_unload)")
+        cmd = PlaceOnCounterCmd(cmd_id=new_id("cmd"), robot_id=robot_id, position=position, yaw=yaw, spot=spot)
+        return self._state_from(spec, await self._isaac(spec, cmd))
+
+    async def counter_units(self, robot_id: RobotId) -> list[ItemInstance]:
+        """Units this robot put on the checkout counter (ground truth: Isaac instances with on_counter, or the fake)."""
+        units = await self.list_instances(robot_id)
+        return [u for u in units if u.on_counter]
 
     # ---- extras for the VLA layer (arms/robot/vla.py; not in the RobotService Protocol) ------------------------------
     def _on_isaac(self, robot_id: RobotId) -> bool:

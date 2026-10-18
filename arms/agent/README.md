@@ -171,6 +171,19 @@ the VLA + verifier are wired), `PICKY_PLAN_TIMEOUT_S` (20), `PICKY_VERIFY_TIMEOU
 - [ ] `add_to_cart` above the ask threshold → `request_approval` → retry with `approval_id`; checkout only via approval
 - [ ] Switching back to the fake by env flag alone works; README is current
 
+## Judges' demo (contracts 0.2.4)
+
+- Planner: the checkout draft step compiles the per-unit unload (`unload:<n>`: ground in the basket → grasp
+  `source=basket` → place `destination=counter` on `planogram.counter_spots` → verify `item_on_counter`), then the
+  handoff "Basket empty: hand off for payment". `PICKY_UNLOAD_BY_ARM=false` keeps the 0.2.3 handoff.
+- Runner: before the first unload step it checks `VlaCapabilities.basket_unload` (skip all when missing), reconciles
+  with the real basket (units dropped off mid-trip are skipped) and re-lays the kept units on spots 1..n; publishes
+  `checkout.unload`; unload failures retry once, then leave the unit for the handoff (never re-pick from a shelf).
+- Photo cards: after every shelf grasp a wrist photo goes to the shopper (`item.verification`, approval kind
+  `verify_item`); wrong → the `wrong_item` recovery (put back + re-pick); silence → auto-accepted. Produce review
+  options carry cropped blurred photos; timeout → the #1 freshness pick (labelled best guess).
+- Limitation: a "wrong" on a backend without put-back (Isaac) is noted and the unit kept for staff.
+
 ## Known limitations
 
 - Loop: plan mode covers shop / fetch goals with items; shelf_scan and return_to_dock goals stay on the v0.2 executor.

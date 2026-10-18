@@ -264,14 +264,19 @@ class VerifierBase:
     ) -> GroundingResult:
         target = request.target
         slot = truth.slots.get(target.slot_id or "")
-        units = [u for u in (slot.instances if slot else []) if u.sku == target.sku]
+        if target.slot_id is None:  # 0.2.4 checkout unload: the unit is in the robot's basket (basket camera)
+            units = [u for u in truth.basket if u.sku == target.sku]
+        else:
+            units = [u for u in (slot.instances if slot else []) if u.sku == target.sku]
         unit = next((u for u in units if u.instance_id == target.instance_id), None) if target.instance_id else None
         unit = unit or (units[0] if units else None)
         if unit is None:
             return GroundingResult(
                 grounding_id=request.grounding_id,
                 found=False,
-                reason=f"no {target.sku} on {target.slot_id or 'the shelf'}",
+                reason=f"no {target.sku} on {target.slot_id or 'the shelf'}"
+                if target.slot_id
+                else f"no {target.sku} in the basket",
                 methods_tried=["ground_truth"],
                 latency_ms=(time.monotonic() - t0) * 1000,
             )

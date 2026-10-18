@@ -293,6 +293,41 @@ Web-app hand-offs (details in [`docs/frontend-backend-map.md`](docs/frontend-bac
 - Planned (v0.3) for the online screens: offers across retailers, price history + verdicts, purchases / spending /
   running low, Cart Whisperer suggestions.
 
+## Judges' demo
+
+The live demo (contracts 0.2.3 + 0.2.4): the web app shows suggestion cards from Maya's purchase history ("You bought
+this 12 days ago — you usually buy it every 10 days"), the presenter clicks a few and orders them, and the Isaac sim
+is livestreamed on the page doing it, next to the robot's own camera with Perceptron Mk1.5 boxes.
+
+1. **Suggestions** — `GET /api/users/maya/suggestions?store_id=store_ave`: replenish / substitute / complement / deal
+   cards from the purchase-history database (SQLite `PICKY_PURCHASES_DB`, seeded with months of history for maya,
+   sam and jordan relative to "now"), only items in stock at the store; Gemini re-ranks and rewrites the reasons from
+   the cards' signals only (`ranked_by`), templates when it is unavailable. Thumbnails: `/api/products/{sku}/image.jpg`.
+2. **Order** — `POST /api/requests {"user_id":"maya","items":[{"sku":"SALSA-MILD","qty":1}],"store_id":"store_ave"}`:
+   one shop goal for exactly those SKUs, auto-executing, plan mode (planner → VLA → verifier).
+3. **Pictures to the human** — after every shelf grasp the wrist photo goes to the app as a verification card
+   (`item.verification`, `GET /api/verifications`, `POST /api/verifications/{id}` correct / wrong; wrong = put back +
+   re-pick; silence = "auto-accepted" after `PICKY_VERIFY_AUTO_ACCEPT_S`). Produce gets a review card with a photo of
+   each candidate unit ("Which avocados? #1 ripe…"); no answer → the robot's best guess, labelled.
+4. **Checkout unload by the arm** — at the counter the plan holds, per unit: find it in the basket (basket camera /
+   Perceptron point) → grasp from the basket → place on the next counter spot (left → right) → verify it is on the
+   counter (photo card). The Isaac worker animates the SO-101 reaching into the basket and the unit riding the gripper
+   to the counter (`pick_from_basket` / `place_on_counter`, capability `basket_unload`). The app's plan list and live
+   page show `checkout.unload` lines ("Unloading 3/9: Mild Chunky Salsa → counter ✓").
+5. **Visa payment agent** — only once the basket is verified empty: cart mandate → intent mandate checked in code →
+   passkey approval → mock Visa Intelligent Commerce agentic token (no PAN) → authorize + capture (Stripe test mode
+   when `STRIPE_SECRET_KEY` is set) → signed receipt → audit ledger, as `payment.agent_step` events
+   (`GET /api/trips/{id}/payment`). Labelled "Sandbox / simulated — no real money".
+6. **History** — the paid lines (with the verification photos) are appended to the purchase database
+   (`GET /api/users/maya/purchases`) and the cards change on the next visit.
+
+Livestream: `<img src="/api/cameras/rover-ave-1.director/stream.mjpg">` (chase view) and
+`<img src="/api/cameras/rover-ave-1.front.perceived/stream.mjpg">` (on-board camera + Perceptron boxes, "ground
+truth" boxes when Perceptron is unavailable or out of quota). `make demo` runs the whole flow on fakes (the summary
+prints the checkout unload and the payment timeline). Env: `PICKY_UNLOAD_BY_ARM`, `PICKY_VERIFY_ITEMS`,
+`PICKY_VERIFY_AUTO_ACCEPT_S`, `PICKY_VERIFY_MAX_REJECTIONS`, `PICKY_PRODUCE_REVIEW_TIMEOUT_S`, `PICKY_PURCHASES_DB`,
+`PICKY_SUGGESTIONS_LLM`, `PICKY_PAYMENT_AGENT`, `PICKY_PAYMENT_AGENT_LLM` (see `.env.example`).
+
 ## Sim
 
 - **2D fake (always available).** The robot arm's built-in top-down sim drives every robot in every store and draws

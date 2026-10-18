@@ -14,7 +14,11 @@ T0 ("scripted / oracle") mapping, one RobotService motion per step:
                  BEFORE any motion) -> robot.pick(slot, sku, grounding.instance_id or target.instance_id) (magic grasp)
     place        basket: robot.place_in_basket (empty gripper -> place_failed) · shelf (put back): FakeRobot /
                  SimRobot-on-the-fake ``put_back`` or a virtual unit from the overlay; Isaac -> unsupported_step
-    handoff      robot.unload_basket
+    handoff      robot.unload_basket (0.2.4: after the per-unit unload it only bags what is on the counter)
+    grasp source='basket' (0.2.4)      robot.pick_from_basket(sku, grounding.instance_id): the arm reaches back into the
+                 basket at the checkout counter (T0 always: the learned T1 policies are trained on shelf grasps)
+    place destination='counter' (0.2.4) robot.place_on_counter(spot.position): reach check against the spot's
+                 approach pose (slot_reachable), then release on the counter (``on_counter``)
 
 Contract rules kept here: ``exec_id`` is idempotent (same body = re-attach + replay after ``after_seq``, never a
 second motion; another body = one failed ``idempotency_conflict``); one running exec per robot (else failed ``busy`` at
@@ -206,6 +210,7 @@ class T0Vla:
                 step_kinds=list(T0_KINDS),
                 model_id="scripted",
                 place_back=self._can_put_back(robot, robot_id, st),
+                basket_unload=self._can_unload(robot, robot_id),
                 cancel_latency_ms=200.0 if st.backend == "isaac" else 50.0,
             ),
             self.t1.capability(robot_id, st.backend, robot=robot),
@@ -388,6 +393,9 @@ class T0Vla:
             if not req.allow_fallback:
                 raise _Fail("policy_unavailable", f"{tier} cannot execute on this wire")
             fell_back, tier = tier, T0
+        unload = getattr(req.step, "source", "shelf") == "basket" or getattr(req.step, "destination", "") == "counter"
+        if tier != T0 and unload:  # the learned policies are trained on shelf grasps: the checkout unload is T0
+            fell_back, tier = tier, T0
         return tier, fell_back
 
     async def _run(self, ex: _Exec) -> None:
@@ -562,6 +570,15 @@ class T0Vla:
                 bind(req.robot_id, trip_id=req.context.trip_id, store_id=st.store_id)
             except Exception:  # noqa: BLE001
                 pass
+
+    @staticmethod
+    def _can_unload(robot: Any, robot_id: RobotId) -> bool:
+        """0.2.4: basket -> counter primitives on this robot's backend (fake: yes; Isaac: worker capability)."""
+        probe = getattr(robot, "can_unload_to_counter", None)
+        try:
+            return bool(probe(robot_id)) if probe is not None else False
+        except Exception:  # noqa: BLE001
+            return False
 
     def _can_put_back(self, robot: Any, robot_id: RobotId, st: RobotState) -> bool:
         overlay = self._overlay()
@@ -753,6 +770,10 @@ class T0Vla:
             return await self._navigate(ex, robot, st, effects)
         if step.kind == "align":
             return await self._align(ex, robot, st)
+        if step.kind == "grasp" and getattr(step, "source", "shelf") == "basket":
+            return await self._grasp_basket(ex, robot, st, effects)
+        if step.kind == "place" and getattr(step, "destination", "basket") == "counter":
+            return await self._place_counter(ex, robot, st, effects)
         if step.kind == "grasp":
             return await self._grasp(ex, robot, st, effects)
         if step.kind == "place":
@@ -834,6 +855,50 @@ class T0Vla:
             self._mislabel(held, effects["mislabel"])
         await self._stage(ex, "lifting", 0.85)
         return f"grasped {target.sku} ({held.instance_id})"
+
+    async def _grasp_basket(self, ex: _Exec, robot: Any, st: RobotState, effects: dict[str, str]) -> str:
+        """0.2.4 checkout unload: take one unit of the target SKU out of the robot's own basket."""
+        req, step = ex.request, ex.request.step
+        target = step.target  # type: ignore[union-attr]
+        grounding = req.grounding
+        inst = (grounding.instance_id if grounding else None) or target.instance_id
+        if not self._can_unload(robot, req.robot_id):
+            raise _Fail("unsupported_step", "no basket -> counter primitive on this backend (Isaac worker < 0.2.4)")
+        await self._stage(ex, "reaching_into_basket", 0.25)
+        if "grasp_miss" in effects:
+            raise RobotError("grasp_failed", "gripper closed on air in the basket (injected)")
+        try:
+            held: ItemInstance = await robot.pick_from_basket(req.robot_id, target.sku, inst)
+        except RobotError as exc:
+            if exc.code == "no_instance" and inst is not None:  # the grounded unit moved: any unit of the SKU
+                held = await robot.pick_from_basket(req.robot_id, target.sku, None)
+            else:
+                raise
+        ex.ended_at = utcnow()
+        await self._stage(ex, "lifting", 0.85)
+        return f"took {target.sku} out of the basket ({held.instance_id})"
+
+    async def _place_counter(self, ex: _Exec, robot: Any, st: RobotState, effects: dict[str, str]) -> str:
+        """0.2.4 checkout unload: put the held unit on the counter spot (reach-checked like a shelf slot)."""
+        req, step = ex.request, ex.request.step
+        spot = step.counter  # type: ignore[union-attr]
+        if spot is None:
+            raise _Fail("precondition_failed", "place on the counter needs a counter spot")
+        if st.holding is None:
+            raise _Fail("place_failed", "nothing to put on the counter: the gripper is empty")
+        if not slot_reachable(st.pose, spot.approach_pose, spot.position):
+            dist = st.pose.distance_to(spot.approach_pose)
+            code: VlaErrorCode = "not_at_pose" if dist > NOT_AT_POSE_M else "out_of_reach"
+            raise _Fail(code, f"counter spot {spot.index + 1} not reachable ({dist:.2f} m from its approach pose)")
+        await self._stage(ex, "moving_to_counter", 0.4)
+        if "place_miss" in effects:
+            ex.ended_at = utcnow()
+            await self._stage(ex, "releasing", 0.9)
+            return f"placed {step.sku} on the counter"  # type: ignore[union-attr]  # the CLAIM: still holding
+        await robot.place_on_counter(req.robot_id, spot.position, spot.yaw, spot.index)
+        ex.ended_at = utcnow()
+        await self._stage(ex, "releasing", 0.9)
+        return f"placed {step.sku} on counter spot {spot.index + 1}"  # type: ignore[union-attr]
 
     async def _grasp_policy(self, ex: _Exec, robot: Any, slot: Slot, sku: str, inst: str | None) -> str:
         """T1 learned grasp (arms.robot.vla_t1): the policy drives the joints on Isaac; a CLAIM like every tier."""

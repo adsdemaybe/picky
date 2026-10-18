@@ -68,6 +68,7 @@ from contracts.plan import (
     ExecContext,
     GripperEmpty,
     GripperHolding,
+    ItemOnCounter,
     ItemOnShelf,
     LabelMatches,
     NotCond,
@@ -613,6 +614,15 @@ def evaluate_on_truth(
                 evidence=[ev],
                 observed={"label": label, "held_sku": unit.sku},
             )
+        if isinstance(atom, ItemOnCounter):
+            n = truth.counter_counts().get(atom.sku, 0)
+            return _av(
+                path,
+                atom,
+                "pass" if n >= atom.min_count else "fail",
+                f"{n} x {atom.sku} on the counter (want >= {atom.min_count})",
+                observed={"count": n},
+            )
         if isinstance(atom, ShelfTagReads):
             slot = truth.slots.get(atom.slot_id)
             tag = slot.shelf_tag_cents if slot else None
@@ -639,6 +649,9 @@ class StateFacts(Model):
     holding_instance_id: InstanceId | None = None
     holding_sku: Sku | None = None
     basket_counts: dict[Sku, int] = Field(default_factory=dict)
+    counter_counts: dict[Sku, int] = Field(
+        default_factory=dict, description="0.2.4: units this robot put on the checkout counter, per SKU."
+    )
     approvals: dict[str, bool] = Field(default_factory=dict)
     slots: dict[SlotId, SlotTruth] = Field(default_factory=dict, description="Slot geometry for slot_reachable.")
     ts: Timestamp = Field(default_factory=utcnow)
@@ -700,6 +713,15 @@ def evaluate_on_state(
             if atom.exact:
                 ok = ok and have == {s: n for s, n in atom.counts.items() if n}
             return _av(path, atom, "pass" if ok else "fail", f"robot state: basket {dict(sorted(have.items()))}", **st)
+        if isinstance(atom, ItemOnCounter):
+            n = facts.counter_counts.get(atom.sku, 0)
+            return _av(
+                path,
+                atom,
+                "pass" if n >= atom.min_count else "fail",
+                f"robot state: {n} x {atom.sku} on the counter",
+                **st,
+            )
         return _av(
             path,
             atom,

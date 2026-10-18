@@ -181,9 +181,10 @@ JsonScalar = str | int | float | bool | None
 Channel = Literal["web", "voice", "photon"]
 """User-facing channel a message or approval travels on."""
 
-CameraName = Literal["front", "wrist", "basket", "ceiling", "head", "overview"]
+CameraName = Literal["front", "wrist", "basket", "ceiling", "head", "overview", "director"]
 """Camera on a robot ('front' mast camera, SO-101 'wrist' camera, 'basket' camera) or a store 'ceiling' camera.
-'head' / 'overview' are v0.1 aliases of 'front' / 'ceiling' (still accepted; normalize with ``normalize_camera``)."""
+'head' / 'overview' are v0.1 aliases of 'front' / 'ceiling' (still accepted; normalize with ``normalize_camera``).
+'director' (0.2.3) = the rover's third-person chase camera (frames sent only when the gateway asks for it)."""
 
 _CAMERA_ALIASES = {"head": "front", "overview": "ceiling"}
 

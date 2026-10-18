@@ -17,6 +17,7 @@ from contracts import CONTRACTS_VERSION
 from contracts.cameras import CameraInfo, parse_camera_id
 from contracts.common import CameraId, StoreId
 from contracts.sim import (
+    BASKET_UNLOAD_CAPABILITY,
     CameraFrame,
     CaptureCmd,
     CommandResult,
@@ -24,7 +25,9 @@ from contracts.sim import (
     ListInstancesCmd,
     NavigateCmd,
     PickCmd,
+    PickFromBasketCmd,
     PlaceInBasketCmd,
+    PlaceOnCounterCmd,
     ResetCmd,
     RobotError,
     ScanCmd,
@@ -110,6 +113,7 @@ class LoopbackSimLink:
             robots=robots,
             cameras=cams,
             contracts_version=CONTRACTS_VERSION,
+            capabilities=[BASKET_UNLOAD_CAPABILITY],
         )
         await self._dispatch(self.hello)
         for r in robots:
@@ -196,6 +200,12 @@ class LoopbackSimLink:
             elif isinstance(cmd, PlaceInBasketCmd):
                 iid = r.snapshot(rid).holding  # type: ignore[arg-type]
                 await r.place_in_basket(rid)  # type: ignore[arg-type]
+            elif isinstance(cmd, PickFromBasketCmd):
+                inst = await r.pick_from_basket(rid, cmd.sku, cmd.instance_id)  # type: ignore[arg-type]
+                instances, iid = [inst], inst.instance_id
+            elif isinstance(cmd, PlaceOnCounterCmd):
+                iid = r.snapshot(rid).holding  # type: ignore[arg-type]
+                await r.place_on_counter(rid, cmd.position, cmd.yaw, cmd.spot)  # type: ignore[arg-type]
             elif isinstance(cmd, UnloadBasketCmd):
                 instances = await r.unload_basket(rid)  # type: ignore[arg-type]
             elif isinstance(cmd, CaptureCmd):

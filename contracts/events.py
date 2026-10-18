@@ -81,7 +81,15 @@ from contracts.routing import Route, StopStatus
 from contracts.shopping import Cart, Intent, ListItem, Recommendation, ShoppingList, TripState
 from contracts.sim import CameraFrame, RobotState
 from contracts.trip import Trip
-from contracts.trust import ApprovalKind, ApprovalRequest, ApprovalResponse, MandateDecision, Receipt
+from contracts.trust import (
+    ApprovalKind,
+    ApprovalRequest,
+    ApprovalResponse,
+    ItemVerification,
+    MandateDecision,
+    PaymentAgentStep,
+    Receipt,
+)
 from contracts.verify import Verdict, VerifyPhase
 from contracts.vla import VlaStatus
 
@@ -503,6 +511,39 @@ class CameraOverlay(EventBase):
     step_id: PlanStepId | None = None
 
 
+class CheckoutUnload(EventBase):
+    """0.2.4: one unit of the checkout unload by the arm (producer: agent, the LoopRunner): 'Unloading 3/9: Mild
+    Chunky Salsa -> counter ✓'. One event per stage of each unit; ``n`` / ``total`` count units of this plan."""
+
+    type: Literal["checkout.unload"] = "checkout.unload"
+    plan_id: PlanId
+    step_id: PlanStepId | None = None
+    n: int = Field(ge=1, description="1-based unit number in the unload sequence.")
+    total: int = Field(ge=0, description="Units the plan unloads by arm.")
+    sku: Sku
+    name: str | None = None
+    status: Literal["started", "grasped", "placed", "verified", "skipped", "failed", "done"] = "started"
+    counter_spot: int | None = Field(None, description="planogram.CounterSpot.index.")
+    photo_url: str | None = Field(None, description="Blurred photo of the unit on the counter (verification card).")
+    text: str = Field("", description="UI line: 'Unloading 3/9: Mild Chunky Salsa → counter ✓'.")
+
+
+class ItemVerificationEvent(EventBase):
+    """0.2.4: a per-item photo verification card (created, then resolved / auto-accepted). Producer: agent (the run
+    that asked); the gateway's REST ``POST /api/verifications/{id}`` only answers it."""
+
+    type: Literal["item.verification"] = "item.verification"
+    verification: ItemVerification
+
+
+class PaymentAgentStepEvent(EventBase):
+    """0.2.4: one step of the Visa payment agent's checkout timeline (producer: gateway, which runs the trust arm's
+    payment agent). Always a sandbox: ``step.simulated`` / ``step.label``."""
+
+    type: Literal["payment.agent_step"] = "payment.agent_step"
+    step: PaymentAgentStep
+
+
 Event = Annotated[
     TripCreated
     | TripSnapshot
@@ -553,7 +594,10 @@ Event = Annotated[
     | VlaTierChanged
     | PlanCompleted
     | DemoFaultEvent
-    | CameraOverlay,
+    | CameraOverlay
+    | CheckoutUnload
+    | ItemVerificationEvent
+    | PaymentAgentStepEvent,
     Field(discriminator="type"),
 ]
 
@@ -610,6 +654,9 @@ EVENT_CLASSES: tuple[type[EventBase], ...] = (
     PlanCompleted,
     DemoFaultEvent,
     CameraOverlay,
+    CheckoutUnload,
+    ItemVerificationEvent,
+    PaymentAgentStepEvent,
 )
 
 EVENT_TYPES: dict[str, type[EventBase]] = {cls.model_fields["type"].default: cls for cls in EVENT_CLASSES}
@@ -666,6 +713,7 @@ EVENT_PRODUCERS: dict[str, str] = (
     | {"agent.message": "agent", "stock.updated": "catalog", "stock.alert": "catalog", "error": "any"}
     | {t: "agent" for t in LOOP_EVENT_TYPES}
     | {"demo.fault": "robot"}
+    | {"checkout.unload": "agent", "item.verification": "agent", "payment.agent_step": "gateway"}
 )
 """Who publishes each event type (see module docstring). 'agent' covers the shopper agent, the robot brain and the
 LoopRunner (loop events); 'robot' = the robot arm's FaultInjector (demo.fault only)."""

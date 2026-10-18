@@ -62,6 +62,8 @@ class UserProfile(Model):
 
 
 class PurchaseRecord(Model):
+    """One purchased line (GET /api/users/{user_id}/purchases; 0.2.4: stored in the purchase-history database)."""
+
     purchase_id: str
     user_id: UserId
     sku: Sku
@@ -71,6 +73,12 @@ class PurchaseRecord(Model):
     trip_id: TripId | None = None
     ts: Timestamp = Field(default_factory=utcnow)
     rating: Rating | None = None
+    name: str | None = Field(None, description="0.2.4: product name at purchase time.")
+    photo_urls: list[str] = Field(
+        default_factory=list,
+        description="0.2.4: root-relative photos of the exact units bought (the robot's verification pictures).",
+    )
+    source: Literal["checkout", "seed"] = Field("checkout", description="0.2.4: 'seed' = demo history.")
 
 
 class Feedback(Model):
@@ -106,3 +114,56 @@ class ProfileUpdate(Model):
     version_before: int = 1
     version_after: int = 1
     ts: Timestamp = Field(default_factory=utcnow)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# Suggestions (0.2.3): "you bought this 12 days ago" cards for the web app
+# --------------------------------------------------------------------------------------------------------------------
+SuggestionKind = Literal["replenish", "substitute", "complement", "deal"]
+"""replenish = due again by your own cadence; substitute = a due item is out of stock here, this is the in-stock
+alternative; complement = usually bought together with a due item; deal = on deal in this store and you buy it / like
+it."""
+
+
+class ReplenishSuggestion(Model):
+    """One card of GET /api/users/{user_id}/suggestions (0.2.3): the Cart Whisperer generators (recommender arm) over
+    the purchase-history database. Candidates are deterministic (cadence, co-purchase, store deals, stock); an LLM may
+    re-rank them and rewrite ``reason`` grounded only in ``signals`` (``ranked_by``). Only items in stock at
+    ``store_id``. Clicking cards and ordering them = POST /api/requests with ``items`` (``fleet.RequestItem``). Never
+    sponsored (CLAUDE.md section 8)."""
+
+    suggestion_id: str = Field(description="Stable id: 'rep-<user_id>-<sku>' (kind prefix: rep / sub / cmp / deal).")
+    kind: SuggestionKind = "replenish"
+    user_id: UserId
+    sku: Sku
+    name: str
+    brand: str | None = None
+    size: str | None = None
+    category: str | None = None
+    image_url: str = Field(description="Root-relative product thumbnail: '/api/products/{sku}/image.jpg'.")
+    label_color: str | None = Field(None, description="#RRGGBB of the sim prop's label (card accent).")
+    price_cents: Cents = Field(description="Unit price at ``store_id`` now (deal applied).")
+    store_id: StoreId
+    in_stock: bool
+    stock_qty: int = Field(0, ge=0)
+    aisle_label: str | None = Field(None, description="'Aisle 3 · shelf 2' (None when not stocked here).")
+    slot_id: str | None = None
+    shelf_level: int | None = Field(None, ge=0, description="0 = bottom shelf.")
+    last_bought_at: Timestamp | None = Field(None, description="None = never bought (deal / complement / substitute).")
+    last_bought_days: int | None = Field(None, ge=0, description="Whole days since the last purchase.")
+    cadence_days: int | None = Field(None, ge=1, description="Typical days between purchases (own history).")
+    overdue_days: int | None = Field(
+        None, description="last_bought_days - cadence_days (negative = due in that many days)."
+    )
+    times_bought: int = Field(0, ge=0)
+    suggested_qty: int = Field(1, ge=1, description="Usual quantity per purchase.")
+    reason: str = Field(description="'You bought this 12 days ago — you usually buy it every 10 days.'")
+    signals: dict[str, float | int | str | bool] = Field(
+        default_factory=dict, description="Why, as numbers (transparency): the only facts the reason may use."
+    )
+    sponsored: bool = False
+    score: float = Field(0.0, description="Deterministic candidate score (before any LLM re-rank).")
+    ranked_by: Literal["rules", "llm"] = Field("rules", description="'llm' = order + reason from the LLM re-rank.")
+    substitute_for: Sku | None = Field(None, description="kind 'substitute': the out-of-stock SKU it replaces.")
+    related_to: Sku | None = Field(None, description="kind 'complement': the due SKU it is usually bought with.")
+    deal_text: str | None = Field(None, description="'20% off' / 'was $4.99' when on deal here.")

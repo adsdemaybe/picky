@@ -96,7 +96,11 @@ class LocalTruth:
                 sku=g.sku,
                 approach_pose=g.approach_pose,
                 item_position=g.item_position,
-                instances=[u for u in units if u.slot_id == sid and not u.in_basket and u.instance_id not in taken],
+                instances=[
+                    u
+                    for u in units
+                    if u.slot_id == sid and not u.in_basket and not u.on_counter and u.instance_id not in taken
+                ],
                 shelf_tag_cents=g.shelf_tag_cents or g.price_cents or (p.price_cents if p else None),
             )
         labels: dict[str, str] = {}
@@ -109,6 +113,7 @@ class LocalTruth:
             battery_pct=st.battery_pct,
             holding=holding,
             basket=basket,
+            counter=[u for u in units if u.on_counter],
             slots=slots,
             visible_slots={robot_camera_id(robot_id, "front"): facing},
             labels=labels,

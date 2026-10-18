@@ -68,6 +68,14 @@ Command rules
   physics substitute (attach on close within ~3 cm of the jaw center), reported in ``ArmJointState.events``.
   ``arm_ik`` (0.2.2, capability ``ARM_IK_CAPABILITY``, not a motion: always allowed) solves TCP targets on the
   worker's SO-101 model into joint rows (Cartesian policies), never moves.
+- ``pick_from_basket`` / ``place_on_counter`` (0.2.4, worker capability ``BASKET_UNLOAD_CAPABILITY``): the checkout
+  unload by the arm. ``pick_from_basket`` lowers the lift, reaches back into the robot's basket with the SO-101 and
+  attaches one basket unit (``instance_id``, else the first unit of ``sku``; ``no_instance`` when absent), then lifts
+  it out (``RobotState.holding``). ``place_on_counter`` carries the held unit to ``position`` (store frame, the unit's
+  base center on the counter top, within reach: else ``grasp_failed``) and releases it there: the unit stays in the
+  scene with ``ItemInstance.on_counter=True`` (``in_basket=False``) until the handoff's ``unload_basket`` (staff bag
+  everything on the counter) or a robot reset. Older workers answer ``internal`` (unknown command); the robot arm
+  never sends them to a worker whose hello lacks the capability.
 - ``set_slot_stock`` makes a slot hold exactly ``qty`` units (lots in planogram order): units are spawned / removed
   deterministically (``instance_id(slot_id, n)``, removing the highest n = back rows first) so it matches catalog
   restocks and write-offs (``RobotService.sync_stock``).
@@ -139,7 +147,13 @@ that robot) · not_ready (no scene) · disconnected (Isaac lost: raised once, th
 from its last state; retryable) · unknown_robot (robot / camera id missing or not hosted) · battery_low (refuses motion
 below BATTERY_MOTION_MIN_PCT: send it to its dock) · internal (incl. a command the worker could not parse)."""
 
-SIM_DEFAULT_TIMEOUTS_S: dict[str, float] = {"reset": 120.0, "navigate": 90.0, "arm_joints": 30.0}
+SIM_DEFAULT_TIMEOUTS_S: dict[str, float] = {
+    "reset": 120.0,
+    "navigate": 90.0,
+    "arm_joints": 30.0,
+    "pick_from_basket": 30.0,
+    "place_on_counter": 30.0,
+}
 """Per-command default for ``SimLink.send(timeout_s=None)``; any other command: ``SIM_DEFAULT_TIMEOUT_S``."""
 SIM_DEFAULT_TIMEOUT_S = 15.0
 
@@ -185,6 +199,9 @@ class ItemInstance(WireModel):
     lot_id: LotId | None = Field(None, description="Planogram Lot this unit belongs to.")
     in_basket: bool = False
     bbox: BBox | None = Field(None, description="Pixel box in the frame this instance rides with (None otherwise).")
+    on_counter: bool = Field(
+        False, description="0.2.4: unloaded onto the checkout counter by the arm (out of the basket, not on a shelf)."
+    )
 
 
 # ---- shared ground truth: the robot fake (2D) and the Isaac scene MUST agree on these, because the gateway falls back
@@ -309,6 +326,27 @@ class PickCmd(_Cmd):
 class PlaceInBasketCmd(_Cmd):
     type: Literal["place_in_basket"] = "place_in_basket"
     instance_id: InstanceId | None = Field(None, description="None = whatever the gripper holds.")
+
+
+BASKET_UNLOAD_CAPABILITY = "basket_unload"
+"""``SimHello.capabilities`` entry of a worker that implements ``PickFromBasketCmd`` + ``PlaceOnCounterCmd`` (0.2.4)."""
+
+
+class PickFromBasketCmd(_Cmd):
+    """Motion (0.2.4, capability ``basket_unload``): the arm reaches into the robot's basket and lifts one unit out."""
+
+    type: Literal["pick_from_basket"] = "pick_from_basket"
+    instance_id: InstanceId | None = Field(None, description="The unit; None = the first basket unit of ``sku``.")
+    sku: Sku | None = None
+
+
+class PlaceOnCounterCmd(_Cmd):
+    """Motion (0.2.4, capability ``basket_unload``): put the held unit on the checkout counter at ``position``."""
+
+    type: Literal["place_on_counter"] = "place_on_counter"
+    position: Point3 = Field(description="Base center of the unit on the counter top (store frame).")
+    yaw: float = 0.0
+    spot: int | None = Field(None, description="planogram.CounterSpot.index (logs / overlays).")
 
 
 class CaptureCmd(_Cmd):
@@ -512,12 +550,24 @@ SimCommand = Annotated[
     | SetStreamsCmd
     | SetSlotStockCmd
     | ArmJointsCmd
-    | ArmIkCmd,
+    | ArmIkCmd
+    | PickFromBasketCmd
+    | PlaceOnCounterCmd,
     Field(discriminator="type"),
 ]
 
 MOTION_COMMANDS: frozenset[str] = frozenset(
-    {"navigate", "scan", "pick", "place_in_basket", "unload_basket", "reset", "arm_joints"}
+    {
+        "navigate",
+        "scan",
+        "pick",
+        "place_in_basket",
+        "unload_basket",
+        "reset",
+        "arm_joints",
+        "pick_from_basket",
+        "place_on_counter",
+    }
 )
 """Command types that are mutually exclusive PER ROBOT (a second one while busy -> error_code='busy')."""
 
@@ -676,6 +726,8 @@ GatewayToSim = Annotated[
     | SetSlotStockCmd
     | ArmJointsCmd
     | ArmIkCmd
+    | PickFromBasketCmd
+    | PlaceOnCounterCmd
     | SimWelcome,
     Field(discriminator="type"),
 ]

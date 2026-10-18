@@ -21,13 +21,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from arms.gateway.loop_api import mount_loop_routes
 from arms.gateway.orchestrator import OrchestratorConfig, TripOrchestrator
@@ -88,7 +88,7 @@ from contracts.fleet import (
 from contracts.messaging import InboundMessage, OutboundMessage, ReplyInterpretation
 from contracts.perception import ScanReport
 from contracts.planogram import Planogram
-from contracts.profile import Feedback, ProfileUpdate, UserProfile
+from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, ReplenishSuggestion, UserProfile
 from contracts.routing import GridSpec
 from contracts.sim import (
     RobotError,
@@ -101,16 +101,37 @@ from contracts.sim import (
 )
 from contracts.tools import AgentReply
 from contracts.trip import Trip
-from contracts.trust import ApprovalRequest, ApprovalResponse, IntentMandate, TrustLedger
+from contracts.trust import (
+    VERIFY_CORRECT,
+    VERIFY_WRONG,
+    ApprovalRequest,
+    ApprovalResponse,
+    IntentMandate,
+    ItemVerification,
+    PaymentAgentStep,
+    TrustLedger,
+)
 from utils.config import get_settings
 from utils.events import event_to_dict
 from utils.ids import new_id
 from utils.log import get_logger
 
 log = get_logger(__name__)
+
+
+class VerificationAnswer(BaseModel):
+    """POST /api/verifications/{id} body (0.2.4)."""
+
+    decision: Literal["correct", "wrong"]
+    user_id: str | None = None
+
+
 STATIC_DIR = Path(__file__).parent / "static"
 MJPEG_BOUNDARY = "frame"
 MAX_STREAM_FPS = 15.0
+DEFAULT_STREAM_FPS = 5.0
+DIRECTOR_STREAM_FPS = 10.0
+"""Default MJPEG rate of '<robot>.director' (0.2.3 livestream main view); ?fps= overrides."""
 MAX_MUX_FPS = 5.0
 """Per-camera cap on the multiplexed /ws/cameras socket."""
 
@@ -402,12 +423,14 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
         return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.get("/api/cameras/{camera_id}/stream.mjpg", response_class=StreamingResponse)
-    async def camera_stream(camera_id: str, request: Request, fps: float = 5.0, w: int | None = None) -> Any:
+    async def camera_stream(camera_id: str, request: Request, fps: float | None = None, w: int | None = None) -> Any:
         cams = svc("cameras")
         try:
-            await cams.get_camera(camera_id)
+            cam = await cams.get_camera(camera_id)
         except KeyError:
             raise HTTPException(404, f"unknown camera {camera_id}") from None
+        if fps is None:  # the director (chase) camera is the livestream's main view: smooth by default
+            fps = DIRECTOR_STREAM_FPS if getattr(cam, "kind", None) == "director" else DEFAULT_STREAM_FPS
         rate = max(0.2, min(fps, MAX_STREAM_FPS))
         return StreamingResponse(
             _mjpeg(cams, camera_id, rate, _width(w), request),
@@ -471,6 +494,26 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
         offers = await catalog.get_offers(sku, store_id or None)
         return SearchHit(product=product, offers=offers, score=1.0)
 
+    image_cache: dict[tuple[str, int], bytes] = {}
+
+    @app.get("/api/products/{sku}/image.jpg", response_class=Response)
+    async def product_image(sku: str, w: int | None = None) -> Response:
+        """Product thumbnail (0.2.3): a render / photo from PICKY_PRODUCT_IMAGE_DIR, else the sim prop's label card."""
+        size = max(64, min(int(w or 320), 1024))
+        jpeg = image_cache.get((sku, size))
+        if jpeg is None:
+            product = await svc("catalog").get_product(sku)
+            if product is None:
+                raise HTTPException(404, f"unknown sku {sku}")
+            from arms.catalog import product_image_jpeg
+
+            image_dir = get_settings().picky_product_image_dir or None
+            jpeg = await asyncio.to_thread(product_image_jpeg, product, size, image_dir)
+            if len(image_cache) >= 512:
+                image_cache.pop(next(iter(image_cache)))
+            image_cache[(sku, size)] = jpeg
+        return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=300"})
+
     @app.get("/api/stores/{store_id}/deals", response_model=list[Deal])
     async def get_deals(store_id: str) -> list[Deal]:
         return await svc("catalog").get_deals(store_id)
@@ -494,6 +537,74 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
             return await svc("recommender").get_profile(user_id)
         except KeyError:
             raise HTTPException(404, f"unknown user {user_id}") from None
+
+    @app.get("/api/users/{user_id}/suggestions", response_model=list[ReplenishSuggestion])
+    async def user_suggestions(
+        user_id: str,
+        store_id: str | None = None,
+        limit: int = 8,
+        include_all: bool = Query(False, alias="all"),
+    ) -> list[ReplenishSuggestion]:
+        """Suggestion cards (0.2.4): replenish / substitute / complement / deal from the purchase-history database,
+        only items in stock at the store, optionally LLM-ranked with grounded reasons (recommender extra)."""
+        fn = getattr(svc("recommender"), "replenish_suggestions", None)
+        if fn is None:
+            raise HTTPException(501, "this recommender has no replenish suggestions")
+        try:
+            return await fn(user_id, store_id=store_id, limit=max(1, min(limit, 50)), include_all=include_all)
+        except KeyError:
+            raise HTTPException(404, f"unknown user {user_id}") from None
+
+    @app.get("/api/users/{user_id}/purchases", response_model=list[PurchaseRecord])
+    async def user_purchases(user_id: str, limit: int = 200) -> list[PurchaseRecord]:
+        """Purchase history from the purchase-history database, newest first (0.2.4; recommender extra)."""
+        fn = getattr(svc("recommender"), "purchase_history", None)
+        if fn is None:
+            raise HTTPException(501, "this recommender has no purchase-history database")
+        try:
+            return await fn(user_id, limit=max(1, min(limit, 1000)))
+        except KeyError:
+            raise HTTPException(404, f"unknown user {user_id}") from None
+
+    @app.get("/api/verifications", response_model=list[ItemVerification])
+    async def list_verifications(
+        trip_id: str | None = None, user_id: str | None = None, status: str | None = None
+    ) -> list[ItemVerification]:
+        """Photo verification cards (0.2.4), newest first; ?status=pending for the open ones."""
+        return reg().publisher.judges.query(trip_id=trip_id, user_id=user_id, status=status)
+
+    @app.post("/api/verifications/{verification_id}", response_model=ItemVerification)
+    async def answer_verification(verification_id: str, body: VerificationAnswer) -> ItemVerification:
+        """Answer a card: 'correct' / 'wrong' (a wrong unit is put back and re-picked). 404 unknown, 409 closed."""
+        judges = reg().publisher.judges
+        ver = judges.verifications.get(verification_id)
+        if ver is None:
+            raise HTTPException(404, f"unknown verification {verification_id}")
+        if ver.status != "pending" or not reg().approvals.is_pending(verification_id):
+            raise HTTPException(409, f"verification {verification_id} is {ver.status}")
+        wrong = body.decision == VERIFY_WRONG
+        ok = await reg().approvals.resolve(
+            ApprovalResponse(
+                approval_id=verification_id,
+                decision="choice",
+                choice=VERIFY_WRONG if wrong else VERIFY_CORRECT,
+                channel="web",
+                user_id=body.user_id or ver.user_id,
+            )
+        )
+        if not ok:
+            raise HTTPException(409, f"verification {verification_id} could not be answered")
+        for _ in range(20):  # the run publishes the resolved card right after the broker resolves
+            cur = judges.verifications.get(verification_id)
+            if cur is not None and cur.status != "pending":
+                return cur
+            await asyncio.sleep(0.02)
+        return ver.model_copy(update={"status": "rejected" if wrong else "accepted", "decided_by": "user"})
+
+    @app.get("/api/trips/{trip_id}/payment", response_model=list[PaymentAgentStep])
+    async def trip_payment(trip_id: str) -> list[PaymentAgentStep]:
+        """The Visa payment agent's timeline for a trip (0.2.4; sandbox / simulated, no real money)."""
+        return reg().publisher.judges.timeline(trip_id)
 
     @app.put("/api/users/{user_id}/profile", response_model=UserProfile)
     async def put_profile(user_id: str, profile: UserProfile) -> UserProfile:
@@ -780,7 +891,8 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
                     for rid in robot_ids or [None]:
                         with contextlib.suppress(Exception):
                             listed += await cams.list_cameras(store_id=sid, robot_id=rid)
-                ids += [c.camera_id for c in listed if c.camera_id not in ids]
+                # '.perceived' streams only when named explicitly (each spends Perceptron calls)
+                ids += [c.camera_id for c in listed if c.camera_id not in ids and c.kind != "perceived"]
             if not ids:
                 await send(_error_dict(None, "no cameras match"))
                 return
@@ -908,12 +1020,14 @@ async def _mjpeg(cams: Any, camera_id: str, fps: float, width: int | None, reque
 
 
 async def _robot_cameras(r: Registry, robot_id: str) -> list[str]:
+    """Every camera of the robot for /ws/frames, except the annotated '.perceived' streams (they spend Perceptron
+    calls: subscribe to them explicitly by camera id)."""
     cams = r.services.cameras
     if cams is not None:
         with contextlib.suppress(Exception):
             listed = await cams.list_cameras(robot_id=robot_id)
             if listed:
-                return [c.camera_id for c in listed]
+                return [c.camera_id for c in listed if c.kind != "perceived"]
     return [robot_camera_id(robot_id, k) for k in ROBOT_CAMERA_KINDS]
 
 

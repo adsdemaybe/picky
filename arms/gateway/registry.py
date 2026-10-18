@@ -26,6 +26,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from arms.gateway.judges import JudgesIndex
 from arms.gateway.loop_api import EvidenceAnnotations
 from contracts.cameras import CameraInfo, parse_camera_id
 from contracts.common import utcnow
@@ -154,10 +155,14 @@ class GatewayPublisher:
         self.bus = bus
         self.frames = frames
         self.annotations = annotations
+        self.judges = JudgesIndex()
+        """0.2.4: verification cards + payment agent timelines (REST views of the event stream)."""
 
     async def publish(self, event: Event) -> Event:
         if isinstance(event, dict):
             event = parse_event(event)
+        if getattr(event, "type", None) in ("item.verification", "payment.agent_step"):
+            self.judges.observe(event)
         if self.annotations is not None and getattr(event, "type", None) in ANNOTATED_EVENT_TYPES:
             self.annotations.observe(event)
         if getattr(event, "type", None) in LIVE_ONLY_EVENT_TYPES:
@@ -788,6 +793,7 @@ def build_registry(
     orchestrator = TripOrchestrator(services, config=orchestrator_config)
     services.trips = orchestrator
     reg.orchestrator = orchestrator
+    orchestrator.photo_lookup = publisher.judges.photos
     approvals.envelope_hook = orchestrator.approval_envelope
     log.info("gateway wired: %s | exec_mode=%s", ", ".join(f"{a}={m}" for a, m in reg.modes.items()), reg.exec_mode)
     return reg

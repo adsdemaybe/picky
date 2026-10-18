@@ -107,6 +107,17 @@ Full flow: CLAUDE.md §5. For this arm:
 - [ ] `sponsored=False` everywhere; every rec has reason + signals (trust rubric)
 - [ ] Embedding model warmed on the demo machine
 
+## Judges' demo (contracts 0.2.4)
+
+- `purchases.py`: the purchase-history database (SQLite via `utils.db.sqlite_connect`, `PICKY_PURCHASES_DB`), seeded
+  from `data/fixtures/purchase_history.yaml` relative to now (re-seeded after 6 h; checkout rows never touched);
+  `record_purchase` appends every paid line (+ verification photos). Gateway extras: `purchase_history`,
+  `add_purchase_photos`, `suggestions` / `replenish_suggestions`.
+- `suggest.py`: deterministic candidates (replenish by own cadence, substitute for an out-of-stock due item,
+  complement = bought on the same trips, deal = on deal here + bought / liked), only in stock at the store; optional
+  LLM re-rank (`PICKY_SUGGESTIONS_LLM`) whose reasons must quote only numbers from the card's signals.
+- Limitation: the purchase DB is SQLite (one gateway process); the real Postgres catalog DB is not used for it.
+
 ## Known limitations
 
 - Profiles live in memory (reset on restart); Postgres persistence is TODO.

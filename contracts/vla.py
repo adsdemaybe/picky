@@ -249,6 +249,11 @@ class VlaCapabilities(Model):
         "never selected by resolve_tier. T0 consumes no frames.",
     )
     place_back: bool = Field(False, description="Can put a held unit back on its shelf (PlaceStep destination shelf).")
+    basket_unload: bool = Field(
+        False,
+        description="0.2.4: can take units out of the basket and put them on the checkout counter (GraspStep "
+        "source='basket', PlaceStep destination='counter'). False = the handoff unloads the basket at once.",
+    )
     supports_progress: bool = True
     cancel_latency_ms: float = Field(200.0, description="Worst-case stop latency after cancel().")
     est_success_rate: dict[str, Score01] = Field(default_factory=dict, description="Per step kind (rolling).")

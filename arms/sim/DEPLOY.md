@@ -255,3 +255,18 @@ When the host is back:
 3. Rsync the branch to `repo-pvla`, re-seed the catalog, and restart `picky-pvla-gw` on `-L picky-pvla`.
 4. Run the spread-out list (dish soap, sports drink, coffee, olive oil, rice, muffins, frozen peas, ground turkey:
    8 fixtures, shelf levels 0–2) and the same request with `PICKY_VLA_T1=smolvla`.
+
+## 10. Judges' demo: checkout unload by the arm (contracts 0.2.4)
+
+The worker now implements `pick_from_basket` / `place_on_counter` and advertises the `basket_unload` capability in its
+hello: at the checkout counter the SO-101 (joint mode, IK on the rover model) lowers the lift to 0.32 m, swings back
+over the basket, attaches one unit (magic grasp, decided by code), lifts it out, then raises the lift and lays the
+unit on the counter spot the plan chose (`planogram.counter_spots`: bays of 3 on the checkout fixture's top,
+left → right). The unit stays in the scene (`on_counter`) until the handoff's `unload_basket` (staff bag it).
+
+- **Redeploy the worker** from this branch (`git pull` on vhagar, restart the tmux session as in section 5). A worker
+  started from an older checkout still connects (0.2.x), but its hello lacks `basket_unload`: the gateway then skips
+  the per-unit unload and the handoff unloads the basket at once (the 0.2.3 behaviour). `GET /api/fleet/robots/{id}/vla`
+  shows `basket_unload: true` on the T0 tier when the connected worker has it.
+- Nothing else to configure; `PICKY_UNLOAD_BY_ARM=false` on the gateway turns the unload sequence off.
+- Smoke test without a GPU: `uv run pytest arms/sim/tests/test_worker_unload.py` (NullBackend).

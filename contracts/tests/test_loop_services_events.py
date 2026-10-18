@@ -299,7 +299,7 @@ def test_loop_events_are_in_the_union_with_one_producer_each() -> None:
     assert set(LOOP_EVENT_TYPES) <= set(EVENT_TYPES) and set(EVENT_PRODUCERS) == set(EVENT_TYPES)
     assert {EVENT_PRODUCERS[t] for t in LOOP_EVENT_TYPES if t != "demo.fault"} == {"agent"}
     assert EVENT_PRODUCERS["demo.fault"] == "robot" and EVENT_PRODUCERS["brain.step"] == "agent"
-    assert len(EVENT_CLASSES) == len(EVENT_TYPES) == 50
+    assert len(EVENT_CLASSES) == len(EVENT_TYPES) == 53  # 0.2.4: checkout.unload, item.verification, payment.agent_step
     assert "camera.overlay" in LIVE_ONLY_EVENT_TYPES and THROTTLED_EVENT_TYPES == {"vla.status": 2.0}
     schema = json.dumps(event_json_schema())
     for t in LOOP_EVENT_TYPES:
@@ -425,7 +425,7 @@ def test_truth_sidecar_and_frames() -> None:
 
 
 def test_version_is_a_patch_bump_the_deployed_isaac_worker_accepts() -> None:
-    assert contracts.CONTRACTS_VERSION == "0.2.2"
+    assert contracts.CONTRACTS_VERSION == "0.2.4"
     assert versions_compatible(contracts.CONTRACTS_VERSION, "0.2.0")  # the worker on vhagar (0.2.0) keeps working
     assert not versions_compatible("0.3.0", "0.2.0")  # T1 wire (RunSkillCmd) waits for 0.3.0 + a worker rebuild
     for name in ("StepPlan", "VlaService", "VerifierService", "PlannerService", "Services", "plan_envelope"):
