@@ -74,6 +74,9 @@ class Planner:
         self.exhausted: set[str] = set()
         self.key = load_key()
         self.models = list(models)
+        fast = os.environ.get("PICKY_MODEL_FAST", "").strip()  # the team's fast-model pick goes first (429 -> next)
+        if fast.startswith("gemini") and fast not in self.models[:1]:
+            self.models = [fast] + [m for m in self.models if m != fast]
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.model_used = None
@@ -135,11 +138,11 @@ class Planner:
                     time.sleep(2)
         raise RuntimeError(f"all Gemini models failed ({last})")
 
-    def plan(self, store: dict, robots: list[dict], items: list[dict], checkout: dict) -> dict:
+    def plan(self, store: dict, robots: list[dict], items: list[dict], checkout: dict, schema=None) -> dict:
         prompt = (
             "STORE MAP\n" + json.dumps(store, separators=(",", ":")) + "\n\nROVERS\n" + json.dumps(robots)
             + "\n\nCHECKOUT COUNTER\n" + json.dumps(checkout) + "\n\nSHOPPING LIST\n" + json.dumps(items)
-            + "\n\nReturn JSON shaped like:\n" + json.dumps(SCHEMA_HINT)
+            + "\n\nReturn JSON shaped like:\n" + json.dumps(schema or SCHEMA_HINT)
         )  # fmt: skip
         return self._call(prompt, "plan")
 
@@ -154,12 +157,20 @@ class Planner:
         )  # fmt: skip
         return self._call(prompt, "replan")
 
-    def name_products(self, images: list) -> dict:
-        """images: [(item id, jpeg bytes)] close-ups from the sim -> {item id: short generic product name}"""
+    def name_products(self, images: list, describe: bool = False) -> dict:
+        """images: [(item id, jpeg bytes)] close-ups from the sim -> {item id: short generic product name}
+        (describe=True: {item id: {"name": ..., "looks": "<colours / shape, <= 8 words>"}} for the grasp policy)"""
         prompt = (
             "Each image below is a close-up of one product on a supermarket shelf (a 3-D model in a simulator), "
             "labelled with its item id. Name each product the way a shopper would, in 2-4 words, generic (no brand "
             "names), first letter capitalised, e.g. 'Orange soda bottle', 'Hand cream tube', 'Dish soap'. The "
-            'product of interest is the one in the centre of the image. Return JSON only: {"<item id>": "<name>"}.'
+            "product of interest is the one in the centre of the image. "
         )
+        if describe:
+            prompt += (
+                "Also describe how it looks so a robot camera can find it (colours, shape, cap; at most 8 words). "
+                'Return JSON only: {"<item id>": {"name": "<name>", "looks": "<looks>"}}.'
+            )
+        else:
+            prompt += 'Return JSON only: {"<item id>": "<name>"}.'
         return self._call(prompt, "name_products", images=images, system="You label supermarket products from photos.")

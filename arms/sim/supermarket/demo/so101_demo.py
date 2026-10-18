@@ -22,6 +22,7 @@ Per-frame state + events go to frames.jsonl / events.jsonl for demo/edit_so101.p
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import math
 import sys
@@ -43,6 +44,7 @@ CTRL = BASE + ARM + ["gripper"]
 NAME = "Pico"
 MAX_W = 0.068  # widest product (across the jaws) we try: the SO-101 jaw opens ~8.6 cm at 1.2 rad
 MIN_W = 0.022
+MAX_H, MAX_DEPTH = 0.28, 0.12  # deeper products tilt over the basket rim and can't be taken out at checkout
 PITCHES = [0, 5, 10, 15, 20, -5, -10]  # tool pitch (deg, + = pointing down) tried for a shelf grasp
 GRIP_IN = 0.035  # deep products are gripped this far behind their front face (the jaw pads are ~4 cm long)
 CAT_NAME = {
@@ -70,6 +72,35 @@ SYSTEM = (
     "rover will face), then end at the checkout. Explain each leg in one short, concrete sentence a shopper would "
     "understand (mention the section and why it comes next). Answer with JSON only."
 )
+# --policy perceptron: Gemini is also the task planner (the step plan per stop); Perceptron Mk1.5 does the grasps
+SYSTEM_VLA = SYSTEM.replace(" Answer with JSON only.", "") + (
+    " You are also the rover's task planner: for every stop give 'steps', the ordered steps the rover runs there, "
+    "using only: approach (drive + park beside the shelf), look (the wrist camera finds the product), grasp (a "
+    "vision-language-action model, Perceptron Mk1.5, steers the arm onto the product and closes the jaws), "
+    "place_in_basket, verify (a camera check that it landed in the basket); and 'grasp_hint': at most 10 words on how "
+    "to recognise the product on the shelf. Also give 'checkout_steps' using: approach_checkout, unload (each item "
+    "onto the counter), pay. Answer with JSON only."
+)
+SCHEMA_VLA = {
+    "summary": "one or two sentences: the overall strategy",
+    "robots": [
+        {
+            "robot": "<robot name>",
+            "stops": [
+                {
+                    "item": "<item id>",
+                    "section": "<section id>",
+                    "side": "<north|south|east|west>",
+                    "reason": "<why this stop comes next, <= 20 words>",
+                    "steps": ["approach", "look", "grasp", "place_in_basket", "verify"],
+                    "grasp_hint": "<how to recognise it on the shelf, <= 10 words>",
+                }
+            ],
+            "checkout_reason": "<why/when it heads to the checkout>",
+            "checkout_steps": ["approach_checkout", "unload", "pay"],
+        }
+    ],
+}
 
 
 # --- small geometry helpers ------------------------------------------------------------------------------------------
@@ -234,7 +265,7 @@ class Catalog:
         n = np.array(SIDE_N[side])
         width = float(abs(size[:2] @ np.array([-n[1], n[0]])))  # across the jaws (along the shelf)
         depth_len = float(abs(size[:2] @ n))
-        if not (MIN_W <= width <= MAX_W) or not (0.05 <= size[2] <= 0.30) or depth_len > 0.24:
+        if not (MIN_W <= width <= MAX_W) or not (0.05 <= size[2] <= MAX_H) or depth_len > MAX_DEPTH:
             return None
         if p.depth > 0.24:
             return None
@@ -636,8 +667,12 @@ class Recorder:
         self.active = set(cams)
         self.frame = 0
         self.on = None
+        self.dups, self.last = {}, {}  # per camera: captures identical to the previous one, last frame hash
 
     def render(self, on: bool):
+        # Isaac 6.0: re-enabling a render product's updates leaks its GPU textures (OOM after ~100 toggled captures),
+        # so active cameras render every step and only the set of active cameras changes (intro / main / outro)
+        on = True
         if on == self.on:
             return
         for n, rp in self.rps.items():
@@ -659,6 +694,9 @@ class Recorder:
             if d is None or getattr(d, "size", 0) == 0:
                 continue
             arr = np.asarray(d)[..., :3].copy()
+            h = hashlib.md5(arr[::6, ::6].tobytes()).hexdigest()  # stale-frame check (render product not updating)
+            self.dups[n] = self.dups.get(n, 0) + (h == self.last.get(n))
+            self.last[n] = h
             p = self.out / n / f"{self.frame:06d}.jpg"
             self.pool.submit(lambda a=arr, p=p: Image.fromarray(a).save(p, quality=92))
         self.frame += 1
@@ -759,6 +797,103 @@ class Director:
         self.set_cam(self.eye, self.tgt, self.focal)
 
 
+# --- follow cameras: bird's-eye + side --------------------------------------------------------------------------------
+class FollowCams:
+    """Two extra world cameras that track the rover every captured frame: a steep bird's-eye view from just under
+    the ceiling (the top-down render at 2.55 m sees the floor, so 2.45 m is free air above the aisle) and a lateral
+    side view at arm height. Both eyes are checked against the occlusion grid (free air, line of sight to the rover)
+    and cut to a new valid spot instead of clipping through a shelf."""
+
+    BIRD_Z = 2.45
+    SIDE_AZ = (0, 25, -25, 180, 155, -155, 50, -50, 130, -130)  # 0 = the rover's left, >0 towards behind it
+    SIDE_DIST = (1.9, 1.6, 1.3, 1.05, 0.85)
+    SIDE_Z = (1.15, 1.35, 0.95)
+
+    def __init__(self, hg: HeightGrid, set_bird, set_side):
+        self.hg, self.set_bird, self.set_side = hg, set_bird, set_side
+        self.b_eye = self.b_tgt = None
+        self.s_eye = self.s_tgt = None
+        self.s_key = None  # (az, dist, z) of the current side shot
+        self.cuts = {"birdseye": 0, "side": 0}
+
+    @staticmethod
+    def _frame(x, y, yaw):
+        fwd = np.array([math.cos(yaw), math.sin(yaw), 0.0])
+        left = np.array([-math.sin(yaw), math.cos(yaw), 0.0])
+        return np.array([x, y, 0.0]), fwd, left
+
+    def bird_ok(self, eye) -> bool:
+        m, hg = self.hg.m, self.hg
+        if np.any(eye[:2] < m.lo + 0.05) or np.any(eye[:2] > m.hi - 0.05):
+            return False
+        r = int(math.ceil(0.2 / m.res))
+        i, j = m.cell(eye[:2])
+        win = hg.h[max(i - r, 0) : i + r + 1, max(j - r, 0) : j + r + 1]
+        return win.size > 0 and float(win.max()) < eye[2] - 0.2
+
+    def bird_goal(self, p, fwd, left):
+        tgt = p + fwd * 0.2 + np.array([0, 0, 0.35])
+        for back, side in ((0.7, 0.0), (0.45, 0.0), (0.7, 0.35), (0.7, -0.35), (0.2, 0.0), (0.0, 0.3), (0.0, -0.3)):
+            eye = p - fwd * back + left * side + np.array([0, 0, self.BIRD_Z])
+            if self.bird_ok(eye):
+                return eye, tgt
+        return p - fwd * 0.3 + np.array([0, 0, self.BIRD_Z]), tgt
+
+    def side_eye(self, key, p, fwd, left):
+        az, dist, z = key
+        a = math.radians(az)
+        d = math.cos(a) * left - math.sin(a) * fwd
+        eye = p + d * dist
+        eye[2] = z
+        return eye
+
+    def side_valid(self, eye, p) -> bool:
+        return self.hg.eye_ok(eye, clear=0.15) and self.hg.visible(eye, p + np.array([0, 0, 0.6]), skip_end=0.3)
+
+    def side_pick(self, p, fwd, left):
+        for az in self.SIDE_AZ:
+            for dist in self.SIDE_DIST:
+                for z in self.SIDE_Z:
+                    key = (az, dist, z)
+                    if self.side_valid(self.side_eye(key, p, fwd, left), p):
+                        return key
+        return None
+
+    def update(self, x, y, yaw):
+        p, fwd, left = self._frame(x, y, yaw)
+        # bird's-eye
+        eye, tgt = self.bird_goal(p, fwd, left)
+        if self.b_eye is None:
+            self.b_eye, self.b_tgt = eye, tgt
+        else:
+            ne = self.b_eye + (eye - self.b_eye) * 0.08
+            if not self.bird_ok(ne):
+                ne = eye
+                self.cuts["birdseye"] += 1
+            self.b_eye, self.b_tgt = ne, self.b_tgt + (tgt - self.b_tgt) * 0.15
+        self.set_bird(self.b_eye, self.b_tgt, 9.0)
+        # side
+        tgt = p + fwd * 0.05 + np.array([0, 0, 0.7])
+        key = self.s_key
+        if key is None or not self.side_valid(self.side_eye(key, p, fwd, left), p):
+            key = self.side_pick(p, fwd, left)
+            self.s_key = key
+        if key is None:  # nowhere free at arm height: fall back to a high three-quarter view
+            eye = p - fwd * 0.9 + left * 0.5 + np.array([0, 0, 2.2])
+        else:
+            eye = self.side_eye(key, p, fwd, left)
+        if self.s_eye is None:
+            self.s_eye, self.s_tgt = eye, tgt
+        else:
+            ne = self.s_eye + (eye - self.s_eye) * 0.08
+            if not self.side_valid(ne, p):
+                ne = eye
+                self.cuts["side"] += 1
+            self.s_eye, self.s_tgt = ne, self.s_tgt + (tgt - self.s_tgt) * 0.2
+        dist = float(np.linalg.norm((self.s_eye - self.s_tgt)[:2]))
+        self.set_side(self.s_eye, self.s_tgt, float(np.clip(7.0 + 3.0 * dist, 9.0, 13.0)))
+
+
 # --- the mission ------------------------------------------------------------------------------------------------------
 class Mission:
     def __init__(self, io, kin, smap, cfg, out: Path, hg: HeightGrid, set_cam=None, rec=None, log=print):
@@ -783,6 +918,8 @@ class Mission:
         self.rec = rec
         self.hg = hg
         self.director = Director(hg, set_cam) if set_cam else None
+        self.cap_every = 2  # record every Nth physics step (2 = 30 fps of sim time)
+        self.cam_hooks = []  # callables (x, y, yaw) run for every captured frame (follow cameras)
         self.drift = 0.0
         self.path = []
         self.drop_k = 0
@@ -845,11 +982,14 @@ class Mission:
             path, rel = self.held
             q_pred = {n: self.qm[n] + self.cmd_v.get(n, 0.0) * DT for n in self.qm}
             self.io.set_body_T(path, self.world_gripper(q_pred) @ rel)
-        capture = (self.k + 1) % 2 == 0
+        capture = (self.k + 1) % self.cap_every == 0
         if capture and self.director is not None:  # camera for the frame this step renders
             q = self.qm
             self.drift = min(self.drift + 0.0005, 0.12) if self.director.mode == "hold" else 0.0
             self.director.update(q["base_x"], q["base_y"], q["base_yaw"], self.drift)
+        if capture:
+            for f in self.cam_hooks:
+                f(self.qm["base_x"], self.qm["base_y"], self.qm["base_yaw"])
         if self.rec is not None:
             self.rec.render(capture)
         self.io.update()
@@ -861,10 +1001,12 @@ class Mission:
             if e:
                 for n, v in e.items():
                     self.eff_max[n] = max(self.eff_max[n], abs(v))
-        if self.k % 2 == 0:
+        if self.k % self.cap_every == 0:
             q = self.qm
             if self.rec is not None:
                 self.rec.capture()
+                if self.rec.frame % 150 == 0:
+                    self.log(f"[so101-demo] frame {self.rec.frame} t={self.t:.1f}s stale={self.rec.dups}")
             moved = {}
             for p in self.tracked:
                 T = self.io.body_T(p)
@@ -873,7 +1015,7 @@ class Mission:
             self.frames.write(
                 json.dumps(
                     {
-                        "f": (self.rec.frame - 1) if self.rec else self.k // 2,
+                        "f": (self.rec.frame - 1) if self.rec else self.k // self.cap_every,
                         "t": round(self.t, 3),
                         "phase": self.gphase,
                         "shot": d.shot if d else 0,
@@ -1419,8 +1561,8 @@ class Mission:
         cb = np.array([self.to_base(c) for c in cw])
         c_b = cb.mean(axis=0)
         best = None
-        for k in range(36):
-            psi = -math.pi + 2 * math.pi * k / 36
+        for k in range(72):
+            psi = -math.pi + 2 * math.pi * k / 72
             R = self.down_R(psi)
             width = float(np.ptp(cb @ R[:, 0]))
             if width > MAX_W + 0.004:
@@ -1694,7 +1836,7 @@ def replan(ms: Mission, items, stop, event, planner, ctx):
     ms.wait(0.4)
 
 
-def make_plan(planner, smap, items, start, ctx, log=print):
+def make_plan(planner, smap, items, start, ctx, log=print, schema=None):
     sec_label = {s["id"]: f"{s['label']} ({s['where']})" for s in smap.sections}
     for it in items.values():
         it["section_label"] = sec_label.get(it["section"], "")
@@ -1714,7 +1856,11 @@ def make_plan(planner, smap, items, start, ctx, log=print):
     robots_info = [{"name": NAME, "start": r2(start[:2], 2), "facing_deg": round(math.degrees(start[2]))}]
     t0 = time.time()
     try:
-        resp = planner.plan(ctx["map_summary"], robots_info, items_info, ctx["checkout_info"])
+        resp = (
+            planner.plan(ctx["map_summary"], robots_info, items_info, ctx["checkout_info"], schema=schema)
+            if schema
+            else planner.plan(ctx["map_summary"], robots_info, items_info, ctx["checkout_info"])
+        )
         stops, seen = [], set()
         rb = next((r for r in resp.get("robots", []) if r.get("robot") == NAME), (resp.get("robots") or [{}])[0])
         for st in rb.get("stops", []):
@@ -1732,6 +1878,7 @@ def make_plan(planner, smap, items, start, ctx, log=print):
             "summary": resp.get("summary", ""),
             "stops": stops,
             "checkout_reason": rb.get("checkout_reason", ""),
+            "checkout_steps": rb.get("checkout_steps") or [],
         }
     except Exception as e:  # noqa: BLE001
         log(f"[so101-demo] Gemini plan failed: {e}; greedy fallback")
@@ -1824,6 +1971,7 @@ def plan_doc(plan, items, smap, meta, slot, ck, spawn):
         "summary": plan["summary"],
         "robots": {NAME: plan["stops"]},
         "checkout_reason": {NAME: plan.get("checkout_reason", "")},
+        "checkout_steps": {NAME: plan.get("checkout_steps", [])},
         "items": {
             i: {
                 "name": it["name"],
@@ -1833,6 +1981,7 @@ def plan_doc(plan, items, smap, meta, slot, ck, spawn):
                 "center": r2(it["center"], 2),
                 "stand": r2(it["xy"], 2),
                 "width_cm": round(it["width"] * 100, 1),
+                "looks": it.get("looks", ""),
             }
             for i, it in items.items()
         },
@@ -1883,23 +2032,85 @@ def product_closeups(app, stage, items, out: Path, hide=(), look_at=None):
     ann = rep.AnnotatorRegistry.get_annotator("rgb")
     ann.attach([rp])
     shots = []
+    import carb.settings  # noqa: PLC0415
+
+    cs = carb.settings.get_settings()
+    cop = cs.get("/omni/replicator/captureOnPlay")
+    cs.set("/omni/replicator/captureOnPlay", False)  # rendered before the timeline plays
+    last = None
     for iid, it in items.items():
         n = np.array([*SIDE_N[it["side"]], 0.0])
         eye = it["center"] + n * 0.42 + np.array([0, 0, 0.06])
         look_at(stage, cam, eye, it["center"], focal=40.0)
-        for _ in range(12):
+        for _ in range(8):
             app.update()
-        d = ann.get_data()
-        if d is None or getattr(d, "size", 0) == 0:
+        a, h = None, None
+        for _ in range(4):  # before play the annotators only fill on an explicit orchestrator step (as in topdown)
+            try:
+                rep.orchestrator.step(rt_subframes=8, pause_timeline=False)
+            except Exception as e:  # noqa: BLE001
+                print(f"[so101-demo] close-up orchestrator.step: {e}", flush=True)
+                app.update()
+            d = ann.get_data()
+            if d is None or getattr(d, "size", 0) == 0:
+                continue
+            a = np.asarray(d)[..., :3].copy()
+            h = hashlib.md5(a[::8, ::8].tobytes()).hexdigest()
+            if h != last and a.mean() > 8:
+                break
+        if a is None or h == last:  # stale annotator (same pixels as the last item): no close-up, not a wrong one
             continue
+        last = h
         f = out / "items" / f"{iid}.jpg"
-        Image.fromarray(np.asarray(d)[..., :3].copy()).save(f, quality=92)
+        Image.fromarray(a).save(f, quality=92)
         shots.append((iid, f.read_bytes()))
+    cs.set("/omni/replicator/captureOnPlay", True if cop is None else cop)
     ann.detach()
     rp.destroy()
     for im in vis:
         im.MakeVisible()
     return shots
+
+
+def flatten_product_xforms(ents) -> int:
+    """Genie Sim products are <parent Xform (translate + orient)>/entity (rigid body, local orient). When a kinematic
+    product turns dynamic mid-run, Isaac 6.0's PhysX writes its world pose into the entity's local xform ops, so the
+    parent transform is applied twice and the grasped product jumps metres away (runs t5/probe1). Before play, give
+    every product parent an identity transform and bake the full world transform into the entity (and any sibling):
+    visually identical, and local == world for the body from then on."""
+    from pxr import Gf, Usd, UsdGeom  # noqa: PLC0415
+
+    tc = Usd.TimeCode.Default()
+    n = 0
+    for ent in ents:
+        par = ent.GetParent()
+        if not par or not par.IsA(UsdGeom.Xformable):
+            continue
+        pxf = UsdGeom.Xformable(par)
+        if pxf.GetLocalTransformation(tc) == Gf.Matrix4d(1.0):
+            continue
+        kids = [c for c in par.GetChildren() if c.IsA(UsdGeom.Xformable)]
+        world = {c: UsdGeom.Xformable(c).ComputeLocalToWorldTransform(tc) for c in kids}
+        pxf.ClearXformOpOrder()
+        G_inv = pxf.ComputeLocalToWorldTransform(tc).GetInverse()  # parent's parent (identity in these scenes)
+        for c, W in world.items():
+            L = Gf.Transform(W * G_inv)
+            xf = UsdGeom.Xformable(c)
+            xf.ClearXformOpOrder()
+            # the standard op names (PhysX updates these in place); reuse an existing attribute's precision
+            t, q, sc = L.GetTranslation(), L.GetRotation().GetQuat(), L.GetScale()
+            for kind, add, dbl, flt in (
+                ("translate", xf.AddTranslateOp, Gf.Vec3d(t), Gf.Vec3f(t)),
+                ("orient", xf.AddOrientOp, Gf.Quatd(q), Gf.Quatf(q)),
+                ("scale", xf.AddScaleOp, Gf.Vec3d(sc), Gf.Vec3f(sc)),
+            ):
+                a = c.GetAttribute(f"xformOp:{kind}")
+                tn = str(a.GetTypeName()) if a and a.IsValid() else ("double3" if kind == "translate" else "")
+                is_d = tn in ("double3", "quatd")
+                prec = UsdGeom.XformOp.PrecisionDouble if is_d else UsdGeom.XformOp.PrecisionFloat
+                add(prec).Set(dbl if is_d else flt)
+        n += 1
+    return n
 
 
 # --- Isaac Sim entry (teleop_app.py --demo) ---------------------------------------------------------------------------
@@ -1917,6 +2128,13 @@ def run(app, args, tele):
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    try:
+        import carb.settings  # noqa: PLC0415
+
+        # DLSS (the default AA) crashed the renderer (NGX CreateFeature failed) once six render products were live
+        carb.settings.get_settings().set("/rtx/post/aa/op", 2)  # 2 = FXAA
+    except Exception as e:  # noqa: BLE001
+        log(f"[so101-demo] could not switch AA: {e}")
     for f in ("events.jsonl", "frames.jsonl", "llm_log.jsonl"):
         (out / f).unlink(missing_ok=True)
     cfg = json.loads(Path(args.so101_config).read_text())
@@ -1960,7 +2178,8 @@ def run(app, args, tele):
     for ent in ents:
         tele.make_dynamic(ent)
         ent.GetAttribute("physics:kinematicEnabled").Set(True)
-    log(f"[so101-demo] {len(ents)} products set up")
+    n_flat = flatten_product_xforms(ents)
+    log(f"[so101-demo] {len(ents)} products set up ({n_flat} parent transforms baked into the bodies)")
     # dump the boxes so the map + item choice can be rerun offline
     from demo.store_map import scene_boxes  # noqa: PLC0415
 
@@ -2002,13 +2221,20 @@ def run(app, args, tele):
         },
         "alternatives": alternatives_fn(cat, {it["path"] for it in items.values()}),
     }
-    planner = Planner(str(out / "llm_log.jsonl"), system=SYSTEM)
+    vla = getattr(args, "policy", "scripted") == "perceptron"
+    planner = Planner(str(out / "llm_log.jsonl"), system=SYSTEM_VLA if vla else SYSTEM)
     # name the products from close-up renders (Gemini vision); category names if that fails
     try:
         shots = product_closeups(app, stage, items, out, hide=[ROBOT], look_at=autopilot.look_at)
-        names = planner.name_products(shots) if shots else {}
+        names = planner.name_products(shots, describe=True) if shots and vla else {}
+        if shots and not vla:
+            names = planner.name_products(shots)
         seen = {}
         for iid, nm in names.items():
+            if isinstance(nm, dict):  # describe=True: {"name", "looks"}
+                if iid in items and isinstance(nm.get("looks"), str):
+                    items[iid]["looks"] = nm["looks"].strip().rstrip(".")[:60]
+                nm = nm.get("name")
             if iid in items and isinstance(nm, str) and 2 <= len(nm) <= 40:
                 nm = nm.strip().rstrip(".")
                 seen[nm] = seen.get(nm, 0) + 1
@@ -2016,8 +2242,10 @@ def run(app, args, tele):
         log(f"[so101-demo] product names: {[(i, it['name']) for i, it in items.items()]}")
     except Exception as e:  # noqa: BLE001
         log(f"[so101-demo] product naming skipped: {e}")
-    plan = make_plan(planner, smap, items, spawn, ctx, log)
-    (out / "plan.json").write_text(json.dumps(plan_doc(plan, items, smap, meta, slot, ck, spawn), indent=1))
+    plan = make_plan(planner, smap, items, spawn, ctx, log, schema=SCHEMA_VLA if vla else None)
+    doc = plan_doc(plan, items, smap, meta, slot, ck, spawn)
+    doc["policy"] = "perceptron" if vla else "scripted"
+    (out / "plan.json").write_text(json.dumps(doc, indent=1))
     log(
         f"[so101-demo] setup {time.time() - t_setup:.0f}s; plan {plan['source']} {plan['model']} "
         f"{plan['latency_s']}s: {plan['summary']}"
@@ -2037,8 +2265,24 @@ def run(app, args, tele):
     set_cam = set_cam_factory("/World/picky_director")
     autopilot.look_at(stage, "/World/picky_director", [spawn[0] - 2, spawn[1], 1.8], [spawn[0], spawn[1], 0.5], 16.0)
     cams = {"director": ("/World/picky_director", tuple(args.res))}
-    for nm, res in (("wrist", (640, 360)), ("front", (640, 360)), ("basket", (480, 270))):
+    for nm, res in (("wrist", (960, 540)), ("front", (640, 360)), ("basket", (480, 270))):
         cams[nm] = (ROBOT + kin.k["cameras"][nm][len("/Picky") :], res)
+    # bird's-eye + side follow cameras (960x540 keeps the render cost low)
+    bird_path, side_path = "/World/picky_birdseye", "/World/picky_side"
+    autopilot.look_at(stage, bird_path, [spawn[0] - 0.6, spawn[1], 2.45], [spawn[0], spawn[1], 0.35], 9.0)
+    autopilot.look_at(stage, side_path, [spawn[0], spawn[1] + 1.5, 1.15], [spawn[0], spawn[1], 0.7], 11.0)
+    cams["birdseye"] = (bird_path, (960, 540))
+    cams["side"] = (side_path, (960, 540))
+    keep = {c.strip() for c in str(getattr(args, "rec_cams", "") or "").split(",") if c.strip()}
+    if vla:  # the policy's cameras: the wrist camera + a mast camera on the rover (sim-only mount), basket for verify
+        from demo.vla_pick import MAST, VlaRig  # noqa: PLC0415
+
+        VlaRig.define_mast(stage, "/World/picky_vla_mast")
+        cams[MAST[0]] = ("/World/picky_vla_mast", MAST[1])
+        keep |= {MAST[0], "wrist", "basket"} if keep else set()
+    if keep:  # fewer render products = less GPU memory + faster renders on a shared GPU
+        cams = {k: v for k, v in cams.items() if k in keep or k == "director"}
+    log(f"[so101-demo] recording cameras: {sorted(cams)}")
     try:
         from omni.kit.viewport.utility import get_active_viewport  # noqa: PLC0415
 
@@ -2050,6 +2294,14 @@ def run(app, args, tele):
     import omni.timeline  # noqa: PLC0415
 
     timeline = omni.timeline.get_timeline_interface()
+    try:  # annotators update on every rendered frame only while capture-on-play is on
+        import carb.settings  # noqa: PLC0415
+
+        cs = carb.settings.get_settings()
+        cs.set("/omni/replicator/captureOnPlay", True)
+        log(f"[so101-demo] replicator captureOnPlay={cs.get('/omni/replicator/captureOnPlay')}")
+    except Exception as e:  # noqa: BLE001
+        log(f"[so101-demo] captureOnPlay: {e}")
     timeline.play()
     for _ in range(4):
         app.update()
@@ -2063,8 +2315,35 @@ def run(app, args, tele):
         f"effort api {io.eff_fn}"
     )
     ms = Mission(io, kin, smap, cfg, out, hg, set_cam=set_cam, rec=rec, log=log)
+    ms.cap_every = max(1, int(getattr(args, "capture_every", 2)))
+    follow = FollowCams(hg, set_cam_factory(bird_path), set_cam_factory(side_path))
+    ms.cam_hooks.append(follow.update)
+    rig = None
+    if vla:
+        from demo import vla_pick  # noqa: PLC0415
+
+        rig = vla_pick.VlaRig(
+            ms,
+            stage,
+            ROBOT,
+            vla_pick.Sidecar(args.vla_url),
+            out,
+            wrist_res=cams["wrist"][1],
+            max_calls=args.vla_max_calls,
+            max_attempts=args.vla_attempts,
+        )
+        ms.cam_hooks.append(rig.mast_hook)
+        rig.mast_hook(spawn[0], spawn[1], spawn[2])
     names = {it["path"]: it["name"] for it in items.values()}
-    ms.ev("plan", source=plan["source"], model=plan["model"], summary=plan["summary"], stops=plan["stops"])
+    ms.ev(
+        "plan",
+        source=plan["source"],
+        model=plan["model"],
+        summary=plan["summary"],
+        stops=plan["stops"],
+        checkout_steps=plan.get("checkout_steps", []),
+        policy="perceptron" if vla else "scripted",
+    )
     t_run = time.time()
     try:
         # intro: slow orbit round the rover
@@ -2087,11 +2366,14 @@ def run(app, args, tele):
             rec.set_active(list(cams))
         ms.gphase = "main"
         ms.ev("start")
-        trip(ms, items, plan["stops"], planner, ctx)
+        if rig is not None:
+            vla_pick.trip_vla(ms, rig, items, plan["stops"], planner, ctx, replan)
+        else:
+            trip(ms, items, plan["stops"], planner, ctx)
         ms.checkout(slot, counter_top, names)
         ms.gphase = "outro"
         if rec:
-            rec.set_active(["director", "basket"])
+            rec.set_active([c for c in ("director", "basket") if c in cams])
         q = ms.qm
         d.mode = "orbit"
         n_out = int(args.outro / DT)
@@ -2109,12 +2391,22 @@ def run(app, args, tele):
             "sim_s": round(ms.t, 1),
             "wall_s": round(time.time() - t_run, 1),
             "frames": rec.frame if rec else 0,
+            "stale_frames": dict(rec.dups) if rec else {},
             "effort_api": io.eff_fn,
+            "follow_cam_cuts": follow.cuts,
             "effort_max_Nm": {k: round(v, 3) for k, v in ms.eff_max.items()},
             "llm_calls": sum('"response"' in ln for ln in open(out / "llm_log.jsonl"))
             if (out / "llm_log.jsonl").exists()
             else 0,
         }
+        if rig is not None:
+            vs = rig.summary()
+            for iid, rp in vs["items"].items():
+                p = items.get(iid, {}).get("path")
+                rp["unloaded"] = p in ms.on_counter if p else None
+            stats["vla"] = {k: v for k, v in vs.items() if k != "items"}
+            (out / "vla_summary.json").write_text(json.dumps(vs, indent=1, default=str))
+            ms.ev("vla_summary", **stats["vla"])
         ms.ev("done", **stats)
         (out / "stats.json").write_text(json.dumps(stats, indent=1))
         if rec:

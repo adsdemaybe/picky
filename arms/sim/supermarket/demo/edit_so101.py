@@ -1,11 +1,20 @@
 """Cut a `teleop_app.py --demo --record` run of the SO-101 rover (demo/so101_demo.py) into the demo videos.
 
-Reads RUN/frames/<director|wrist|front|basket>/<n>.jpg (30 fps of sim time), RUN/frames.jsonl, RUN/events.jsonl,
+Reads RUN/frames/<director|birdseye|side|wrist|front|basket>/<n>.jpg (30 fps of sim time; any camera folder may be
+missing), RUN/frames.jsonl, RUN/events.jsonl,
 RUN/plan.json and RUN/topdown.jpg. Composes: title card, intro + shopping list, the Gemini plan card, the main run
 (director camera + HUD + live mini-map with Gemini's route, visited / remaining stops, the trail and the robot +
-wrist-cam and front/basket-cam picture-in-picture + captions with Gemini's reason per leg and each pick), the "Paid"
-card and the outro. Playback speed varies by phase (driving faster than grasping). Works on a run still in progress
+wrist-cam and front/basket/side/chase-cam picture-in-picture + captions with Gemini's reason per leg and each pick),
+the "Paid" card and the outro. Camera views: bird's-eye full screen in the middle of long drives (chase cam as PiP),
+side cam PiP during reach/grasp and the checkout unload, side cam full screen while the arm swings the product into
+the basket (basket cam as PiP); every view is labelled. Playback speed varies by phase (driving faster than
+grasping). Works on a run still in progress
 (--early: cut what exists, end on a "to be continued" card).
+
+Runs with ``--policy perceptron`` (demo/vla_pick.py) also get: Gemini's per-item step plan as a live step panel
+(approach / look / grasp / place / verify, done / current), every Perceptron VLA action as the caption (tool call,
+step number, latency, outcome), the frame Mk1.5 saw with the point it chose, the verifier's verdicts, scripted
+fallbacks labelled as such, and the VLA / Perceptron numbers on the plan and paid cards.
 
     python demo/edit_so101.py RUN OUT_DIR [--only full|highlight|early] [--tag _v2]
     # -> OUT/picky_so101_supermarket_full.mp4, picky_so101_highlight.mp4, picky_so101_preview.gif
@@ -34,7 +43,16 @@ BLUE = (80, 170, 255)
 YELLOW = (255, 214, 90)
 WHITE = (255, 255, 255)
 GREY = (200, 204, 212)
-PICK_PHASES = ("reach", "grasp", "lift", "basket")
+PICK_PHASES = ("look", "reach", "grasp", "lift", "verify", "basket")
+PURPLE = (190, 140, 255)
+RED = (255, 110, 90)
+STEP_LABEL = {
+    "approach": "approach · A* + drive",
+    "look": "look · Perceptron: in view?",
+    "grasp": "grasp · Perceptron VLA",
+    "place_in_basket": "place in basket · IK",
+    "verify": "verify · Perceptron",
+}
 BADGE = [""]  # e.g. "offline preview" for runs without Isaac
 
 
@@ -61,9 +79,29 @@ class Run:
         # wrist camera upside down for flipped-roll grasps
         self.flip_from = []
         for e in self.events:
-            if e["kind"] == "ik_grasp":
+            if e["kind"] in ("ik_grasp", "vla_grasp_setup"):
                 self.flip_from.append((e["t"], bool(e.get("wrist_flip"))))
+        # --policy perceptron runs
+        self.vla = self.plan.get("policy") == "perceptron"
+        self.route_m = 0.0
+        for e in self.events:
+            if e["kind"] == "path" and len(e.get("points") or []) > 1:
+                pts = np.array(e["points"], float)
+                self.route_m += float(np.linalg.norm(np.diff(pts, axis=0), axis=1).sum())
+        self.vla_sum = next((e for e in reversed(self.events) if e["kind"] == "vla_summary"), None)
         self.trail = [(f["t"], f["rovers"][0]["x"], f["rovers"][0]["y"]) for f in self.frames]
+        dts = np.diff([f["t"] for f in self.frames[: min(len(self.frames), 400)]])
+        # sim frames per 1/30 s (1 for a 30 fps recording, 2 for --capture-every 4) to keep playback speeds in sim time
+        self.ratio = max(1.0, float(np.median(dts)) * FPS) if len(dts) else 1.0
+        self.drives = []  # (t0, t1) of each contiguous driving stretch
+        for f in self.frames:
+            drv = f["rovers"][0]["phase"] in ("drive", "to_checkout")
+            if drv and self.drives and self.drives[-1][2]:
+                self.drives[-1][1] = f["t"]
+            elif drv:
+                self.drives.append([f["t"], f["t"], True])
+            elif self.drives:
+                self.drives[-1][2] = False
 
     def frame_path(self, cam, f):
         return self.dir / "frames" / cam / f"{f:06d}.jpg"
@@ -86,6 +124,20 @@ class Run:
         ps = self.paths[name]
         i = bisect.bisect_right([p[0] for p in ps], t) - 1
         return ps[i][1] if i >= 0 else None
+
+    def in_long_drive(self, t, min_len=4.0, pad0=1.2, pad1=1.0):
+        return any(t1 - t0 >= min_len and t0 + pad0 <= t <= t1 - pad1 for t0, t1, _ in self.drives)
+
+    def item_events(self, iid, kinds, t, since=None):
+        return [
+            e
+            for e in self.events
+            if e["kind"] in kinds and e.get("item") == iid and e["t"] <= t and (since is None or e["t"] >= since)
+        ]
+
+    def leg_for(self, iid, t):
+        legs = self.item_events(iid, ("leg",), t)
+        return legs[-1] if legs else None
 
     def wrist_flipped(self, t):
         cur = False
@@ -164,6 +216,13 @@ class Editor:
         img.paste(im, (x0, y0))
         ImageDraw.Draw(img).text((x0 + 6, y0 - 33), label, font=font(22, True), fill=WHITE)
 
+    def view_label(self, img, label, y=160):
+        d = ImageDraw.Draw(img)
+        tw = d.textlength(label, font=font(24, True))
+        panel(img, (24, y, 24 + tw + 64, y + 44), 190, 10)
+        d.ellipse([40, y + 15, 54, y + 29], fill=(255, 70, 70))
+        d.text((64, y + 22), label, font=font(24, True), fill=WHITE, anchor="lm")
+
     def caption_bar(self, img, title, sub, color):
         d = ImageDraw.Draw(img)
         f1, f2 = font(40, True), font(30)
@@ -176,7 +235,7 @@ class Editor:
         for k, ln in enumerate(lines):
             d.text((76, H - h + 34 + 40 * k), ln, font=f2, fill=(228, 228, 228))
 
-    def caption(self, fr, t):
+    def caption(self, fr, t, hold=None):
         r = self.r
         rv = fr["rovers"][0]
         name = rv["name"]
@@ -204,6 +263,10 @@ class Editor:
                 f"Gemini: “{reason}”" if reason else "",
                 BLUE,
             )
+        if r.vla and rv["target"] and (rv["phase"] in PICK_PHASES or hold):
+            cap = self.vla_caption(rv, t, it, hold)
+            if cap:
+                return cap
         if rv["phase"] in PICK_PHASES and rv["target"]:
             g = r.last_event(t, ("grasp_check", "attached"), within=40)
             nm = it.get("name", rv["target"])
@@ -211,6 +274,11 @@ class Editor:
                 sub = {"lift": "lift off the shelf, retract", "basket": "tool down, swing 90° to the rear basket"}.get(
                     rv["phase"], ""
                 )
+                if r.vla and g and g.get("item") == rv["target"]:
+                    who = "Perceptron VLA" if g.get("tier") == "perceptron_vla" else "scripted IK (fallback)"
+                    sub = (
+                        f"grasped by the {who} · " + (sub or "") + (" (scripted IK)" if rv["phase"] == "basket" else "")
+                    )
                 return (f"SO-101 grasp ✓ {nm} → basket", sub, GREEN)
             if rv["phase"] == "grasp":
                 return (
@@ -239,11 +307,223 @@ class Editor:
             return ("Paid ✓", f"{rv.get('counter', 0)} items on the counter (simulated payment)", GREEN)
         return None
 
-    def compose(self, fi, caption=None, overlays=True):
+    def current_step(self, rv, t):
+        """(the vla_step this frame belongs to, done?): while the arm plays a step the frames carry its tool call in
+        ``sub`` and its event (logged when it finished) comes later; between steps the last finished one"""
+        r = self.r
+        tgt = rv.get("target")
+        leg = r.leg_for(tgt, t)
+        since = leg["t"] if leg else None
+        if str(rv.get("sub", "")).startswith("Perceptron VLA:"):
+            nxt = [e for e in r.events if e["kind"] == "vla_step" and e.get("item") == tgt and e["t"] >= t - 1e-6]
+            if nxt:
+                return nxt[0], False
+        st = r.item_events(tgt, ("vla_step",), t, since)
+        return (st[-1], True) if st else (None, None)
+
+    def vla_caption(self, rv, t, it, hold=None):
+        """captions of a --policy perceptron pick: look -> Perceptron VLA steps -> verifier (None = default caption)"""
+        r = self.r
+        tgt = rv["target"]
+        nm = it.get("name", tgt)
+        leg = r.leg_for(tgt, t)
+        since = leg["t"] if leg else None
+        ph = rv["phase"]
+        if hold is not None:
+            kind, e = hold
+            if kind == "decide":
+                lat = (e.get("latency_ms") or 0) / 1000
+                return (
+                    f"Perceptron Mk1.5 decides → {e.get('action') or 'no tool call'}",
+                    f"VLA step {e['n']} (attempt {e['attempt']}) · mast + wrist frames, arm state, last steps in · "
+                    f"one tool call out in {lat:.1f} s · the sim is paused while it thinks",
+                    PURPLE,
+                )
+            if kind == "look":
+                return (f"Perceptron Mk1.5: is the {nm} in view?", f"“{e.get('answer', '')}” (wrist camera)", PURPLE)
+            if kind == "verify":
+                ph = "verify"
+        if ph == "look":
+            e = r.item_events(tgt, ("look",), t, since)
+            if e and e[-1].get("answer"):
+                return (f"Perceptron Mk1.5: is the {nm} in view?", f"“{e[-1]['answer']}” (wrist camera)", PURPLE)
+            return (f"Arm to the look pose for {nm}", "slot from the store map · wrist camera on the shelf", PURPLE)
+        if ph == "verify":
+            if hold is not None:
+                v = hold[1]
+            else:
+                nxt = [e for e in r.events if e["kind"] == "verify" and e.get("item") == tgt and e["t"] >= t - 1e-6]
+                ev = r.item_events(tgt, ("verify",), t, since)
+                v = nxt[0] if nxt and (not ev or nxt[0]["t"] - t < 1.0) else (ev[-1] if ev else None)
+            if v:
+                what = "held between the jaws" if v.get("what") == "held" else "in the basket"
+                mark = {True: "✓", False: "✗"}.get(v.get("verdict"), "?")
+                agree = {True: "sim state agrees", False: "sim state disagrees"}.get(v.get("agrees"), "")
+                sub = f"“{v.get('answer', '')}” · {v.get('camera')} cam" + (f" · {agree}" if agree else "")
+                col = GREEN if v.get("verdict") else RED
+                return (f"Verifier (Perceptron Mk1.5): {nm} {what} {mark}", sub, col)
+            return (f"Verifier (Perceptron Mk1.5) checks the {nm}", "", PURPLE)
+        fb = r.item_events(tgt, ("vla_fallback",), t, since)
+        if fb and ph in ("reach", "grasp", "lift"):
+            f = fb[-1]
+            return (
+                f"Scripted IK fallback: {nm}",
+                f"the Perceptron VLA did not get it in {f.get('attempts', '?')} attempts ({f.get('reason', '')}) · "
+                "this pick is scripted, logged as such",
+                RED,
+            )
+        if ph in ("reach", "grasp", "lift"):
+            s, done = self.current_step(rv, t)
+            if s is None:
+                return (
+                    f"Perceptron VLA takes over the arm: {nm}",
+                    "mast + wrist cameras → Mk1.5 → one tool call",
+                    PURPLE,
+                )
+            held = r.item_events(tgt, ("attached",), t, since)
+            if done and held and s["t"] <= held[-1]["t"] and ph == "lift":
+                return None  # the scripted retract after the VLA's last step
+            lat = (s.get("latency_ms") or 0) / 1000
+            sub = f"Mk1.5 step {s['n']} (attempt {s['attempt']}) · decided in {lat:.1f} s"
+            if done:
+                out = str(s.get("outcome", ""))
+                if out.startswith("ignored: target out of reach"):
+                    out = "ignored: IK can't reach that point with a level side grasp"
+                sub += f" · {out}"
+            return (f"Perceptron VLA → {s.get('action') or 'no tool call'}", sub, PURPLE)
+        return None
+
+    def step_panel(self, img, fr, t):
+        """Gemini's step plan for the current item, live: ✓ done · ▶ now · ○ next; the VLA actions under grasp and the
+        verifier verdicts under verify"""
+        r = self.r
+        rv = fr["rovers"][0]
+        tgt = rv.get("target")
+        ph = rv["phase"]
+        d = ImageDraw.Draw(img)
+        x0, y0, wd = 24, 216, 600
+        if not tgt or ph in ("to_checkout", "checkout", "unload", "paid", "idle", "replan"):
+            if ph in ("to_checkout", "checkout", "unload", "paid"):
+                steps = (r.plan.get("checkout_steps") or {}).get(r.name) or ["approach_checkout", "unload", "pay"]
+                cur = {"to_checkout": 0, "checkout": 1, "unload": 1, "paid": 3}[ph]
+                rows = [
+                    (s.replace("_", " ") + (" · scripted IK" if s == "unload" else ""), k, cur)
+                    for k, s in enumerate(steps)
+                ]
+                h = 60 + 40 * len(rows)
+                panel(img, (x0, y0, x0 + wd, y0 + h), 196, 14)
+                d.text((x0 + 18, y0 + 12), "Gemini step plan · checkout", font=font(24, True), fill=WHITE)
+                for k, (lab, i, c) in enumerate(rows):
+                    mark, col = ("✓", GREEN) if i < c else (("▶", ORANGE) if i == c else ("○", GREY))
+                    d.text((x0 + 22, y0 + 52 + 40 * k), mark, font=font(26, True), fill=col)
+                    d.text((x0 + 58, y0 + 54 + 40 * k), lab, font=font(24), fill=col if i <= c else GREY)
+            return
+        leg = r.leg_for(tgt, t)
+        if leg is None:
+            return
+        steps = leg.get("steps") or ["approach", "look", "grasp", "place_in_basket", "verify"]
+        done = {e["step"] for e in r.item_events(tgt, ("step_done",), t, leg["t"])}
+        cur = {
+            "drive": "approach",
+            "look": "look",
+            "reach": "grasp",
+            "grasp": "grasp",
+            "lift": "grasp",
+            "basket": "place_in_basket",
+            "verify": "verify" if "place_in_basket" in done else "grasp",
+        }.get(ph)
+        it = r.items.get(tgt, {})
+        rows = []
+        for s in steps:
+            st = "done" if s in done else ("now" if s == cur else "next")
+            rows.append((STEP_LABEL.get(s, s), st, None))
+            if s == "grasp" and st != "next":
+                acts = r.item_events(tgt, ("vla_step",), t, leg["t"])
+                cur_s, cur_done = self.current_step(rv, t)
+                if cur_s is not None and not cur_done:
+                    acts = acts + [cur_s]
+                for a in acts[-4:]:
+                    ok = "✓ held" if a.get("held") and a.get("act_kind") == "gripper" else ""
+                    rows.append((f"{a['n']}. {a.get('action') or 'text'}  {ok}", "sub", PURPLE))
+                fb = r.item_events(tgt, ("vla_fallback",), t, leg["t"])
+                if fb:
+                    rows.append(("VLA missed → scripted IK fallback", "sub", RED))
+                for v in r.item_events(tgt, ("verify",), t, leg["t"]):
+                    if v.get("what") == "held":
+                        mk = {True: "✓", False: "✗"}.get(v.get("verdict"), "?")
+                        rows.append((f"verifier: held {mk}", "sub", GREEN if v.get("verdict") else RED))
+            if s == "verify" and st != "next":
+                for v in r.item_events(tgt, ("verify",), t, leg["t"]):
+                    if v.get("what") == "in_basket":
+                        mk = {True: "✓", False: "✗"}.get(v.get("verdict"), "?")
+                        rows.append(
+                            (f"in basket {mk} “{v.get('answer', '')[:34]}”", "sub", GREEN if v.get("verdict") else RED)
+                        )
+        h = 62 + sum(30 if st == "sub" else 40 for _, st, _ in rows)
+        panel(img, (x0, y0, x0 + wd, y0 + h), 196, 14)
+        title = f"Gemini step plan · {it.get('name', tgt)}"
+        d.text((x0 + 18, y0 + 12), title[:44], font=font(24, True), fill=WHITE)
+        y = y0 + 52
+        for lab, st, col in rows:
+            if st == "sub":
+                d.text((x0 + 64, y + 2), lab[:52], font=font(20), fill=col)
+                y += 30
+                continue
+            mark, c = {"done": ("✓", GREEN), "now": ("▶", ORANGE), "next": ("○", GREY)}[st]
+            d.text((x0 + 22, y), mark, font=font(26, True), fill=c)
+            d.text((x0 + 58, y + 2), lab, font=font(24, st == "now"), fill=WHITE if st != "next" else GREY)
+            y += 40
+
+    def vla_input(self, img, t, tgt, box, sub="", step=None):
+        """the frame Mk1.5 decided on (its last step for this item) with the point it chose"""
+        r = self.r
+        if step is not None:
+            s = step
+        else:
+            s, _ = self.current_step({"target": tgt, "sub": sub}, t)
+        if s is None or not s.get("img"):
+            return False
+        cam = (s.get("point_px") or ["wrist"])[0]
+        p = r.dir / "vla" / f"{s['img']}_{cam}.jpg"
+        if not p.exists():
+            return False
+        x0, y0, w, h = box
+        im = Image.open(p).convert("RGB")
+        sw, sh = im.size
+        if s.get("point_px"):
+            dd = ImageDraw.Draw(im)
+            px, py = float(s["point_px"][1]) / 1000 * sw, float(s["point_px"][2]) / 1000 * sh
+            rr = max(8, sw // 40)
+            dd.ellipse([px - rr, py - rr, px + rr, py + rr], outline=(255, 60, 200), width=max(3, sw // 200))
+            dd.line([px - 2 * rr, py, px + 2 * rr, py], fill=(255, 60, 200), width=max(2, sw // 320))
+            dd.line([px, py - 2 * rr, px, py + 2 * rr], fill=(255, 60, 200), width=max(2, sw // 320))
+        h = int(round(w * sh / sw))
+        im = im.resize((w, h), Image.LANCZOS)
+        panel(img, (x0 - 6, y0 - 36, x0 + w + 6, y0 + h + 6), 205, 10)
+        img.paste(im, (x0, y0))
+        label = f"Mk1.5 saw ({cam}) · step {s['n']}"
+        ImageDraw.Draw(img).text((x0 + 6, y0 - 33), label, font=font(22, True), fill=PURPLE)
+        return True
+
+    def compose(self, fi, caption=None, overlays=True, hold=None):
         r = self.r
         fr = r.frames[fi]
         t = fr["t"]
-        base = self.load("director", fi)
+        rv = fr["rovers"][0]
+        main_cam = "director"
+        if overlays and fr["phase"] == "main":
+            if rv["phase"] in ("drive", "to_checkout") and r.in_long_drive(t):
+                main_cam = "birdseye"
+            elif rv["phase"] == "basket":
+                main_cam = "side"
+        base = None
+        if main_cam != "director":
+            f = self.nearest(main_cam, fi)
+            base = self.load(main_cam, f) if f is not None else None
+            if base is None:
+                main_cam = "director"
+        if base is None:
+            base = self.load("director", fi)
         if base is None:
             f = self.nearest("director", fi, 10)
             base = self.load("director", f) if f is not None else Image.new("RGB", (W, H), (20, 20, 24))
@@ -261,12 +541,39 @@ class Editor:
                 fill=(220, 220, 220),
                 anchor="mm",
             )
-            rv = fr["rovers"][0]
+            mode = fr.get("mode", "chase")
+            label = {
+                "birdseye": "bird's-eye",
+                "side": "side cam",
+            }.get(main_cam, {"hold": "close-up cam", "orbit": "orbit cam"}.get(mode, "chase cam"))
+            self.view_label(img, label)
+            slot = (W - 384 - 30, 500, 384, 216)
             basket_view = rv["phase"] == "basket" or r.last_event(t, ("released", "in_basket"), within=1.6)
-            if basket_view and r.has("basket", fi):
-                self.pip(img, "basket", fi, (W - 384 - 30, 500, 384, 216), "basket cam")
+            vla_pick = (
+                r.vla
+                and (rv["phase"] in ("reach", "grasp", "lift") or (hold and hold[0] == "decide"))
+                and not r.last_event(t, ("attached",), within=1.5)
+                and self.vla_input(
+                    img,
+                    t,
+                    rv["target"],
+                    (W - 384 - 30, 480, 384, 0),
+                    sub=rv.get("sub", ""),
+                    step=hold[1] if hold and hold[0] == "decide" else None,
+                )
+            )
+            if vla_pick:
+                pass
+            elif basket_view and r.has("basket", fi):
+                self.pip(img, "basket", fi, slot, "basket cam")
+            elif main_cam == "birdseye":
+                self.pip(img, "director", fi, slot, "chase cam")
+            elif rv["phase"] in PICK_PHASES + ("checkout", "unload") and self.nearest("side", fi) is not None:
+                self.pip(img, "side", fi, slot, "side cam")
+            elif main_cam == "director" and rv["phase"] in ("drive", "to_checkout") and self.nearest("birdseye", fi):
+                self.pip(img, "birdseye", fi, slot, "bird's-eye")
             else:
-                self.pip(img, "front", fi, (W - 384 - 30, 500, 384, 216), "front cam")
+                self.pip(img, "front", fi, slot, "front cam")
             self.pip(
                 img,
                 "wrist",
@@ -275,7 +582,9 @@ class Editor:
                 "SO-101 wrist cam",
                 flip=r.wrist_flipped(t) and rv["phase"] in PICK_PHASES,
             )
-        cap = caption if caption is not None else self.caption(fr, t)
+        if overlays and r.vla and fr["phase"] == "main":
+            self.step_panel(img, fr, t)
+        cap = caption if caption is not None else self.caption(fr, t, hold)
         if cap and cap[0]:
             self.caption_bar(img, *cap)
         if BADGE[0]:
@@ -294,7 +603,9 @@ class Editor:
         if sub:
             d.text(
                 (W / 2, H / 2 + 20),
-                "Gemini maps the store and plans the route · an SO-101 arm does the shopping",
+                "Gemini plans the route + every step · Perceptron Mk1.5 (VLA) grasps and verifies · an SO-101 executes"
+                if self.r.vla
+                else "Gemini maps the store and plans the route · an SO-101 arm does the shopping",
                 font=font(38),
                 fill=(222, 222, 222),
                 anchor="mm",
@@ -317,15 +628,29 @@ class Editor:
         bg.alpha_composite(mm, (50, (H - mm.size[1]) // 2))
         d = ImageDraw.Draw(bg)
         x = 50 + mm.size[0] + 110
-        d.text((x, 60), "Gemini plans the trip", font=font(54, True), fill=WHITE)
-        model = r.plan.get("model") or r.plan.get("source")
         d.text(
-            (x, 128),
-            f"{model} · {r.plan.get('latency_s', '?')} s · {len(r.items)} items · map built from the scene",
-            font=font(23),
-            fill=(170, 175, 185),
+            (x, 60),
+            "Gemini plans the trip + steps" if r.vla else "Gemini plans the trip",
+            font=font(46 if r.vla else 54, True),
+            fill=WHITE,
         )
+        model = r.plan.get("model") or r.plan.get("source")
+        sub = f"{model} · {r.plan.get('latency_s', '?')} s · {len(r.items)} items · map built from the scene"
+        if r.vla:
+            lat = r.plan.get("latency_s", "?")
+            sub = f"{model} · {len(r.items)} items · route {r.route_m:.0f} m · planned in {lat} s"
+        d.text((x, 128), sub, font=font(23), fill=(170, 175, 185))
         y = 172
+        if r.vla:
+            for ln in wrap_text(
+                d,
+                "every stop: approach → look → grasp (Perceptron Mk1.5 VLA) → place in basket → verify (Perceptron)",
+                font(23, True),
+                W - x - 50,
+            ):
+                d.text((x, y), ln, font=font(23, True), fill=PURPLE)
+                y += 32
+            y += 8
         for ln in wrap_text(d, f"“{r.plan.get('summary', '')}”", font(28), W - x - 50)[:4]:
             d.text((x, y), ln, font=font(28), fill=(235, 225, 160))
             y += 37
@@ -360,14 +685,15 @@ class Editor:
         d = ImageDraw.Draw(bg)
         panel(bg, (W / 2 - 560, 120, W / 2 + 560, H - 120), 222, 30)
         d.text((W / 2, 210), "Paid ✓", font=font(108, True), fill=GREEN, anchor="mm")
-        d.text(
-            (W / 2, 300),
-            "every item taken out of the basket by the arm and laid on the counter (simulated payment)",
-            font=font(27),
-            fill=(210, 210, 210),
-            anchor="mm",
-        )
         rv = fr["rovers"][0]
+        n_done, n_ctr = len(rv["done"]), int(rv.get("counter", 0) or 0)
+        line = "every item taken out of the basket by the arm and laid on the counter (simulated payment)"
+        if n_ctr < n_done:  # say what really happened at the counter
+            line = (
+                f"{n_ctr} of {n_done} taken out of the basket by the arm and laid on the counter, "
+                f"{n_done - n_ctr} left in the basket (no unload grasp) · simulated payment"
+            )
+        d.text((W / 2, 300), line, font=font(27), fill=(210, 210, 210), anchor="mm")
         names = [r.items.get(i, {}).get("name", i) for i in rv["done"]]
         y = 370
         d.text(
@@ -381,6 +707,18 @@ class Editor:
             d.text((W / 2 - 500, y), ln, font=font(27), fill=(235, 235, 235))
             y += 38
         stats = r.last_event(1e9, ("done",))
+        vs = r.vla_sum
+        if vs:
+            n_it = len(rv["done"])
+            lat = vs.get("perceptron_latency_ms_median")
+            d.text(
+                (W / 2 - 500, H - 236),
+                f"Perceptron VLA grasps: {vs.get('vla_grasps', 0)} of {n_it} · scripted fallbacks: "
+                f"{vs.get('scripted_fallbacks', 0)} · Perceptron calls: {vs.get('perceptron_calls', 0)}"
+                + (f" (median {lat / 1000:.1f} s)" if lat else ""),
+                font=font(25, True),
+                fill=PURPLE,
+            )
         llm = (stats or {}).get("llm_calls")
         if llm is not None:
             d.text(
@@ -441,6 +779,8 @@ def speed_for(run: Run, fi: int, picks_seen: int, mode: str = "full") -> float:
             "checkout": 4.0,
             "unload": 4.0,
             "replan": 1.0,
+            "look": 2.5,
+            "verify": 1.5,
         }.get(ph, 4.0)
     early = picks_seen < 3
     return {
@@ -454,6 +794,8 @@ def speed_for(run: Run, fi: int, picks_seen: int, mode: str = "full") -> float:
         "checkout": 2.0 if rv.get("counter", 0) < 2 else 4.0,
         "unload": 2.0 if rv.get("counter", 0) < 2 else 4.0,
         "paid": 1.0,
+        "look": 1.5 if early else 2.0,
+        "verify": 1.0,
     }.get(ph, 2.0)
 
 
@@ -463,13 +805,64 @@ def main_frames(run: Run, m0: int, m1: int, mode="full", windows=None):
         fi = int(f)
         fr = run.frames[fi]
         done = len(fr["rovers"][0]["done"])
-        sp = speed_for(run, fi, done, mode)
+        sp = speed_for(run, fi, done, mode) / run.ratio
         if windows is not None:
             t = fr["t"]
             if not any(a <= t <= b for a, b in windows):
                 sp = max(sp, 30.0)
         yield fi
         f += sp
+
+
+HOLD_FRAMES = {"full": {"decide": 24, "look": 36, "verify": 36}, "highlight": {"decide": 10, "look": 18, "verify": 20}}
+
+
+def vla_holds(run: Run) -> list[tuple[int, str, dict]]:
+    """(frame, kind, event) where a --policy perceptron run decided something with the sim paused: the first frame of
+    each VLA step (its tool call is in ``sub``), of the look question, of each verifier check"""
+    out = []
+    prev = None
+    for fi, fr in enumerate(run.frames):
+        rv = fr["rovers"][0]
+        key = (rv["phase"], rv.get("sub", ""), rv.get("target"))
+        if key != prev and fr["phase"] == "main":
+            t, tgt, sub = fr["t"], rv.get("target"), str(rv.get("sub", ""))
+            kind = (
+                "decide"
+                if sub.startswith("Perceptron VLA:")
+                else (
+                    "look" if sub.startswith("Perceptron: is it") else ("verify" if rv["phase"] == "verify" else None)
+                )
+            )
+            ev_kind = {"decide": "vla_step", "look": "look", "verify": "verify"}.get(kind)
+            if ev_kind:
+                nxt = [e for e in run.events if e["kind"] == ev_kind and e.get("item") == tgt and e["t"] >= t - 1e-6]
+                if nxt:
+                    out.append((fi, kind, nxt[0]))
+        prev = key
+    return out
+
+
+def with_holds(ed, frames_iter, mode="full", windows=None):
+    """compose each frame; at every VLA decision / look / verifier check hold the frame a moment (the sim was paused
+    while Perceptron answered, so the recording has no frames for it)"""
+    r = ed.r
+    holds = vla_holds(r) if r.vla else []
+    k, prev = 0, -1
+    for fi in frames_iter:
+        while k < len(holds) and holds[k][0] <= fi:
+            hf, kind, ev = holds[k]
+            k += 1
+            if hf <= prev:
+                continue
+            t = r.frames[hf]["t"]
+            if windows is not None and not any(a <= t <= b for a, b in windows):
+                continue
+            im = ed.compose(hf, hold=(kind, ev))
+            for _ in range(HOLD_FRAMES[mode][kind]):
+                yield im
+        yield ed.compose(fi)
+        prev = fi
 
 
 def write(path: Path, frames_iter, gif: Path | None = None, gif_range=None):
@@ -481,7 +874,7 @@ def write(path: Path, frames_iter, gif: Path | None = None, gif_range=None):
         fps=FPS,
         codec="libx264",
         quality=None,
-        output_params=["-crf", "19", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart"],
+        output_params=["-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart"],
         macro_block_size=8,
     )
     w.send(None)
@@ -517,8 +910,7 @@ def full_cut(ed: Editor, early=False):
     if m0 is None:
         return
     yield from ed.plan_card(m0, int(7 * FPS))
-    for fi in main_frames(r, m0, m1):
-        yield ed.compose(fi)
+    yield from with_holds(ed, main_frames(r, m0, m1))
     if early:
         yield from ed.todo_card(m1, int(2 * FPS))
         return
@@ -537,6 +929,8 @@ def highlight(ed: Editor):
     yield from ed.plan_card(m0, int(3.5 * FPS))
     # three picks from different sections (slide-in -> in the basket), driving in between at 8x, one unload
     att = [e for e in r.events if e["kind"] == "attached"]
+    if r.vla:  # VLA picks first (look -> verifier), the fallbacks only if there are too few
+        att = sorted(att, key=lambda e: (e.get("tier") != "perceptron_vla", e["t"]))
     secs, wins = set(), []
     for e in att:
         sec = r.items.get(e["item"], {}).get("section")
@@ -544,14 +938,24 @@ def highlight(ed: Editor):
             continue
         secs.add(sec)
         t_in = next((x["t"] for x in r.events if x["kind"] == "in_basket" and x["item"] == e["item"]), e["t"] + 10)
-        wins.append((e["t"] - 5.0, t_in + 0.8))
-        if len(wins) == 3:
+        if r.vla:  # parked -> look -> VLA steps -> verifier -> basket -> basket verifier
+            lk = [
+                x["t"]
+                for x in r.events
+                if x.get("item") == e["item"]
+                and (x["kind"] in ("look", "vla_grasp_setup") or (x["kind"] == "step_done" and x["step"] == "approach"))
+            ]
+            vf = [x["t"] for x in r.events if x["kind"] == "verify" and x.get("item") == e["item"] and x["t"] > t_in]
+            wins.append(((min(lk) - 0.5) if lk else e["t"] - 6.0, (vf[-1] + 1.0) if vf else t_in + 0.8))
+        else:
+            wins.append((e["t"] - 5.0, t_in + 0.8))
+        if len(wins) == (4 if r.vla else 3):
             break
     un = next((e for e in r.events if e["kind"] == "unload_attached"), None)
     if un:
         wins.append((un["t"] - 4.0, un["t"] + 9.0))
-    for fi in main_frames(r, m0, m1, "highlight", wins):
-        yield ed.compose(fi)
+    wins.sort()
+    yield from with_holds(ed, main_frames(r, m0, m1, "highlight", wins), "highlight", wins)
     yield from ed.paid_card(m1, int(3 * FPS))
     if o0 is not None:
         for fi in range(o0, o1 + 1, 3):
@@ -585,7 +989,7 @@ def main():
         idx = sorted(set(np.linspace(m0, m1, a.stills).astype(int).tolist()))
         tmap = [f["t"] for f in r.frames]
         for e in r.events:
-            if e["kind"] in ("grasp_check", "in_basket", "leg", "on_counter", "replan"):
+            if e["kind"] in ("grasp_check", "in_basket", "leg", "on_counter", "replan", "vla_step", "look", "verify"):
                 idx.append(min(len(tmap) - 1, bisect.bisect_left(tmap, e["t"] + 0.5)))
         for fi in sorted(set(idx))[: a.stills * 3]:
             ed.compose(fi).save(st / f"main_{fi:06d}.jpg", quality=88)

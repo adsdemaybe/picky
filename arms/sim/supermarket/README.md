@@ -58,6 +58,7 @@ Demo loop: drive to a shelf → N → jog with ↑/↓ until the gripper is at a
 | `demo/so101_config.json` | SO-101 demo: spawn, checkout counter + parking slot, counter placement spots, open shelf sides |
 | `demo/edit_so101.py` | cuts an SO-101 run: full cut, 45-60 s highlight, GIF, early cut, `--stills N` for review |
 | `demo/record_so101.sh` | one command: record the SO-101 demo + cut the videos (on the GPU host) |
+| `demo/vla_policy.py` / `demo/vla_pick.py` / `demo/vla_sidecar.py` | `--policy perceptron`: Mk1.5 tool policy (pure: prompt, tools, parsing, pixel → shelf geometry, guards), the Isaac-side planner → VLA → verifier loop, the localhost httpx sidecar to Perceptron |
 | `robot/build_so101_rover.py` | robot v3 USD: PMB2 base + fixed riser + long-reach SO-101 (cut + carbon-tube extensions, reducers) + round wire basket + cameras, one articulation; writes `.kin.json` (chain, actuators, torque budget, jaw points) |
 | `robot/setup_so101_rover.sh` | fetches SO-ARM100 + pmb2_robot at pinned commits, makes the tools venv, builds the USD, runs the reach check |
 | `robot/so101_ik.py` / `robot/urdf_tree.py` | numpy FK/IK (DLS) for the long-reach chain; minimal URDF reader |
@@ -98,6 +99,40 @@ flying through shelves) + the robot's wrist, front and basket cameras, one frame
 time. `frames.jsonl` / `events.jsonl` / `plan.json` / `llm_log.jsonl` / `stats.json` sit next to the frames;
 `demo/edit_so101.py` adds the HUD, the live mini-map (Gemini's route, visited/remaining stops, the trail, the robot),
 picture-in-picture and captions.
+
+### `--policy perceptron`: Gemini plans, Perceptron Mk1.5 grasps (VLA) and verifies
+
+Same trip, with Picky's live planner → VLA → verifier loop instead of the scripted picks (the default stays
+`--policy scripted`). Mirrors the live T1 tier (`arms/robot/vla_mk15.py` + `vla_t1.py` on main) on this rover:
+
+| step | who | how |
+|---|---|---|
+| route + **step plan** | Gemini (`demo/planner.py`, `PICKY_MODEL_FAST` first, the next model on HTTP 429) | per stop `steps` (approach, look, grasp, place_in_basket, verify) + a grasp hint, `checkout_steps`; close-up names also get a "looks" line (colours / shape) for the policy prompt; `demo/vla_pick.norm_steps` keeps known steps in order and adds missing required ones |
+| look | Perceptron Mk1.5 | the arm unfolds to a pose 20 cm in front of the slot (store map = this scene's planogram), "is the &lt;product&gt; visible?" on the wrist frame |
+| **grasp** | **Perceptron Mk1.5 as the VLA** | per step: mast + wrist JPEGs + arm state + the last steps → `demo/vla_sidecar.py` → Mk1.5 → ONE tool call (`reach_point` / `move_ee` / `set_gripper` / `lift` / `done`, the live tool set) → `vla_policy.map_action` validates + clamps (pixel ray → the product's aisle face from the map; height / along-shelf clamps) → IK (`so101_ik`) → joint drives. Close = jaws close until the moving jaw touches the product, attached only if it is between the pads. Physics is paused while Mk1.5 decides (no `app.update()`: sim time and the 30 fps recording only move with the arm) |
+| fallback | scripted IK | after `--vla-attempts` (2) attempts of `--vla-max-calls` (8) steps without a grasp, or no sidecar / key: the scripted pick runs and `events.jsonl` says so (`vla_fallback`, `tier` on every `attached` / `grasp_check`); it is never counted as a VLA pick |
+| place in basket | scripted IK | as in the scripted run |
+| **verify** | Perceptron Mk1.5 | held: the live verifier's rule (detect the product in the wrist frame, a box over the jaws = IoU > 0.2 with `GRIPPER_ROI_WRIST`), after the retract; in basket: "is &lt;product&gt; inside the basket?" on the basket camera. A "no" re-checks once with a fresh frame; the sim's own state is logged next to every verdict (`agrees`) |
+| checkout | scripted IK | unload onto the counter, "Paid" |
+
+The mast camera (`/World/picky_vla_mast`, 640×480, 74° hfov) rides 0.3 m behind the arm's pan axis, 1.6 m up, and
+looks at the slot during a pick: a sim-only camera (no mast is modelled). The sidecar runs in the repo's uv venv
+(Isaac's python has no httpx, and Perceptron's CDN refuses urllib's default client); the Isaac app calls it on
+localhost with urllib. Every Mk1.5 input frame is kept in `RUN/vla/`, every call in `RUN/vla_calls.jsonl` (no images,
+no key), the per-item outcome in `RUN/vla_summary.json`.
+
+```bash
+# on vhagar (keys: PERCEPTRON_API_KEY + GEMINI_API_KEY in ~/.config/picky/secrets.env, never printed)
+set -a; . ~/.config/picky/secrets.env; set +a
+uv run python arms/sim/supermarket/demo/vla_sidecar.py --port 8766 --log $RUN/vla_calls.jsonl &
+/data/advaiv2/isaacsim/python.sh arms/sim/supermarket/teleop_app.py --scene $SCENE --robot $ROBOT --demo --record \
+    --out $RUN --policy perceptron --vla-url http://127.0.0.1:8766 --max-items 8 --rec-cams director,birdseye,side,wrist,basket
+python demo/edit_so101.py $RUN $RUN/video   # step panel, VLA captions, Mk1.5 input inset, verifier verdicts
+```
+
+Tests (base deps, no Isaac / network): `arms/sim/supermarket/tests/test_vla_policy.py` (response parsing, pixel ray ↔
+projection, tool call → Cartesian action with clamps, the live guards, detect boxes → held rule, action → grasp TCPs
+→ IK on the rover's real SO-101 chain from `tests/fixtures/picky_so101_rover.kin.json`).
 
 ### Live stream to the web app (`demo/frame_stream.py`)
 

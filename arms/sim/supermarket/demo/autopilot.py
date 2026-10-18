@@ -661,8 +661,27 @@ def topdown(app, stage, smap, out: Path, hide: list[str], px_n: int = 1024):
     dep = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
     rgb.attach([rp])
     dep.attach([rp])
+    # annotators only capture while the timeline plays (Replicator captureOnPlay); the SO-101 demo renders this
+    # before play, so capture on every update for now and fall back to an explicit orchestrator step
+    import carb.settings
+
+    cs = carb.settings.get_settings()
+    cop = cs.get("/omni/replicator/captureOnPlay")
+    cs.set("/omni/replicator/captureOnPlay", False)
     for _ in range(40):
         app.update()
+    for k in range(200):
+        if getattr(rgb.get_data(), "size", 0) > 0 and getattr(dep.get_data(), "size", 0) > 0:
+            break
+        if k % 20 == 19:
+            try:
+                rep.orchestrator.step(rt_subframes=4, pause_timeline=False)
+            except Exception as e:  # noqa: BLE001
+                print(f"[topdown] orchestrator.step: {e}", flush=True)
+        app.update()
+    # restore capture-on-play (unset counts as on): left False, every annotator during the run keeps returning its
+    # first frame (the frozen-frame recordings of runs isaac1/isaac2)
+    cs.set("/omni/replicator/captureOnPlay", True if cop is None else cop)
     img = np.asarray(rgb.get_data())[..., :3]
     d = np.asarray(dep.get_data(), dtype=np.float32)
     rgb.detach()

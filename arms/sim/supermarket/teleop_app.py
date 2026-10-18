@@ -53,7 +53,7 @@ ap.add_argument("--livestream", action="store_true", help="enable WebRTC livestr
 # --demo: autopilot shopping run (demo/autopilot.py): Gemini plans the route, the rovers drive + pick + check out
 ap.add_argument("--demo", action="store_true", help="LLM-planned autopilot shopping run (headless unless --livestream)")
 ap.add_argument("--demo-robot", choices=["so101", "rm2"], default="so101",
-                help="--demo robot: so101 = SO-101 rover v3 (demo/so101_demo.py), rm2 = rm2_car/AIRBOT")  # fmt: skip
+                help="--demo robot: so101 = Picky SO-101 rover v3 (demo/so101_demo.py), rm2 = rm2_car/AIRBOT")  # fmt: skip # noqa: E501
 ap.add_argument("--so101-config", default=str(Path(__file__).parent / "demo" / "so101_config.json"))
 ap.add_argument("--light-scale", type=float, default=0.8, help="--demo so101: scale every scene light (exposure)")
 ap.add_argument("--demo-config", default=str(Path(__file__).parent / "demo" / "demo_config.json"))
@@ -68,7 +68,18 @@ ap.add_argument("--plan-only", action="store_true", help="--demo: build the map,
 ap.add_argument("--intro", type=float, default=7.0, help="--demo: seconds of intro orbit")
 ap.add_argument("--outro", type=float, default=7.0)
 ap.add_argument("--max-sim-s", type=float, default=900.0)
+ap.add_argument(
+    "--rec-cams", default="director,birdseye,side,wrist,front,basket", help="--demo so101: cameras to record"
+)
+ap.add_argument("--capture-every", type=int, default=2, help="--demo so101: record every Nth 60 Hz step (2 = 30 fps)")
 ap.add_argument("--debug", action="store_true", help="--demo: log held-product poses after each grab")
+# --demo so101 grasp policy: scripted IK (default) or Perceptron Mk1.5 as the VLA (demo/vla_pick.py + vla_sidecar.py)
+ap.add_argument("--policy", choices=["scripted", "perceptron"], default="scripted", help="--demo so101 grasp policy")
+ap.add_argument("--vla-url", default="http://127.0.0.1:8766", help="--policy perceptron: demo/vla_sidecar.py")
+ap.add_argument("--vla-max-calls", type=int, default=8, help="--policy perceptron: Mk1.5 steps per grasp attempt")
+ap.add_argument(
+    "--vla-attempts", type=int, default=2, help="--policy perceptron: VLA attempts before the scripted grasp"
+)
 args = ap.parse_args()
 if args.smoke or (args.demo and not args.livestream):
     args.headless = True
@@ -521,6 +532,13 @@ def main():
 
         try:
             so101_demo.run(simulation_app, args, sys.modules[__name__])
+        except BaseException:  # print it: close() below exits the process before Python would
+            import traceback  # noqa: PLC0415
+
+            traceback.print_exc()
+            sys.stdout.flush()
+            sys.stderr.flush()
+            raise
         finally:
             simulation_app.close()
         return
