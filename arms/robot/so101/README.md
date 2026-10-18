@@ -188,13 +188,16 @@ Options: `--camera fake | image:<file or folder> | <index or name>` (default `SO
 | | standalone (default) | `--stand-in rover-hill-1` |
 |---|---|---|
 | hosts | store `store_table`, robot `so101-real`, camera `so101-real.front` | the fleet robot + its store (`store_hill`) |
-| app shows | worker in `GET /api/sim/status`, camera in `GET /api/cameras` | Hazel's live camera = the real table camera, Hazel's goals / brain steps / cart driven by the real arm, `isaac_store_ids` includes `store_hill` |
+| app shows | worker in `GET /api/sim/status`, camera in `GET /api/cameras` (frames: see gaps); no goals | the live page of a Capitol Hill order: "Store ceiling camera" and "What the robot sees" = the table camera, Hazel's plan / brain steps / basket / receipt driven by the real arm; `isaac_store_ids` includes `store_hill` |
 | needs | a gateway change before frames / commands flow (see gaps) | the Isaac worker must NOT host that store (`PICKY_SIM_STORES=store_ave` on vhagar) |
 
 In stand-in mode the bridge advertises the store `loaded=false`; the robot arm then sends the store-level `ResetCmd`
 with the planogram, products and robots (the bridge keeps the SKU names, the slots and Hazel's dock) and routes
 `store_hill` to the bridge. Tested on a Mac against the `feat/judges-demo` gateway with `--dry --camera fake`: the
-request "get me salsa and tortilla chips" at Capitol Hill went fleet -> Hazel -> bridge (navigate, scan, pick, place).
+request "get me salsa and tortilla chips" at Capitol Hill went fleet -> Hazel -> bridge (navigate, scan, pick, place);
+a fetch goal pinned with `POST /api/fleet/robots/rover-hill-1/goals` completed through the bridge; and with Playwright
+the web app's `/watch` page followed a Capitol Hill order end to end (both camera panels showed the bridge's frames,
+basket filled, receipt shown).
 
 **Command mapping** (the arm is stationary; the plate next to it is the basket):
 
@@ -205,7 +208,7 @@ request "get me salsa and tortilla chips" at Capitol Hill went fleet -> Hazel ->
 | `pick` | Perceptron grounding of the product (or its `--map` / `--default-prop` prop) + IK plan (`pick_routine.plan`, learned steering) + hover / straddle / close / short lift. Not found -> `no_instance`; unreachable -> `grasp_failed` |
 | `place_in_basket` | lift high, carry, lower onto the plate, release, retreat, home |
 | `unload_basket` | bookkeeping only (a person empties the plate) |
-| `capture` | real frame (`basket` / unknown kinds of this robot alias the table camera) |
+| `capture` | real frame (`basket` / unknown kinds of this robot, and the hosted store's `<store>.ceiling-<n>` cameras, alias the table camera) |
 | `stop` | halts at the next interpolation step; the running motion answers `cancelled`, the arm holds its pose |
 | `reset` | robot: home + empty basket; store: adopt the gateway's planogram / products (no motion) |
 | `set_streams`, `list_instances`, `set_slot_stock` | as the Isaac worker |
@@ -220,8 +223,17 @@ worker cameras as rendered and does not face-check them.
 
 **Known gaps (need the gateway or physical work):**
 - Standalone `so101-real` is listed but its camera shows "offline (unknown_robot)": the gateway robot arm only drives
-  robots in `data/fixtures/robots.yaml` and drops other workers' frames. Use stand-in mode, or teach `SimRobot` about
-  worker-only robots (capture by `camera_id` + relay their frames + include their cameras in `set_streams`).
+  robots in `data/fixtures/robots.yaml` and drops other workers' frames. Use stand-in mode. Camera fix on the gateway
+  (about 20 lines in `arms/robot/service.py`, checked against a local gateway copy): in `capture_camera`, a robot that is
+  not in robots.yaml but is hosted by a worker gets a `CaptureCmd(camera_id=...)` on that worker, and `_on_message`
+  also pushes that robot's streamed frames. Goals on a standalone robot also need the fleet to know it (its robots come
+  only from robots.yaml), which is a bigger change. Stand-in mode avoids both.
+- No chase camera (`<robot>.director`) in stand-in mode: the app shows "Chase camera offline". The `arm/robot` branch
+  is still on contracts 0.2.0, where `director` isn't a camera kind yet. Announce it (an alias of the table camera)
+  after `arm/robot` merges `main`'s 0.2.3 contracts.
+- The app labels the bridge's frames "Live · Isaac Sim": `contracts.cameras.CameraSource` is `isaac | fake | none`,
+  with no value for a physical camera. Labelling them honestly (e.g. "Live · real SO-101") needs a contracts change
+  (`CameraSource` + `"real"`), so that the bridge's `CameraInfo.source` and the app's badge can say so.
 - The gateway waits 15 s for a `pick` / `place_in_basket` (`SIM_DEFAULT_TIMEOUT_S`); a real pick is ~10-20 s and
   `--confirm` adds your reaction time. A late result is dropped and the brain sees `timeout`. Fix on the gateway: a
   longer timeout for workers advertising the `real_hardware` capability.

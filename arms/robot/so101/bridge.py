@@ -312,10 +312,20 @@ class BridgeCore:
     # ---- streams ---------------------------------------------------------------------------------------------------
     def set_streams(self, camera_ids: list[str], fps: float) -> list[str]:
         now = self.clock()
-        known = set(self.camera_ids())
         self.stream_fps = max(0.1, min(MAX_STREAM_FPS, fps))
-        self.streams = {cid: now for cid in camera_ids if cid in known}
-        return [cid for cid in camera_ids if cid not in known]
+        self.streams = {cid: now for cid in camera_ids if self.serves_camera(cid)}
+        return [cid for cid in camera_ids if not self.serves_camera(cid)]
+
+    def serves_camera(self, camera_id: str) -> bool:
+        """Our robot's cameras, plus our store's ceiling cameras (a stand-in store keeps the gateway's ceiling
+        cameras; the bridge answers them with the table camera, a fixed overview of the bench)."""
+        if camera_id in self.camera_ids():
+            return True
+        try:
+            owner, kind = parse_camera_id(camera_id)
+        except ValueError:
+            return False
+        return kind == "ceiling" and owner == self.cfg.store_id
 
     def stream_due(self, now: float | None = None) -> list[str]:
         now = self.clock() if now is None else now
@@ -329,12 +339,17 @@ class BridgeCore:
 
     # ---- frames ----------------------------------------------------------------------------------------------------
     def resolve_camera(self, camera_id: str | None, robot_id: str | None, camera: str = "front") -> str:
-        """Hosted camera id for a capture; other kinds of OUR robot (e.g. 'basket') alias to the table camera."""
+        """Hosted camera id for a capture; other kinds of OUR robot (e.g. 'basket') and our store's ceiling cameras
+        alias to the table camera."""
         if camera_id:
             try:
                 owner, kind = parse_camera_id(camera_id)
             except ValueError as exc:
                 raise RigError("unknown_robot", str(exc)) from exc
+            if kind == "ceiling":
+                if owner != self.cfg.store_id:
+                    raise RigError("unknown_robot", f"camera {camera_id!r} is not hosted by this bridge")
+                return camera_id
         elif robot_id:
             owner, kind = robot_id, normalize_camera(camera)  # type: ignore[assignment]
         else:
@@ -347,18 +362,19 @@ class BridgeCore:
         _, kind = parse_camera_id(camera_id)
         src = self.cameras.get(kind) or self.cameras["front"]
         jpeg, w, h = src.read_jpeg()
+        robot_cam = kind != "ceiling"  # a store camera carries no robot_id / robot pose (contracts/sim.py)
         return CameraFrame(
             frame_id=new_id("frame"),
             camera=kind,  # type: ignore[arg-type]
             camera_id=camera_id,
-            robot_id=self.cfg.robot_id,
+            robot_id=self.cfg.robot_id if robot_cam else None,
             store_id=self.cfg.store_id,
             jpeg_b64=base64.b64encode(jpeg).decode("ascii"),
             w=w,
             h=h,
             blurred=False,  # RAW on the wire (contracts/sim.py); real frames were face-blurred on this laptop anyway
             slot_id=slot_id,
-            pose=self.pose,
+            pose=self.pose if robot_cam else None,
         )
 
     # ---- results ---------------------------------------------------------------------------------------------------

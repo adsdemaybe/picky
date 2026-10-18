@@ -144,6 +144,27 @@ def test_capture_of_a_camera_we_do_not_host_is_unknown_robot():
     assert sink.result("c2").error_code == "unknown_robot"
 
 
+def test_stand_in_answers_its_store_ceiling_cameras_with_the_table_camera():
+    core, sink, _ = make(stand_in=True)
+    core.submit(cmd("capture", "c1", None, camera_id="store_hill.ceiling-1"))
+    core.submit(cmd("capture", "c2", None, camera_id="store_ave.ceiling-1"))  # another store: not ours
+    res = sink.result("c1")
+    assert res.ok and res.frame is not None
+    assert (res.frame.camera_id, res.frame.camera, res.frame.store_id) == (
+        "store_hill.ceiling-1",
+        "ceiling",
+        "store_hill",
+    )
+    assert res.frame.robot_id is None and res.frame.pose is None  # a store camera, not a robot camera
+    assert _jpeg_size(res.frame) == (160, 120)
+    assert sink.result("c2").error_code == "unknown_robot"
+    missing = core.set_streams(["rover-hill-1.front", "store_hill.ceiling-1", "store_ave.ceiling-1"], 2)
+    assert missing == ["store_ave.ceiling-1"]
+    assert set(core.streams) == {"rover-hill-1.front", "store_hill.ceiling-1"}
+    frame = core.frame(core.stream_due()[-1])
+    assert frame.camera == "ceiling" and frame.robot_id is None
+
+
 def test_set_streams_keeps_hosted_cameras_and_paces_frames():
     t = [100.0]
     core, sink, _ = make()
