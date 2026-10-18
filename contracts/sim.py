@@ -66,6 +66,8 @@ Command rules
   policies; the robot arm runs the policy loop, one command per action chunk, and gets the joint state + the two
   policy-camera frames back in the same result (``ArmJointsCmd`` docstring). Grasps there are the "sticky grasp"
   physics substitute (attach on close within ~3 cm of the jaw center), reported in ``ArmJointState.events``.
+  ``arm_ik`` (0.2.2, capability ``ARM_IK_CAPABILITY``, not a motion: always allowed) solves TCP targets on the
+  worker's SO-101 model into joint rows (Cartesian policies), never moves.
 - ``set_slot_stock`` makes a slot hold exactly ``qty`` units (lots in planogram order): units are spawned / removed
   deterministically (``instance_id(slot_id, n)``, removing the highest n = back rows first) so it matches catalog
   restocks and write-offs (``RobotService.sync_stock``).
@@ -432,6 +434,14 @@ class ArmJointsCmd(_Cmd):
         default_factory=lambda: list(POLICY_CAMERAS), description="Policy cameras rendered after the last row."
     )
     capture_each_step: bool = Field(False, description="Render ``capture`` after EVERY row (dataset recording).")
+    capture_every: int = Field(
+        0,
+        ge=0,
+        le=ARM_JOINTS_MAX_STEPS,
+        description="Also render ``capture`` after every n-th row while the rows play (the live picture feed while "
+        "the arm moves: 10 at 30 Hz = 3 frames/s); 0 = only after the last row. The last frame is always the "
+        "observation after the last row.",
+    )
     end: bool = Field(False, description="After the rows: leave joint mode (the scripted rig takes the arm back).")
     exec_id: str | None = Field(None, description="VLA exec id (logs only).")
 
@@ -446,6 +456,49 @@ class ArmJointsCmd(_Cmd):
         return rows
 
 
+ARM_IK_CAPABILITY = "arm_ik"
+"""``SimHello.capabilities`` entry of a worker that implements ``ArmIkCmd`` (0.2.2)."""
+ARM_IK_MAX_TARGETS = 8
+IK_TOLERANCE_M = 0.015
+"""``IkSolution.ok``: the solved TCP is within this of the target."""
+
+
+class IkTarget(Model):
+    """One TCP target for ``ArmIkCmd``: the jaw center at ``point`` (STORE frame)."""
+
+    point: Point3
+    level: bool = Field(True, description="Keep the gripper level (side grasp, as the scripted rig and the demos).")
+    gripper_deg: float | None = Field(None, description="Gripper joint of the solution (None = the seed's).")
+    wrist_roll_deg: float | None = Field(None, description="Wrist roll of the solution (None = the seed's).")
+
+
+class IkSolution(Model):
+    q_deg: list[float] = Field(description="6 USD joint degrees (SO101_JOINT_NAMES order), clamped to the limits.")
+    error_m: float = Field(ge=0, description="Solved TCP to target distance.")
+    ok: bool = Field(description="error_m <= IK_TOLERANCE_M (else the closest reachable pose).")
+    tcp: Point3 | None = Field(None, description="Solved TCP, store frame.")
+
+
+class ArmIkCmd(_Cmd):
+    """NON-motion (0.2.2, capability ``ARM_IK_CAPABILITY``): inverse kinematics on the worker's SO-101 model (the
+    rover USD's joint frames), so policies that act in Cartesian space (e.g. a VLM pointing at pixels) turn targets
+    into the joint rows of an ``ArmJointsCmd``. Solves only, never moves. Targets are solved in order, each seeded
+    with the previous solution (``seed_deg`` / the current joints first, then a few fixed seeds); the lift is
+    ``lift_height_m`` (None = the current lift). Result: ``CommandResult.ik`` (one ``IkSolution`` per target)."""
+
+    type: Literal["arm_ik"] = "arm_ik"
+    targets: list[IkTarget] = Field(min_length=1, max_length=ARM_IK_MAX_TARGETS)
+    lift_height_m: float | None = None
+    seed_deg: list[float] | None = Field(None, description="6 USD degrees; None = the arm's current joints.")
+
+    @field_validator("seed_deg")
+    @classmethod
+    def _seed_six(cls, v: list[float] | None) -> list[float] | None:
+        if v is not None and (len(v) != len(SO101_JOINT_NAMES) or not all(math.isfinite(x) for x in v)):
+            raise ValueError(f"seed_deg needs {len(SO101_JOINT_NAMES)} finite values")
+        return v
+
+
 SimCommand = Annotated[
     NavigateCmd
     | ScanCmd
@@ -458,7 +511,8 @@ SimCommand = Annotated[
     | StopCmd
     | SetStreamsCmd
     | SetSlotStockCmd
-    | ArmJointsCmd,
+    | ArmJointsCmd
+    | ArmIkCmd,
     Field(discriminator="type"),
 ]
 
@@ -482,6 +536,11 @@ class PolicyFrame(Model):
     h: int = Field(ge=1)
     blurred: bool = False
     camera_pose: CameraMount | None = Field(None, description="Pose + intrinsics used (frame='world' = store frame).")
+    roll: float = Field(
+        0.0,
+        description="Camera roll about its viewing axis (rad, > 0 turns the image's right edge up); with camera_pose "
+        "the exact pinhole for casting a pixel ray (the wrist camera rolls with the wrist).",
+    )
     ts: Timestamp = Field(default_factory=utcnow)
 
 
@@ -521,6 +580,7 @@ class CommandResult(WireModel):
     policy_frames: list[PolicyFrame] = Field(
         default_factory=list, description="arm_joints results (0.2.2): the requested policy-camera frames, in order."
     )
+    ik: list[IkSolution] = Field(default_factory=list, description="arm_ik results (0.2.2): one per target.")
 
 
 class SimStoreInfo(WireModel):
@@ -615,6 +675,7 @@ GatewayToSim = Annotated[
     | SetStreamsCmd
     | SetSlotStockCmd
     | ArmJointsCmd
+    | ArmIkCmd
     | SimWelcome,
     Field(discriminator="type"),
 ]

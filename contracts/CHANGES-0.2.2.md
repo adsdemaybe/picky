@@ -44,3 +44,24 @@ The worker runs no physics. When the gripper joint crosses below its closing thr
 of the jaw center, that unit attaches to the gripper link (`events: 'sticky_grasp:<id>'`, a `SimLog` says "sticky
 grasp (physics substitute)"); opening releases it into the basket (over it), back onto its shelf spot (near it) or
 onto the floor. The VLA's success is still only a claim: the verifier checks the postcondition.
+
+## Additions inside 0.2.2 (before any 0.2.2 worker was deployed): Cartesian policies + pictures while moving
+
+Still additive and still `0.2.2` (no 0.2.2 build had shipped when they were added; 0.2.0 / 0.2.1 workers are
+unaffected: they never get these commands, see the capability gates).
+
+- `ArmIkCmd` (`type='arm_ik'`, NOT a motion: allowed while a chunk plays; capability `ARM_IK_CAPABILITY='arm_ik'`):
+  up to `ARM_IK_MAX_TARGETS` (8) `IkTarget`s (jaw-center point in the STORE frame, `level`, optional `gripper_deg` /
+  `wrist_roll_deg`), `lift_height_m`, `seed_deg` -> `CommandResult.ik: list[IkSolution]` (6 USD degrees, `error_m`,
+  `ok` = within `IK_TOLERANCE_M` 1.5 cm, solved TCP). Solves on the worker's SO-101 model (the rover USD's joint
+  frames), never moves. For policies that act in Cartesian space: the Perceptron Mk1.5 tool policy points at pixels,
+  the robot arm casts the ray to the planogram's shelf face and asks the worker for the joints.
+- `ArmJointsCmd.capture_every` (rows, 0 = off): policy-camera frames also every n-th row while the rows play (the live
+  picture feed while the arm moves; 30 rows/s with n = 8 -> ~4 pictures/s), on top of the observation after the last
+  row (which stays the last frame per camera).
+- `PolicyFrame.roll` (rad): the camera roll about its viewing axis (the wrist camera rolls with the wrist), so a
+  pixel ray from `camera_pose` + `roll` is exact.
+
+Robot-arm side (`arms/robot`): `SimRobot.arm_ik`, `SimRobot.feed_policy_frames` (policy frames -> the robot's live
+front / wrist view, worker-streamed front / wrist frames held back meanwhile), `vla_t1.PolicyContext` +
+`backend.set_context` (camera poses, TCP, slot, `ik()`), `vla_mk15.Mk15Policy` (`PICKY_VLA_T1=perceptron`).
