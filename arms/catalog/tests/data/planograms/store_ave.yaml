@@ -67,5 +67,5 @@ slots:
     lots:
       - {lot_id: avo-L1, qty: 6, expiry: 2026-10-19, freshness: 0.6}
       - {lot_id: avo-L2, qty: 4, expiry: 2026-10-23, freshness: 0.9}
-  - {slot_id: P1-0-1, fixture_id: P1, aisle_id: produce, sku: lime, level: 0, index: 1, item_position: {x: 9.0, y: 17.0, z: 0.8}, approach_pose: {x: 9.0, y: 16.25, theta: 1.5708}, qty: 30}
+  - {slot_id: P1-0-1, fixture_id: P1, aisle_id: produce, sku: lime, level: 0, index: 1, item_position: {x: 9.0, y: 17.0, z: 0.8}, approach_pose: {x: 9.0, y: 16.25, theta: 1.5708}, capacity: 40, qty: 30}
   - {slot_id: P1-0-2, fixture_id: P1, aisle_id: produce, sku: cilantro, level: 0, index: 2, item_position: {x: 10.0, y: 17.0, z: 0.8}, approach_pose: {x: 10.0, y: 16.25, theta: 1.5708}, qty: 12}

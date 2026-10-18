@@ -1,0 +1,13 @@
+# Test fixture for arms/catalog tests only (same schema as data/categories.yaml). 'canned' is deliberately missing
+# (the catalog derives it from products), 'alcohol' has no products.
+schema_version: 1
+categories:
+  - {category_id: produce, name: Produce, icon: carrot, color: "#16a34a", sort: 10}
+  - {category_id: dairy, name: Dairy & Eggs, icon: milk, color: "#2563eb", sort: 20}
+  - {category_id: meat, name: Meat & Seafood, icon: beef, sort: 30}
+  - {category_id: deli, name: Deli, sort: 40}
+  - {category_id: bakery, name: Bakery, sort: 50}
+  - {category_id: pantry, name: Pantry, sort: 60}
+  - {category_id: salsa, name: Salsa & Dips, parent_id: pantry, sort: 1}
+  - {category_id: condiments, name: Condiments & Hot Sauce, parent_id: pantry, sort: 2}
+  - {category_id: alcohol, name: Beer & Wine, sort: 130}

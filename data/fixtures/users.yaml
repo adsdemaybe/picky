@@ -52,6 +52,11 @@ users:
     trip_id: trip_maya_1008, ts: '2026-10-08T18:30:00Z', rating: 5}
   - {purchase_id: pur_maya_009, user_id: maya, sku: LIMES, qty: 4, unit_price_cents: 45, store_id: store_ave, trip_id: trip_maya_1008,
     ts: '2026-10-08T18:30:00Z'}
+  # T-Mobile store (Cart Whisperer SKIP signals; her Pixel 7 + line details live in data/fixtures/wireless.yaml)
+  - {purchase_id: pur_maya_tmo_001, user_id: maya, sku: CASE-PX7-BLK, qty: 1, unit_price_cents: 2999, store_id: store_tmobile,
+    ts: '2023-12-02T19:00:00Z'}
+  - {purchase_id: pur_maya_tmo_002, user_id: maya, sku: CHG-20W, qty: 1, unit_price_cents: 1499, store_id: store_tmobile,
+    ts: '2026-03-14T18:20:00Z'}
   feedback: []
 - user_id: jordan
   profile:

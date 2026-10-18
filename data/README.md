@@ -1,109 +1,242 @@
 # data/: store data (the source of truth)
 
-These YAML files are the single source of truth for the stores (CLAUDE.md §4 rule 5). The DB seed, the Isaac
-sim scene, the routing occupancy grid and the frontend store map are all **generated** from them. Fix the data
-here, never a generated artifact. The schemas are in `contracts/planogram.py` and `contracts/catalog.py`. Load the
-files only through `utils/data.py`.
+These YAML files are the single source of truth for the stores, the fleet and the catalog (CLAUDE.md §4 rule 5).
+The DB seed, the Isaac sim scene (every store + every rover + ceiling cameras), the routing occupancy grid, the 2D
+robot fake and the web app's store map are all **generated** from them. Fix the data here, never a generated
+artifact. The schemas are in `contracts/planogram.py` and `contracts/catalog.py`. Load the files only through
+`utils/data.py`.
 
 ```bash
-uv run python -m utils.data        # validate every file: schema, cross-refs, EAN-13, robot clearance, lot sums
+uv run python -m utils.data        # validate every file: schema, cross-refs, EAN-13, rover clearance, SO-101 reach,
+                                   # slot ids unique across stores, qty/low <= capacity, lot sums, docks, cameras
 ```
+
+Current state: `data OK` with **0 problems and 0 warnings** (contracts v0.2.0), three stores.
 
 | File | Model | What |
 |---|---|---|
-| `products.yaml` | `ProductsFile` | 73 SKUs (70 in-store and 3 `online_only`) with fake brands, int-cent prices, category, tags + dietary, `spice_level`, valid EAN-13 barcodes (`200…` prefix), `perishable` / `shelf_life_days`, and sim `asset` hints (`shape`, `dims_m`, `label_color`, `mass_kg`) |
-| `planograms/store_ave.yaml` | `Planogram` | Main demo store: "Picky Market - The Ave", 14 m x 22 m |
-| `planograms/store_hill.yaml` | `Planogram` | Second store: "Picky Express - Capitol Hill", 9 m x 14 m, 3 aisles, overlapping SKUs at different prices |
-| `online_store.yaml` | `OnlineCatalog` | Mock online store with 19 items. Shipping is $2.99, free at $25 or more. The default ETA is 24 h; groceries arrive in 2 h |
-| `fixtures/users.yaml` | `FixturesFile` | Fictional demo users `maya`, `jordan`, `sam`: profile, IntentMandate, purchase history, feedback |
+| `products.yaml` | `ProductsFile` | **216 SKUs**. Grocery: 122 in-store + 3 `online_only`, across all 13 grocery categories; made-up brands, realistic 2026 US prices and pack sizes in int cents, category + subcategory, tags + dietary + allergens, `spice_level`, valid EAN-13 barcodes (`200…` prefix), `perishable` / `shelf_life_days`, sim `asset` hints (`shape`, `dims_m`, `label_color`, `mass_kg`). Wireless: **91 real products** for `store_tmobile` (block at the end of the file, see below) |
+| `categories.yaml` | `CategoriesFile` | Taxonomy: the 13 grocery `STANDARD_CATEGORY_IDS` + 9 wireless top-level ids (`phone`, `tablet`, `wearable`, `case`, `screen`, `charger`, `audio`, `home_internet`, `connected`) (display name, icon, color, aliases, sort = store walk order) + 66 grocery and 26 wireless subcategories (one parent each, max depth 2). Where each category sits per store is documented in the file header and derived from the planogram aisles |
+| `planograms/store_ave.yaml` | `Planogram` | Main demo store "Picky Market - The Ave", 14 m x 22 m: **124 slots / 122 SKUs / 1331 units** |
+| `planograms/store_hill.yaml` | `Planogram` | Second store "Picky Express - Capitol Hill", 9 m x 14 m: **64 slots / 64 SKUs / 589 units**, overlapping SKUs at different prices |
+| `planograms/store_tmobile.yaml` | `Planogram` | T-Mobile wireless store "T-Mobile - University Way NE", 10 m x 8 m (T-Mobile track, Cart Whisperer): **124 slots / 91 SKUs / 476 units**, 33 tethered live demo units + boxed back stock |
+| `online_store.yaml` | `OnlineCatalog` | Mock online store with 19 items. Shipping $2.99, free at $25+. Default ETA 24 h; groceries 2 h |
+| `fixtures/users.yaml` | `FixturesFile` | Fictional demo users `maya`, `jordan`, `sam`: profile, IntentMandate, purchase history (Maya also owns `CASE-PX7-BLK` + `CHG-20W` from store_tmobile), feedback |
+| `fixtures/robots.yaml` | `RobotsFile` | The fleet: `rover-ave-1` **Pico** + `rover-ave-2` **Rhea** (store_ave), `rover-hill-1` **Hazel** (store_hill), `rover-tmo-1` **Tess** (store_tmobile), kind `rover_so101`, dock, battery, basket capacity, UI color; ceiling cameras `store_ave.ceiling-1`, `store_ave.ceiling-2`, `store_hill.ceiling-1`, `store_tmobile.ceiling-1`, `store_tmobile.ceiling-2` |
+| `fixtures/wireless.yaml` | none yet (plain YAML) | Cart Whisperer signals for store_tmobile: Maya's Pixel 7 (age, installments left), owned accessories, household lines; synthetic upcoming promos (WAIT); real t-mobile.com line-activation offers and online sale prices. Cross-checked by `arms/catalog/tests/test_tmobile_data.py` |
+| `sim/demo_units.yaml` | none yet (sim hints) | Device size (`demo_m`), stand and tether for every tethered demo unit in store_tmobile; `shown: open` for foldables |
+| `sim/sku_assets.yaml` | sim arm (generated) | SKU -> how one unit renders in Isaac; regenerate with `arms/sim/tools/gen_sku_assets.py` (wireless SKUs are box primitives) |
 
 SKU ids are uppercase and hyphenated (`SALSA-CHIPOTLE`). All dates are relative to the demo day, **2026-10-17**.
 
-## Store geometry (world frame: meters, x right, y up, origin bottom-left, theta CCW from +x)
+## Categories (top-level, `Product.category`)
+
+| id | Name | SKUs | Example subcategories |
+|---|---|---|---|
+| `produce` | Produce | 17 | fruit, vegetables, herbs, greens |
+| `dairy` | Dairy & Eggs | 14 | milk, cheese, yogurt, eggs, butter, cultured, plant_milk, cheese_dip |
+| `meat` | Meat & Seafood | 7 | beef, poultry, pork, seafood |
+| `deli` | Deli & Prepared | 6 | dips, fresh_salsa, plant_protein, deli_meat |
+| `bakery` | Bakery & Tortillas | 7 | bread, tortillas, pastry |
+| `pantry` | Pantry | 31 | canned, salsa, hot_sauce, spices, sauces, grains, pasta, baking, cereal, coffee, spreads, soup, oils, taco_shells |
+| `international` | International & Mexican | 4 | mexican, asian |
+| `snacks` | Snacks | 10 | chips, pretzels, crackers, cookies, bars, popcorn, nuts, candy |
+| `beverages` | Beverages | 8 | soda, water, juice, sports, drinks |
+| `frozen` | Frozen | 6 | meals, frozen_vegetables, frozen_seafood, dessert |
+| `household` | Household | 9 | paper, cleaning, laundry, bags, kitchen |
+| `personal_care` | Personal Care | 4 | oral_care, hair_care, bath_body |
+| `alcohol` | Beer & Wine | 2 | beer, wine |
+
+The taco-demo SKUs keep their v0.1 categories (salsa / hot sauce / beans are `pantry`, tortillas `bakery`) so the
+agent's recipe hints and the recommender scores do not move. Four subcategories were renamed so every subcategory has
+exactly one parent: `TACO-SHELLS` → `taco_shells`, `PICO-FRESH` → `fresh_salsa`, `QUESO-DIP` → `cheese_dip`,
+`CORN-FROZEN` → `frozen_vegetables`.
+
+## Robot model and geometry rules (contracts.common)
+
+The robot is a small rover (radius `ROBOT_RADIUS_M` = 0.3 m) carrying a vertical lift (0.2-1.2 m) with an SO-101 arm
+(mast 0.12 m forward of the base center, reach 0.35 m) and a basket. Every slot obeys:
+
+- `item_position` = front-center of the item base on the fixture's pick-face edge, `z = level_z_m[level]`, within
+  **0.1-1.5 m**. Gondola boards: 0.15 / 0.6 / 1.05 / 1.5 m. Fridge + freezer boards: 0.25 / 0.65 / 1.05 / 1.45 m
+  (lowered from 1.6 m so the top board is reachable). Produce tables 0.8 m, endcaps 0.3 / 0.8 / 1.2 m.
+- `approach_pose` = `item_position` + **0.375 m** along the pick-face normal (design range 0.35-0.40 m), facing the
+  shelf (`theta = atan2(item - approach)`). Slots in the same column on different levels share the approach pose.
+- Every approach pose, dock, entrance and checkout keeps >= 0.3 m from every fixture, obstacle and wall. Aisles are
+  1.6 m (store_hill aisle 3: 2.0 m), so two rovers can pass.
+- Checked beyond the validator for this release: a flood fill on a 0.05 m grid inflated by 0.3 m reaches every
+  approach pose, dock, entrance and checkout from the start pose; the routing fake's visibility graph has 0
+  unreachable stop pairs; and the multi-robot 2D fake (`strict_reach=True`) drove one rover per store through every
+  slot, scanned it (instances == slot qty) and picked one unit from every stocked slot.
+- Slot ids are unique across stores: `<STORE>-<fixture>-<face><level>-<index>`, e.g. `AVE-G2-E1-04` = store_ave,
+  gondola 2, east face, level 1, column 4 (index 0 = leftmost as the robot faces the shelf; shared across levels).
+  Store prefixes `AVE` / `HILL`; lot ids `ave-<SKU>-L<n>` / `hil-<SKU>-L<n>`.
+- Every slot has an explicit `capacity` and `low_threshold` (= ceil(25% of capacity), the
+  `contracts.catalog.default_low_threshold` rule). `qty == sum(lots)`.
+
+## Store layouts (world frame: meters, x right, y up, origin bottom-left, theta CCW from +x)
 
 **store_ave** (14 x 22):
 
 ```
-y=22 ┌──────────── FRIDGE-BACK (dairy / meat / deli, faces -y) ─────────────┐
-     │                    back_wall corridor y 19.0-21.2                    │
+y=22 ┌──────── FRIDGE-BACK: meat (left) | deli | dairy (right), faces -y ────────┐
+     │                    back_wall corridor y 19.0-21.2                      │
 y=19 │W  a1  G1  a2  G2  a3  G3  a4  G4  a5  F│   gondolas G1-G4 are double-sided, 1.2 m deep
-     │A      ║       ║       ║       ║       R│   aisles a1-a5 are 1.6 m wide (robot center line = aisle center)
-     │L      ║       ║       ║       ║       Z│   WALL-L = household, FREEZER-R = frozen
+     │A      ║       ║       ║       ║       R│   aisles a1-a5 are 1.6 m wide
+     │L      ║       ║       ║       ║       Z│   WALL-L = household + personal care, FREEZER-R = frozen
 y=9  │L     [EC-G2]         [EC-G4]           │   front endcaps (promo deals) at y 8.4-9.0
      │   [PRODUCE-A]  [PRODUCE-B]  [PRODUCE-C] │   produce tables y 5.0-6.2, picked from both sides
      │                                         │
-     │ ENTRANCE (1.2,1.2)   ▪pillar  [CHECKOUT-1]  checkout pose (11.25, 2.75)
+     │ ENTRANCE (1.2,1.2) Pico▪ Rhea▪ ▪pillar [CHECKOUT-1]  checkout pose (11.25, 2.75)
 y=0  └─────────────────────────────────────────┘ x=14
 ```
 
-- Aisle layout along x: WALL-L 0-0.6 | a1 0.6-2.2 | G1 2.2-3.4 | a2 | G2 5.0-6.2 | a3 | G3 7.8-9.0 | a4 | G4 10.6-11.8 | a5 | FREEZER-R 13.4-14.0.
-- Aisle contents: a1 Household & Beverages, a2 Snacks & Breakfast, a3 Taco & Mexican + Canned, a4 Pantry & Bakery, a5 Chips, Soda & Frozen.
-- Gondola levels are at z = 0.15 / 0.6 / 1.05 / 1.5 m, fridge and freezer levels at 0.3 / 0.75 / 1.2 / 1.6 m, and produce tables at 0.8 m. Most demo items sit on level 1 (within the arm's reach).
-- Every `approach_pose` sits in the aisle 0.75-1.0 m off the shelf face and faces the shelf (`theta = atan2(item - approach)`). Every pose has at least 0.75 m of clearance from every fixture, obstacle and wall, against `ROBOT_RADIUS_M` = 0.6. A flood fill on a 0.05 m grid inflated by r + 0.05 reaches every approach pose, the entrance and the checkout pose from the robot's start pose.
-- Slot ids follow `<fixture>-<face><level>-<index>`. For example, `G2-E1-03` is gondola 2, east face, level 1, 4th from the left as the robot faces it.
+- Along x: WALL-L 0-0.6 | a1 0.6-2.2 | G1 2.2-3.4 | a2 | G2 5.0-6.2 | a3 | G3 7.8-9.0 | a4 | G4 10.6-11.8 | a5 | FREEZER-R 13.4-14.0.
+- Aisle 1 Household, Personal Care & Drinks (WALL-L + G1 west: water, sports drinks, sparkling, cane cola, lager, wine) ·
+  Aisle 2 Snacks & Breakfast (G1 east snacks, G2 west cereal/coffee/peanut butter/honey) · Aisle 3 International &
+  Mexican, Canned (G2 east: tortillas, taco shells + seasoning, salsas, hot sauces, enchilada sauce, masa, soy sauce,
+  ramen, coconut milk; G3 west: beans, rice, diced tomatoes, broth, tuna) · Aisle 4 Pasta, Baking & Bakery (G3 east,
+  G4 west bread/bagels/buns/muffins) · Aisle 5 Chips, Soda & Frozen (G4 east, FREEZER-R) · Back wall Meat, Deli &
+  Dairy.
+- Docks: Pico (2.6, 1.6) = the planogram `robot_home`; Rhea (3.6, 1.6). Ceiling cameras: `store_ave.ceiling-1` over the
+  entrance looking up the store, `store_ave.ceiling-2` in the back-right corner looking down the aisles.
 
-**store_hill** (9 x 14) has the produce table up front, then WALL-L | a1 | G1 | a2 | G2 | a3 (2.0 m wide) | FRIDGE-R on the right wall. It stocks 37 SKUs and carries **no cilantro and no sour cream**, so the online store stays the obvious fallback.
+**store_hill** (9 x 14) has the produce table up front, then WALL-L (pantry + canned) | a1 | G1 (taco, Mexican &
+international | snacks) | a2 | G2 (breakfast | household, personal care & drinks) | a3 (2.0 m) | FRIDGE-R (meat, deli
+& dairy) on the right wall. It carries **no cilantro and no sour cream**, so the online store stays the obvious
+fallback. Hazel docks at (3.0, 1.0); `store_hill.ceiling-1` sits over the entrance.
+
+**store_tmobile** (10 x 8), a T-Mobile wireless store laid out like a real one (sources in the PR):
+
+```
+y=8 ┌ [WEAR-CASE: tethered watches]   staff door  [BACK-STOCK: boxed phones / tablets / watches] ┐
+    │          [HOME-INET pedestal]                staff aisle    [COUNTER (Fast Lane)]          │
+    │A                                                            checkout pose (8.4, 5.05)     A│
+    │C    [TABLE-A]        [TABLE-B]          [TABLE-C]                                         U│
+    │C    Apple            Google/Moto/REVVL  Samsung    (live demo units on both long sides)  D│
+    │                                                                                         I│
+    │ ENTRANCE (1.2, 0.6)  Tess dock (2.4, 1.0)                                                O│
+y=0 └──────────────────────────────────────────────────────────────────────────────────────────┘ x=10
+```
+
+- **Live demo units, boxes in back stock.** Every phone, tablet and watch on the floor is a tethered demo unit
+  (TABLE-A/B/C, WEAR-CASE: qty 1, capacity 1, `low_threshold` 0). Sales come from the boxed units on BACK-STOCK behind
+  the counter. Those slots are listed first in the file: `get_locations()` keeps file order and the orchestrator / brain
+  pick the first stocked location, so the robot fetches a box. Exception: `IPDUO-256` is pre-order only (back stock
+  0), so its only stocked location is the demo unit (contracts have no display-only flag).
+- **ACC-WALL** (slatwall, 5 hook rows at 0.2-1.32 m): device bays iPhone / Pixel / Galaxy with cases and glass on hooks
+  4-2 (newest at eye level), chargers, cables, power banks, car gear and grips on hooks 1-0. **AUDIO-WALL**: boxed
+  audio by brand on 4 shelves + the Belkin 3-in-1. **HOME-INET** pedestal: 5G gateway, hotspots, window antenna.
+  **COUNTER** (`checkout` kind): AirTag + PopGrip on the customer side, SIM kits on the staff side.
+- Fixture kinds (no `display_table` / `slatwall` / `counter` in `FixtureKind`): tables are `produce_bin` (open-top
+  table body, picked from both long sides), the pedestal and the watch case `endcap`, the counter `checkout`.
+- Checked: `python -m utils.data` clean; a 0.05 m grid flood fill (inflated 0.3 m) reaches all 128 poses (124 approach
+  poses + entrance, checkout, robot_home, Tess's dock) from the start; the routing fake's visibility graph has 0
+  unreachable pairs; the 2D fake (`strict_reach=True`) scanned every slot (instances == qty) and picked one unit from
+  every stocked slot. Slot ids `TMO-<fixture>-<face><level>-<index>`.
+- **Products.** Names, brands and full retail prices ("pay in full") are a public t-mobile.com snapshot from
+  2026-10-17 (src URL above each row). Last-gen stock no longer on t-mobile.com (Pixel 9 cases and glass, Pixel 7
+  case, Pixel Watch 3) cites the maker or a reseller. `asset.dims_m` = the retail box; demo device sizes are in
+  `sim/demo_units.yaml`. All 16 SKU ids of the web app's `tmobile.ts` are kept; fictional brands were re-pointed to real
+  products (`CHG-20W` GoTo 20W $14.99, `BUDS-RUN` Beats Flex $69.99, `GLASS-PX9` ZAGG Glass Elite $49.99, ...).
+- **Compatibility** lives in tags until `Product.compatible_with` exists: `fits:<sku>` (lowercased; upper-case it to get
+  the SKU), plus `requires_ios` / `requires_android` on watches and AirTag, `universal` on USB-C chargers and audio.
+  `fits:px7` = Maya's Pixel 7, which is not a catalog SKU.
+- Trademarks belong to their owners; the store uses real names for demo realism only. There is no affiliation or
+  sponsorship and no paid placement. Shopper, device and promo-calendar data stay synthetic.
 
 ## The demo scenario these files encode
 
 **Trip 1. Maya texts: "tacos for 6, under $40, one vegetarian".** The fake agent expands this to: TORT-CORN x2,
-BEEF-GROUND x2, BEANS-BLACK x1, CHEESE-MEX, SALSA-MILD, AVOCADO x3, LIMES x2, ONION-WHITE, CILANTRO, SOUR-CREAM.
-The basket comes to about **$37.56**: $34.57 of goods plus $2.99 delivery for the online cilantro. That leaves a
-little headroom, so taking a recommendation shows the over-budget approval flow.
+BEEF-GROUND x2, BEANS-BLACK x1, CHEESE-MEX, SALSA-MILD, AVOCADO x3, LIMES x2, ONION-WHITE, CILANTRO, SOUR-CREAM
+(sourcing: everything in store at store_ave except CILANTRO → online). The basket comes to about **$37.56**: $34.57
+of goods plus $2.99 delivery for the online cilantro. Verified unchanged after the v0.2 data refresh (same list, same
+sourcing, same recommender ranking for maya, trip 2 still switches to SALSA-HOT).
 
 | Hook | Where | Why |
 |---|---|---|
-| **Out of stock → split sourcing** | `CILANTRO` qty 0 at store_ave (slot `PRODUCE-B-S0-02`, no lots); online $1.29, ETA 2 h | Forces an online line on the combined checkout. It also appears as an OOS row on the merchant dashboard |
-| **Mispricing** | `BEANS-REFRIED` at store_ave: system $1.99, `shelf_tag_cents` 249 | Merchant dashboard mispricing row (+$0.50) |
-| **Near-expiry markdowns** | `GUAC-KIT` lot `ave-GUAC-KIT-L1` best by 10-18, $5.99 → $3.99. `YOGURT-GREEK` L1 10-19, $5.99 → $3.49. `BREAD-SOURDOUGH` L1 10-18, half price | Recommendation 2 is "a guac kit that expires tomorrow, $2 off". It goes only to shoppers likely to want it |
-| **Deals** | ENDCAP-G2: `CHIPS-TORTILLA` 25% off ($2.99). ENDCAP-G4: `PAPER-PLATES` markdown $3.99, `COLA` BOGO ($1.50 effective). store_hill: `SALSA-CHIPOTLE` 10% off. Online: `HOTSAUCE-GHOST` 10% off, `CHILE-LIME-SEASONING` BOGO | Recommendation 3 is a deal detour. The endcaps sit off the mandatory path, so taking them is a visible detour |
-| **Recommendation 1 (taste)** | `HOTSAUCE-GHOST` (spice 5, on ENDCAP-G2), `SALSA-CHIPOTLE`, `CHIPS-SPICY-LIME` | Maya's `prefs.spicy` is 0.8 and she rated HOTSAUCE-RED 5/5 |
-| **Produce freshness top-3** | Every produce slot has 2-4 lots with different `freshness` (for example, AVOCADO 0.95 / 0.82 / 0.58 / 0.31) | Perception ranks lots and shows the shopper the top 3 |
-| **Mandate block** | `LAGER-6PK` (category `alcohol`, aisle 1) | Maya's mandate blocks alcohol → `CATEGORY_BLOCKED` if anything tries to add it |
+| **Out of stock → split sourcing** | `CILANTRO` qty 0 at store_ave (slot `AVE-PRODUCE-B-S0-02`, no lots); online $1.29, ETA 2 h | Forces an online line on the combined checkout. Also an OOS row + stock alert for staff |
+| **Mispricing** | `BEANS-REFRIED` at store_ave (`AVE-G3-W1-04`): system $1.99, `shelf_tag_cents` 249 | Merchant dashboard mispricing row (+$0.50) |
+| **Near-expiry markdowns** | `GUAC-KIT` lot `ave-GUAC-KIT-L1` best by 10-18, $5.99 → $3.99. `YOGURT-GREEK` L1 10-19, $5.99 → $3.49. `BREAD-SOURDOUGH` L1 10-18, half price | Recommendation "a guac kit that expires tomorrow, $2 off". New v0.2 SKUs keep their earliest lot >= 7 days out, so the near-expiry list is still exactly the v0.1 set |
+| **Deals** | ENDCAP-G2: `CHIPS-TORTILLA` 25% off ($2.99). ENDCAP-G4: `PAPER-PLATES` markdown $3.99, `COLA` BOGO ($1.50 effective). store_hill: `SALSA-CHIPOTLE` 10% off. Online: `HOTSAUCE-GHOST` 10% off, `CHILE-LIME-SEASONING` BOGO | Deal detours; the endcaps sit off the mandatory path |
+| **Recommendation (taste)** | `HOTSAUCE-GHOST` (spice 5, on ENDCAP-G2), `SALSA-CHIPOTLE`, `CHIPS-SPICY-LIME` | Maya's `prefs.spicy` is 0.8 and she rated HOTSAUCE-RED 5/5. No new spicy / taco-tagged SKUs were added, so the ranking is unchanged |
+| **Produce freshness top-3** | Every produce slot has 1-4 lots with different `freshness` (e.g. AVOCADO 0.95 / 0.82 / 0.58 / 0.31) | Perception ranks lots and shows the shopper the top 3 |
+| **Mandate block** | `LAGER-6PK`, `WINE-RED` (category `alcohol`, aisle 1) | Maya's and Sam's mandates block alcohol → `CATEGORY_BLOCKED` |
 | **Ask-above** | Maya `ask_above_cents` 1500, cap $60, per-item cap $25 | Any line over $15 triggers an approval. The over-cap path denies |
+| **Staff shelf_scan / stock alerts** | store_ave aisle 2 snacks (G1 east): `PRETZELS` **out** (qty 0, `AVE-G1-E1-00`), `CRACKERS` **low** (2/12), `COOKIES-CHOC-CHIP` **low** (1/12); store_hill `CREAM-CHEESE` **low** (2/10) | Boot-time stock alerts: store_ave = CILANTRO + PRETZELS out, CRACKERS + COOKIES low; store_hill = CREAM-CHEESE low. "Rhea, scan the snacks aisle" / "scan dairy at Hill" demo, then restock |
+| **Multi-store split** | PRETZELS are out at the Ave but stocked at the Hill ($4.19) | The fleet can split a list across stores by stock coverage + price |
 
 **Follow-up → trip 2.** `SALSA-MILD` is in Maya's `favorite_skus` (her usual, rated **3/5**) and every hot item is
 rated 4-5, so trip 1 picks SALSA-MILD. The follow-up "how was the salsa?" → "too mild, loved the hot sauce" is read
 as 2/5 + `too_mild`: SALSA-MILD leaves her favorites and becomes disliked, and `spicy` goes 0.8 → 1.0. **Trip 2
-picks `SALSA-HOT`** ("Habanero Fire", spice 5), and the recs move from HOTSAUCE-RED / GUAC-KIT / CHIPS-TORTILLA to
-`HOTSAUCE-GHOST` / BREAD-SOURDOUGH / COLA (what she just bought is not pushed again). Trip 1's detours are one taste
-pick, one near-expiry markdown and one deal, as in the demo script.
+picks `SALSA-HOT`** ("Habanero Fire", spice 5), and the recs move toward `HOTSAUCE-GHOST`.
+
+**T-Mobile store (Cart Whisperer, `docs/cart-whisperer.md` §11b).** Not exercised by `make demo` yet.
+
+| Hook | Where | Why |
+|---|---|---|
+| **SKIP: already owned** | Maya owns `CHG-20W` (GoTo 20W USB-C, bought 2026-03-14; `users.yaml` purchase + `fixtures/wireless.yaml`) | "Skip the charger: yours works with the Pixel 9" (avoids $14.99) |
+| **SKIP: doesn't fit** | `CASE-PX7-BLK` clearance $9.99 (`fits:px7`) vs `CASE-PX9-CLR` (`fits:px9-128`) | "That case is for a Pixel 7" |
+| **WAIT** | `fixtures/wireless.yaml`: Maya's Pixel 7 has 4 installments left ($66.00); `PX9-128` $599.99 expected Nov 27; `BUDS-RUN` $49.99 from Fri Oct 23 | Early-upgrade and sale-soon cards |
+| **Deals** | `GLASS-PX9` 20% off ($39.99), `CASE-PX7-BLK` clearance $9.99, `WATCH-PX3` clearance $399.99 (all on the primary slot) | Deal / swap cards |
+| **Stock alerts** | `CASE-IP18P-CLR` **out** (launch sell-out), `GLASS-IP18P-XTR6` **low** (2/10), `IPDUO-256` **low** (pre-order: demo unit only) | Staff view; "out here, the ZAGG case fits too" |
+| **Mispricing** | `CHG-20W` shelf tag still $24.99, system $14.99 (`TMO-ACC-WALL-E1-03`) | Merchant dashboard row |
+
+**Fleet.** Pico (95% battery, docked at the store entrance) wins the deterministic assignment score for store_ave
+shop goals over Rhea (81%); Hazel (88%) serves store_hill. Robot names in requests ("Hazel, go charge") map to
+`robot_hint`.
 
 **Other users.**
-- `jordan` is a budget, deals-driven shopper who likes kid-friendly items and dislikes `extra_hot`. Home store is store_hill. Cap $90, asks above $20.
-- `sam` is a gluten-free, peanut-allergic breakfast shopper. Use this user for the batched-shoppers demo with Maya at store_ave. Cap $50, asks above $12, blocks alcohol.
+- `jordan` is a budget, deals-driven shopper who likes kid-friendly items and dislikes `extra_hot`. Home store is
+  store_hill. Cap $90, asks above $20.
+- `sam` is a gluten-free, peanut-allergic breakfast shopper. Use this user for the batched-shoppers demo with Maya at
+  store_ave. Cap $50, asks above $12, blocks alcohol.
 - Phones `+1555555010x` are placeholders. Map them to the real Photon handles at the event.
 
 ## How the files feed the pipeline
 
-- **DB seed / catalog** (`arms/catalog/seed.py`, catalog fake):
-  - products → product rows
-  - each slot → an inventory row keyed by `(store_id, slot_id)`, with price = `price_cents` or the base price, plus its lots
-  - slot deals → `Deal` with `deal_id = f"{store_id}:{slot_id}"`
-  - online items → the `online` store, with online deal ids `online:<sku>`
-  - `shelf_tag_cents` → seeded mispricings
-- **Sim scene** (`arms/sim`):
-  - fixture rects + `height_m` / `level_z_m` → shelf boxes
-  - slot `item_position` = front-center of the item base on the board
-  - `asset` gives the prop's primitive, size and label color
-  - lots → `ItemInstance.lot_id`, so freshness is per instance
-- **Occupancy grid** (`arms/routing`):
-  - `bounds` + fixture rects + `obstacles` → 0.05 m grid, inflated by `ROBOT_RADIUS_M`
-  - slot `approach_pose`s, `entrance` and `checkout` are the routing nodes
-- **Recommender / agent**: product `tags`, `dietary`, `spice_level` and `description` feed the embeddings and filters. `fixtures/users.yaml` seeds profiles, mandates and history.
+- **DB seed / catalog** (`arms/catalog/seed.py`, catalog fake): products → product rows; each slot → an inventory
+  row keyed by `(store_id, slot_id)` with price = `price_cents` or the base price, capacity, low threshold and lots;
+  slot deals → `Deal` with `deal_id = f"{store_id}:{slot_id}"`; online items → the `online` store (deal ids
+  `online:<sku>`); `shelf_tag_cents` → seeded mispricings; `categories.yaml` → the categories API (counts, aisle
+  labels from `Aisle.categories`).
+- **Fleet** (`arms/fleet`): `fixtures/robots.yaml` → robots per store, docks (return_to_dock target), battery at boot.
+- **Sim scene** (`arms/sim`, Isaac on vhagar): every store under `/World/Stores/<store_id>`; fixture rects +
+  `height_m` / `level_z_m` → shelf boxes; slot `item_position` + product `asset` → textured props; lots →
+  `ItemInstance.lot_id`; robots spawn at their docks; ceiling cameras from `store_cameras`.
+- **2D robot fake** (`arms/robot`): the same robots + cameras, Pillow frames for `<robot_id>.front|wrist|basket` and
+  `<store_id>.ceiling-<n>`.
+- **Occupancy grid** (`arms/routing`): `bounds` + fixture rects + `obstacles` → 0.05 m grid inflated by
+  `ROBOT_RADIUS_M`; slot `approach_pose`s, `entrance` and `checkout` are the routing nodes.
+- **Recommender / agent**: product `tags`, `dietary`, `spice_level` and `description` feed the embeddings and filters;
+  `fixtures/users.yaml` seeds profiles, mandates and history.
 
 ## Contributing to the data
 
-The flow is the same as CLAUDE.md §5: a short-lived `feat/catalog-<slug>` or `fix/catalog-<slug>` branch and a PR
-reviewed by the catalog owner.
+Same flow as CLAUDE.md §5: a short-lived `feat/catalog-<slug>` or `fix/catalog-<slug>` branch and a PR reviewed by
+the catalog owner.
 
 1. Edit the YAML by hand. These files are the source, not generated output. Keep money in integer cents, dates as
    ISO dates, and SKUs unique and UPPER-HYPHEN.
-2. New product: give it a unique `sku` and a unique, **valid EAN-13**:
-   `python -c "from contracts.catalog import ean13_check_digit as c; b='200000001234'; print(b+str(c(b)))"`.
-3. New slot: put `item_position` on the fixture's pick-face edge at `z = level_z_m[level]`. Put `approach_pose` in
-   the aisle, at least 0.6 m (design for 0.75 m) from every fixture, facing the item. Make `qty` equal the sum of
-   the lot `qty` values. A deal's `lot_id` must be one of the slot's lots.
-4. Run `uv run python -m utils.data`, then `make check` and `make demo`. A data change that breaks the demo
-   scenario above (the OOS item, the mispricing, the markdowns, the salsa ranking) must update this README in the
-   same PR.
+2. New product: unique `sku`, top-level `category` from `categories.yaml`, a `subcategory` that is a child of it (add
+   it to `categories.yaml` if new), and a unique, **valid EAN-13**:
+   `python -c "from contracts.catalog import ean13_check_digit as c; b='200000002400'; print(b+str(c(b)))"`.
+3. New slot: id `<STORE>-<fixture>-<face><level>-<index>`; `item_position` on the fixture's pick-face edge at
+   `z = level_z_m[level]`; `approach_pose` 0.375 m out along the face normal, facing the item; no other slot on the
+   same face + level within 0.5 m; `qty <= capacity`, `low_threshold = ceil(capacity / 4)`, `qty == sum(lot qty)`;
+   a deal's `lot_id` must be one of the slot's lots.
+4. Run `uv run python -m utils.data`, then `make check` and `make demo`. A data change that breaks the demo scenario
+   above (the OOS item, the mispricing, the markdowns, the salsa ranking) must update this README in the same PR.
+
+## Known limitations
+
+- `CategoryDef` has no aisle field, so "which aisles" per category lives in the planogram (`Aisle.categories`) and in
+  the `categories.yaml` header comment; the catalog derives `CategoryInfo.aisle_labels` from the planogram.
+- The demo SKUs for salsa / hot sauce / beans stay under `pantry` (not `international`) on purpose (agent recipe
+  category hints + recommender scores); the International & Mexican aisle shows them through aisle 3's categories.
+- Weighted goods are fixed packs (`unit: pack`, e.g. "1.5 lb"), never sold by weight (qty is an integer everywhere).
+- store_hill has no freezer.
+- store_tmobile: no contracts home yet for compatibility (`fits:` tags), display / demo-unit mode (fixture + slot
+  order), storage / color variants (one SKU per base config), financing and line-activation promos
+  (`fixtures/wireless.yaml`), or a per-trip mandate (Maya's grocery mandate, per item $25, blocks most wireless items).
+  The wireless categories are not in `STANDARD_CATEGORY_IDS`, so the keyword NL rules don't map them.

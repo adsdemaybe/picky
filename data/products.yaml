@@ -1,5 +1,8 @@
 # Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
-# Product master. Prices are integer cents. Barcodes are valid EAN-13 in the in-store 200 prefix.
+# Product master: 213 in-store SKUs + 3 online-only. Grocery (122 + 3 online-only): realistic 2026 US
+# supermarket prices, made-up brands. Wireless store (91, block at the end): REAL products, brands and t-mobile.com
+# prices (see that block's header). Prices are integer cents. Barcodes are valid EAN-13 in the in-store 200 prefix.
+# category = top-level id in data/categories.yaml; subcategory = one of its children.
 # asset: sim prop hints (item frame x=width, y=depth, z=height; label on the -y face).
 schema_version: 1
 products:
@@ -47,7 +50,7 @@ products:
   name: Crunchy Taco Shells 12 ct
   brand: La Milpa
   category: pantry
-  subcategory: tortillas
+  subcategory: taco_shells
   description: Pre-formed crunchy corn taco shells.
   tags: [taco, mexican, kid_friendly, vegetarian, vegan, gluten_free]
   dietary: [vegetarian, vegan, gluten_free]
@@ -541,7 +544,7 @@ products:
   name: Fresh Pico de Gallo 12 oz
   brand: Verde Cocina
   category: deli
-  subcategory: salsa
+  subcategory: fresh_salsa
   description: Fresh-cut tomato, onion, jalapeno and cilantro.
   tags: [taco, mexican, salsa, fresh, vegetarian, vegan, gluten_free]
   dietary: [vegetarian, vegan, gluten_free]
@@ -562,7 +565,7 @@ products:
   name: White Queso Dip 15 oz
   brand: Cascade Creamery
   category: dairy
-  subcategory: dips
+  subcategory: cheese_dip
   description: Creamy white queso with green chiles.
   tags: [mexican, dip, party, cheese, kid_friendly, vegetarian, gluten_free]
   dietary: [vegetarian, gluten_free]
@@ -1347,7 +1350,7 @@ products:
   name: Fire-Roasted Corn 16 oz
   brand: Polar Creamery
   category: frozen
-  subcategory: vegetables
+  subcategory: frozen_vegetables
   description: Flame-roasted sweet corn, frozen.
   tags: [mexican, healthy, budget, vegetarian, vegan, gluten_free]
   dietary: [vegetarian, vegan, gluten_free]
@@ -1384,6 +1387,1038 @@ products:
     dims_m: [0.25, 0.06, 0.2]
     label_color: '#ff7043'
     mass_kg: 1.6
+- sku: GARLIC
+  name: Garlic 3 ct Sleeve
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Three whole white garlic bulbs.
+  tags: [garlic, aromatics, cooking, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 149
+  unit: pack
+  size: 3 bulbs
+  barcode: '2000000020006'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: sphere
+    dims_m: [0.07, 0.07, 0.06]
+    label_color: '#f5f0e1'
+    mass_kg: 0.15
+- sku: POTATO-RUSSET
+  name: Russet Potatoes 5 lb Bag
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Washington russets for baking, mashing and fries.
+  tags: [potato, staple, budget, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 499
+  unit: bag
+  size: 5 lb
+  barcode: '2000000020075'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: box
+    dims_m: [0.3, 0.12, 0.4]
+    label_color: '#a1887f'
+    mass_kg: 2.3
+- sku: CARROTS
+  name: Carrots 2 lb Bag
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Crunchy whole carrots.
+  tags: [carrot, snacking, budget, kid_friendly, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 199
+  unit: bag
+  size: 2 lb
+  barcode: '2000000020143'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.18, 0.06, 0.3]
+    label_color: '#fb8c00'
+    mass_kg: 0.9
+- sku: BROCCOLI
+  name: Broccoli Crown
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Fresh green broccoli crown.
+  tags: [broccoli, greens, healthy, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 179
+  unit: each
+  size: about 12 oz
+  barcode: '2000000020211'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: sphere
+    dims_m: [0.14, 0.14, 0.14]
+    label_color: '#2e7d32'
+    mass_kg: 0.35
+- sku: STRAWBERRIES
+  name: Strawberries 1 lb Clamshell
+  brand: Sunny Grove
+  category: produce
+  subcategory: fruit
+  description: Sweet red strawberries.
+  tags: [berries, fruit, snacking, kid_friendly, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 399
+  unit: pack
+  size: 1 lb
+  barcode: '2000000020280'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.18, 0.12, 0.08]
+    label_color: '#e53935'
+    mass_kg: 0.5
+- sku: SPINACH-BABY
+  name: Baby Spinach 5 oz Clamshell
+  brand: Picky Farms
+  category: produce
+  subcategory: greens
+  description: Triple-washed baby spinach.
+  tags: [spinach, salad, greens, healthy, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 349
+  unit: pack
+  size: 5 oz
+  barcode: '2000000020358'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.19, 0.13, 0.08]
+    label_color: '#43a047'
+    mass_kg: 0.15
+- sku: LEMONS
+  name: Lemon
+  brand: Sunny Grove
+  category: produce
+  subcategory: fruit
+  description: Bright, juicy lemon.
+  tags: [lemon, citrus, baking, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 69
+  unit: each
+  size: 1 medium
+  barcode: '2000000020426'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: sphere
+    dims_m: [0.07, 0.07, 0.08]
+    label_color: '#fdd835'
+    mass_kg: 0.12
+- sku: MILK-WHOLE
+  name: Whole Milk 1 gal
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: milk
+  description: Vitamin D whole milk, rBST-free.
+  tags: [milk, breakfast, kid_friendly, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 429
+  unit: each
+  size: 1 gal
+  barcode: '2000000020495'
+  perishable: true
+  shelf_life_days: 14
+  asset:
+    shape: box
+    dims_m: [0.15, 0.15, 0.27]
+    label_color: '#e3f2fd'
+    mass_kg: 3.9
+- sku: CHEESE-CHEDDAR
+  name: Sharp Cheddar Block 8 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cheese
+  description: Aged sharp cheddar.
+  tags: [cheese, cheddar, sandwich, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 399
+  unit: each
+  size: 8 oz
+  barcode: '2000000020563'
+  perishable: true
+  shelf_life_days: 60
+  asset:
+    shape: box
+    dims_m: [0.15, 0.03, 0.08]
+    label_color: '#ffb300'
+    mass_kg: 0.23
+- sku: CREAM-CHEESE
+  name: Cream Cheese 8 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cheese
+  description: Original cream cheese brick.
+  tags: [cheese, breakfast, bagel, baking, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 279
+  unit: each
+  size: 8 oz
+  barcode: '2000000020631'
+  perishable: true
+  shelf_life_days: 45
+  asset:
+    shape: box
+    dims_m: [0.11, 0.04, 0.06]
+    label_color: '#90caf9'
+    mass_kg: 0.23
+- sku: HALF-HALF
+  name: Half & Half 1 pt
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: milk
+  description: Half milk, half cream. For coffee.
+  tags: [coffee, cream, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 249
+  unit: each
+  size: 1 pt
+  barcode: '2000000020709'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.07, 0.07, 0.15]
+    label_color: '#bbdefb'
+    mass_kg: 0.5
+- sku: STRING-CHEESE
+  name: Mozzarella String Cheese 12 ct
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cheese
+  description: Individually wrapped low-moisture mozzarella sticks.
+  tags: [cheese, snacking, kid_friendly, lunchbox, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 549
+  unit: pack
+  size: 12 ct
+  barcode: '2000000020778'
+  perishable: true
+  shelf_life_days: 60
+  asset:
+    shape: box
+    dims_m: [0.2, 0.05, 0.16]
+    label_color: '#fff59d'
+    mass_kg: 0.34
+- sku: CHICKEN-BREAST
+  name: Boneless Chicken Breast 1.5 lb
+  brand: Prairie Ranch
+  category: meat
+  subcategory: poultry
+  description: Air-chilled boneless, skinless chicken breasts.
+  tags: [chicken, protein, grill, high_protein]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 899
+  unit: pack
+  size: 1.5 lb
+  barcode: '2000000020846'
+  perishable: true
+  shelf_life_days: 4
+  asset:
+    shape: box
+    dims_m: [0.24, 0.05, 0.17]
+    label_color: '#ffccbc'
+    mass_kg: 0.7
+- sku: CHICKEN-THIGHS
+  name: Boneless Chicken Thighs 2 lb
+  brand: Prairie Ranch
+  category: meat
+  subcategory: poultry
+  description: Boneless, skinless thighs. Great for tinga.
+  tags: [chicken, protein, budget, grill]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 699
+  unit: pack
+  size: 2 lb
+  barcode: '2000000020914'
+  perishable: true
+  shelf_life_days: 4
+  asset:
+    shape: box
+    dims_m: [0.24, 0.05, 0.17]
+    label_color: '#ffab91'
+    mass_kg: 0.9
+- sku: BACON
+  name: Applewood Smoked Bacon 12 oz
+  brand: Prairie Ranch
+  category: meat
+  subcategory: pork
+  description: Thick-cut, applewood smoked.
+  tags: [bacon, pork, breakfast]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 649
+  unit: pack
+  size: 12 oz
+  barcode: '2000000020983'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.25, 0.02, 0.15]
+    label_color: '#d84315'
+    mass_kg: 0.34
+- sku: SALMON-FILLET
+  name: Atlantic Salmon Fillet 1 lb
+  brand: Harbor Catch
+  category: meat
+  subcategory: seafood
+  description: Skin-on salmon fillet, farm-raised.
+  tags: [salmon, fish, seafood, omega3, protein]
+  dietary: [gluten_free, dairy_free]
+  allergens: [fish]
+  price_cents: 1199
+  unit: pack
+  size: 1 lb
+  barcode: '2000000021058'
+  perishable: true
+  shelf_life_days: 3
+  asset:
+    shape: box
+    dims_m: [0.26, 0.04, 0.14]
+    label_color: '#ff8a65'
+    mass_kg: 0.45
+- sku: STEAK-FLANK
+  name: Flank Steak 1.5 lb
+  brand: Prairie Ranch
+  category: meat
+  subcategory: beef
+  description: Lean flank steak, perfect for carne asada.
+  tags: [beef, steak, grill, carne_asada, protein]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 1349
+  unit: pack
+  size: 1.5 lb
+  barcode: '2000000021126'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.28, 0.04, 0.16]
+    label_color: '#c62828'
+    mass_kg: 0.7
+- sku: HUMMUS
+  name: Classic Hummus 10 oz
+  brand: Verde Cocina
+  category: deli
+  subcategory: dips
+  description: Chickpea hummus with tahini and lemon.
+  tags: [hummus, dip, snacking, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: [sesame]
+  price_cents: 399
+  unit: each
+  size: 10 oz
+  barcode: '2000000021195'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: cylinder
+    dims_m: [0.11, 0.11, 0.06]
+    label_color: '#d7ccc8'
+    mass_kg: 0.3
+- sku: TURKEY-DELI
+  name: Oven Roasted Turkey Breast 9 oz
+  brand: Prairie Ranch
+  category: deli
+  subcategory: deli_meat
+  description: Thin-sliced turkey for sandwiches.
+  tags: [turkey, sandwich, lunchbox, protein]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 549
+  unit: pack
+  size: 9 oz
+  barcode: '2000000021263'
+  perishable: true
+  shelf_life_days: 14
+  asset:
+    shape: box
+    dims_m: [0.18, 0.04, 0.16]
+    label_color: '#efebe9'
+    mass_kg: 0.26
+- sku: TOFU-FIRM
+  name: Organic Firm Tofu 14 oz
+  brand: Lotus Garden
+  category: deli
+  subcategory: plant_protein
+  description: Water-packed organic firm tofu.
+  tags: [tofu, protein, organic, plant_based, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: [soy]
+  price_cents: 249
+  unit: each
+  size: 14 oz
+  barcode: '2000000021331'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: box
+    dims_m: [0.12, 0.05, 0.1]
+    label_color: '#fafafa'
+    mass_kg: 0.4
+- sku: BAGELS
+  name: Plain Bagels 6 ct
+  brand: Harbor Bakehouse
+  category: bakery
+  subcategory: bread
+  description: New York style boiled bagels.
+  tags: [bagel, breakfast, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [wheat]
+  price_cents: 399
+  unit: pack
+  size: 6 ct
+  barcode: '2000000021409'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.22, 0.1, 0.12]
+    label_color: '#d7a86e'
+    mass_kg: 0.6
+- sku: BUNS-HAMBURGER
+  name: Hamburger Buns 8 ct
+  brand: Harbor Bakehouse
+  category: bakery
+  subcategory: bread
+  description: Soft enriched burger buns.
+  tags: [buns, grill, kid_friendly, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat]
+  price_cents: 299
+  unit: pack
+  size: 8 ct
+  barcode: '2000000021478'
+  perishable: true
+  shelf_life_days: 10
+  asset:
+    shape: box
+    dims_m: [0.24, 0.12, 0.1]
+    label_color: '#ffcc80'
+    mass_kg: 0.45
+- sku: MUFFINS-BLUEBERRY
+  name: Blueberry Muffins 4 ct
+  brand: Harbor Bakehouse
+  category: bakery
+  subcategory: pastry
+  description: Bakery-fresh blueberry muffins.
+  tags: [muffin, breakfast, sweet, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 499
+  unit: pack
+  size: 4 ct
+  barcode: '2000000021546'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.2, 0.2, 0.1]
+    label_color: '#7986cb'
+    mass_kg: 0.45
+- sku: FLOUR-AP
+  name: All-Purpose Flour 5 lb
+  brand: Morning Mill
+  category: pantry
+  subcategory: baking
+  description: Unbleached all-purpose flour.
+  tags: [baking, flour, staple, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [wheat]
+  price_cents: 349
+  unit: bag
+  size: 5 lb
+  barcode: '2000000021614'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.17, 0.09, 0.28]
+    label_color: '#f5f5f5'
+    mass_kg: 2.3
+- sku: SUGAR
+  name: Granulated Sugar 4 lb
+  brand: Morning Mill
+  category: pantry
+  subcategory: baking
+  description: Pure cane granulated sugar.
+  tags: [baking, sugar, staple, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 379
+  unit: bag
+  size: 4 lb
+  barcode: '2000000021683'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: box
+    dims_m: [0.15, 0.08, 0.24]
+    label_color: '#e0f7fa'
+    mass_kg: 1.8
+- sku: TOMATOES-DICED
+  name: Diced Tomatoes 14.5 oz
+  brand: Nonna Bella
+  category: pantry
+  subcategory: canned
+  description: Diced tomatoes in juice.
+  tags: [tomato, canned, budget, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 129
+  unit: each
+  size: 14.5 oz
+  barcode: '2000000021751'
+  perishable: false
+  shelf_life_days: 540
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.11]
+    label_color: '#d32f2f'
+    mass_kg: 0.45
+- sku: BROTH-CHICKEN
+  name: Chicken Broth 32 oz
+  brand: Puget Pantry
+  category: pantry
+  subcategory: soup
+  description: Low-sodium chicken broth carton.
+  tags: [broth, soup, cooking]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 279
+  unit: each
+  size: 32 oz
+  barcode: '2000000021829'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.1, 0.065, 0.19]
+    label_color: '#ffe082'
+    mass_kg: 1.0
+- sku: TUNA
+  name: Chunk Light Tuna in Water 5 oz
+  brand: Harbor Catch
+  category: pantry
+  subcategory: canned
+  description: Dolphin-safe chunk light tuna.
+  tags: [tuna, fish, protein, budget, lunchbox]
+  dietary: [gluten_free, dairy_free]
+  allergens: [fish]
+  price_cents: 149
+  unit: each
+  size: 5 oz
+  barcode: '2000000021898'
+  perishable: false
+  shelf_life_days: 1095
+  asset:
+    shape: cylinder
+    dims_m: [0.085, 0.085, 0.04]
+    label_color: '#1565c0'
+    mass_kg: 0.17
+- sku: MAC-CHEESE
+  name: Macaroni & Cheese 7.25 oz
+  brand: Puget Pantry
+  category: pantry
+  subcategory: pasta
+  description: Classic boxed mac and cheese.
+  tags: [pasta, cheese, kid_friendly, budget, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat, milk]
+  price_cents: 129
+  unit: each
+  size: 7.25 oz
+  barcode: '2000000021966'
+  perishable: false
+  shelf_life_days: 540
+  asset:
+    shape: box
+    dims_m: [0.15, 0.04, 0.19]
+    label_color: '#ffa000'
+    mass_kg: 0.21
+- sku: HONEY
+  name: Wildflower Honey 12 oz
+  brand: Sunny Coop
+  category: pantry
+  subcategory: spreads
+  description: Raw Pacific Northwest wildflower honey.
+  tags: [honey, breakfast, sweet, vegetarian]
+  dietary: [vegetarian, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 599
+  unit: each
+  size: 12 oz
+  barcode: '2000000022031'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: cylinder
+    dims_m: [0.07, 0.07, 0.14]
+    label_color: '#ffb300'
+    mass_kg: 0.4
+- sku: MASA-HARINA
+  name: Masa Harina Corn Flour 4.4 lb
+  brand: La Milpa
+  category: international
+  subcategory: mexican
+  description: Instant corn masa flour for tortillas and tamales.
+  tags: [masa, corn, baking, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 449
+  unit: bag
+  size: 4.4 lb
+  barcode: '2000000022109'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.16, 0.09, 0.27]
+    label_color: '#fff176'
+    mass_kg: 2.0
+- sku: SOY-SAUCE
+  name: Naturally Brewed Soy Sauce 15 oz
+  brand: Lotus Garden
+  category: international
+  subcategory: asian
+  description: Traditionally brewed soy sauce.
+  tags: [asian, sauce, umami, vegetarian, vegan]
+  dietary: [vegetarian, vegan, dairy_free]
+  allergens: [soy, wheat]
+  price_cents: 329
+  unit: each
+  size: 15 oz
+  barcode: '2000000022178'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: cylinder
+    dims_m: [0.07, 0.07, 0.2]
+    label_color: '#4e342e'
+    mass_kg: 0.5
+- sku: RAMEN
+  name: Shoyu Ramen Noodles 5 pk
+  brand: Lotus Garden
+  category: international
+  subcategory: asian
+  description: Instant wavy noodles with soy-sauce broth packets.
+  tags: [asian, noodles, quick_meal, budget]
+  dietary: [dairy_free]
+  allergens: [wheat, soy]
+  price_cents: 449
+  unit: pack
+  size: 5 x 3 oz
+  barcode: '2000000022246'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.2, 0.1, 0.16]
+    label_color: '#c62828'
+    mass_kg: 0.45
+- sku: COCONUT-MILK
+  name: Coconut Milk 13.5 oz
+  brand: Lotus Garden
+  category: international
+  subcategory: asian
+  description: Full-fat coconut milk for curries.
+  tags: [asian, curry, coconut, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: [coconut]
+  price_cents: 249
+  unit: each
+  size: 13.5 oz
+  barcode: '2000000022314'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.115]
+    label_color: '#eceff1'
+    mass_kg: 0.45
+- sku: PRETZELS
+  name: Mini Twist Pretzels 16 oz
+  brand: Crunch Co
+  category: snacks
+  subcategory: pretzels
+  description: Classic salted mini pretzel twists.
+  tags: [pretzels, salty, party, vegetarian, vegan]
+  dietary: [vegetarian, vegan, dairy_free]
+  allergens: [wheat]
+  price_cents: 399
+  unit: bag
+  size: 16 oz
+  barcode: '2000000022383'
+  perishable: false
+  shelf_life_days: 180
+  asset:
+    shape: box
+    dims_m: [0.24, 0.07, 0.3]
+    label_color: '#8d6e63'
+    mass_kg: 0.45
+- sku: CRACKERS
+  name: Woven Wheat Crackers 9 oz
+  brand: Crunch Co
+  category: snacks
+  subcategory: crackers
+  description: Whole grain woven wheat crackers.
+  tags: [crackers, whole_grain, snacking, vegetarian, vegan]
+  dietary: [vegetarian, vegan, dairy_free]
+  allergens: [wheat]
+  price_cents: 379
+  unit: box
+  size: 9 oz
+  barcode: '2000000022451'
+  perishable: false
+  shelf_life_days: 240
+  asset:
+    shape: box
+    dims_m: [0.19, 0.06, 0.24]
+    label_color: '#bf8f00'
+    mass_kg: 0.26
+- sku: COOKIES-CHOC-CHIP
+  name: Chocolate Chip Cookies 13 oz
+  brand: Cacao Coast
+  category: snacks
+  subcategory: cookies
+  description: Crunchy chocolate chip cookies.
+  tags: [cookies, sweet, kid_friendly, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, soy]
+  price_cents: 449
+  unit: pack
+  size: 13 oz
+  barcode: '2000000022529'
+  perishable: false
+  shelf_life_days: 240
+  asset:
+    shape: box
+    dims_m: [0.2, 0.06, 0.2]
+    label_color: '#5d4037'
+    mass_kg: 0.37
+- sku: GRANOLA-BARS
+  name: Oat & Honey Granola Bars 12 ct
+  brand: Morning Mill
+  category: snacks
+  subcategory: bars
+  description: Crunchy oat and honey bars, 2 per pouch.
+  tags: [granola, bars, lunchbox, kid_friendly, vegetarian]
+  dietary: [vegetarian, dairy_free]
+  allergens: [wheat]
+  price_cents: 499
+  unit: box
+  size: 12 ct
+  barcode: '2000000022598'
+  perishable: false
+  shelf_life_days: 300
+  asset:
+    shape: box
+    dims_m: [0.2, 0.06, 0.18]
+    label_color: '#ffca28'
+    mass_kg: 0.5
+- sku: WATER-24PK
+  name: Spring Water 24 pk
+  brand: Cascade Springs
+  category: beverages
+  subcategory: water
+  description: Natural spring water bottles.
+  tags: [water, hydration, party, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 499
+  unit: pack
+  size: 24 x 16.9 fl oz
+  barcode: '2000000022666'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: box
+    dims_m: [0.4, 0.27, 0.21]
+    label_color: '#4fc3f7'
+    mass_kg: 9.0
+- sku: SPORTS-DRINK
+  name: Lemon-Lime Sports Drink 28 oz
+  brand: Fizz Peak
+  category: beverages
+  subcategory: sports
+  description: Electrolyte sports drink.
+  tags: [sports, electrolytes, hydration]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 179
+  unit: each
+  size: 28 fl oz
+  barcode: '2000000022734'
+  perishable: false
+  shelf_life_days: 270
+  asset:
+    shape: cylinder
+    dims_m: [0.08, 0.08, 0.25]
+    label_color: '#c0ca33'
+    mass_kg: 0.85
+- sku: APPLE-JUICE
+  name: 100% Apple Juice 64 oz
+  brand: Sunny Grove
+  category: beverages
+  subcategory: juice
+  description: Shelf-stable apple juice, no sugar added.
+  tags: [juice, kid_friendly, breakfast, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 349
+  unit: each
+  size: 64 fl oz
+  barcode: '2000000022802'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.11, 0.11, 0.27]
+    label_color: '#ffb74d'
+    mass_kg: 2.0
+- sku: PIZZA-FROZEN
+  name: Pepperoni Pizza 12 inch
+  brand: Polar Kitchen
+  category: frozen
+  subcategory: meals
+  description: Thin-crust frozen pepperoni pizza.
+  tags: [pizza, quick_meal, kid_friendly]
+  dietary: []
+  allergens: [wheat, milk]
+  price_cents: 749
+  unit: each
+  size: 12 inch
+  barcode: '2000000022871'
+  perishable: false
+  shelf_life_days: 270
+  asset:
+    shape: box
+    dims_m: [0.3, 0.05, 0.3]
+    label_color: '#e64a19'
+    mass_kg: 0.6
+- sku: PEAS-FROZEN
+  name: Sweet Peas 12 oz
+  brand: Polar Kitchen
+  category: frozen
+  subcategory: frozen_vegetables
+  description: Steam-in-bag sweet peas.
+  tags: [peas, healthy, budget, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 199
+  unit: bag
+  size: 12 oz
+  barcode: '2000000022949'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.16, 0.04, 0.22]
+    label_color: '#7cb342'
+    mass_kg: 0.34
+- sku: SHRIMP-FROZEN
+  name: Raw Shrimp 1 lb (31-40 ct)
+  brand: Harbor Catch
+  category: frozen
+  subcategory: frozen_seafood
+  description: Peeled, deveined, tail-on raw shrimp.
+  tags: [shrimp, seafood, protein, quick_meal]
+  dietary: [gluten_free, dairy_free]
+  allergens: [shellfish]
+  price_cents: 999
+  unit: bag
+  size: 1 lb
+  barcode: '2000000023014'
+  perishable: false
+  shelf_life_days: 270
+  asset:
+    shape: box
+    dims_m: [0.2, 0.05, 0.26]
+    label_color: '#ff7043'
+    mass_kg: 0.5
+- sku: LAUNDRY-DETERGENT
+  name: Laundry Detergent 92 oz
+  brand: HomeBase
+  category: household
+  subcategory: laundry
+  description: Free & clear liquid detergent, 64 loads.
+  tags: [laundry, cleaning, free_clear]
+  dietary: []
+  allergens: []
+  price_cents: 1299
+  unit: each
+  size: 92 fl oz
+  barcode: '2000000023083'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.18, 0.11, 0.28]
+    label_color: '#1e88e5'
+    mass_kg: 3.0
+- sku: ALUMINUM-FOIL
+  name: Aluminum Foil 75 sq ft
+  brand: HomeBase
+  category: household
+  subcategory: kitchen
+  description: Standard-duty aluminum foil roll.
+  tags: [foil, kitchen, grill]
+  dietary: []
+  allergens: []
+  price_cents: 499
+  unit: each
+  size: 75 sq ft
+  barcode: '2000000023151'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.32, 0.05, 0.05]
+    label_color: '#b0bec5'
+    mass_kg: 0.4
+- sku: TOILET-PAPER
+  name: Toilet Paper 12 Double Rolls
+  brand: HomeBase
+  category: household
+  subcategory: paper
+  description: Soft 2-ply bath tissue.
+  tags: [paper, bathroom, bulk]
+  dietary: []
+  allergens: []
+  price_cents: 1199
+  unit: pack
+  size: 12 rolls
+  barcode: '2000000023229'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.3, 0.2, 0.3]
+    label_color: '#e1f5fe'
+    mass_kg: 1.4
+- sku: TOOTHPASTE
+  name: Fresh Mint Toothpaste 4.8 oz
+  brand: Fern & Fog
+  category: personal_care
+  subcategory: oral_care
+  description: Fluoride toothpaste, fresh mint.
+  tags: [toothpaste, oral_care, mint]
+  dietary: []
+  allergens: []
+  price_cents: 399
+  unit: each
+  size: 4.8 oz
+  barcode: '2000000023298'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.2, 0.04, 0.05]
+    label_color: '#26a69a'
+    mass_kg: 0.15
+- sku: SHAMPOO
+  name: Daily Shampoo 12 oz
+  brand: Fern & Fog
+  category: personal_care
+  subcategory: hair_care
+  description: Gentle daily shampoo with rosemary.
+  tags: [shampoo, hair_care]
+  dietary: []
+  allergens: []
+  price_cents: 699
+  unit: each
+  size: 12 fl oz
+  barcode: '2000000023366'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.07, 0.07, 0.2]
+    label_color: '#66bb6a'
+    mass_kg: 0.4
+- sku: BODY-WASH
+  name: Cedar & Sea Salt Body Wash 18 oz
+  brand: Fern & Fog
+  category: personal_care
+  subcategory: bath_body
+  description: Moisturizing body wash.
+  tags: [body_wash, bath]
+  dietary: []
+  allergens: []
+  price_cents: 649
+  unit: each
+  size: 18 fl oz
+  barcode: '2000000023434'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.05, 0.22]
+    label_color: '#5c6bc0'
+    mass_kg: 0.55
+- sku: DEODORANT
+  name: Aluminum-Free Deodorant 2.6 oz
+  brand: Fern & Fog
+  category: personal_care
+  subcategory: bath_body
+  description: Aluminum-free deodorant stick.
+  tags: [deodorant]
+  dietary: []
+  allergens: []
+  price_cents: 599
+  unit: each
+  size: 2.6 oz
+  barcode: '2000000023502'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.06, 0.04, 0.13]
+    label_color: '#8d6e63'
+    mass_kg: 0.1
+- sku: WINE-RED
+  name: Columbia Valley Red Blend 750 ml
+  brand: Bench Cellars
+  category: alcohol
+  subcategory: wine
+  description: 'Washington red blend: dark cherry, soft tannins.'
+  tags: [wine, red_wine, 21_plus]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: [sulfites]
+  price_cents: 1299
+  unit: each
+  size: 750 ml
+  barcode: '2000000023571'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.3]
+    label_color: '#6a1b4d'
+    mass_kg: 1.3
 - sku: MOLCAJETE
   name: Volcanic Stone Molcajete
   brand: Casa Verde
@@ -1445,3 +2480,1831 @@ products:
     dims_m: [0.05, 0.05, 0.12]
     label_color: '#d84315'
     mass_kg: 0.15
+# ==== Wireless store (store_tmobile) ====
+# Wireless store (T-Mobile track, Cart Whisperer). REAL product names, brands and full retail prices ("pay in full",
+# integer cents) from a public t-mobile.com snapshot taken Sat 2026-10-17 (src: comment above each row). Brands and
+# trademarks belong to their owners; no affiliation, endorsement or sponsorship, and nothing is paid placement.
+# Last-gen stock no longer listed on t-mobile.com (Pixel 9 cases + glass, Pixel 7 case, Pixel Watch 3) cites the
+# maker or a reseller. Shoppers / owned devices stay synthetic (data/fixtures/wireless.yaml).
+# - asset.dims_m = the RETAIL PACKAGE (x width, y depth, z height; label on -y). Phones, tablets and watches are sold
+#   from boxed BACK STOCK behind the counter; the tethered live demo units on the tables use the device size in
+#   data/sim/demo_units.yaml.
+# - Compatibility (contracts.catalog.Product has no compatible_with yet): tag 'fits:<sku>' (lowercased by the
+#   Product validator; upper-case it to get the SKU) per device an accessory fits. No fits tag + 'universal' = any
+#   USB-C phone. 'fits:px7' is Maya's Pixel 7, which is not sold here (not a catalog SKU). Watches / AirTag also
+#   carry requires_ios / requires_android.
+# - Barcodes: generated in-store EAN-13 (200 prefix, block 20000003xxxx); some real T-Mobile item codes are
+#   alphanumeric, so they cannot be Product.barcode.
+# src: https://www.t-mobile.com/cell-phone/apple-iphone-18-pro-max
+- sku: IP18PM-256
+  name: iPhone 18 Pro Max 256 GB
+  brand: Apple
+  category: phone
+  subcategory: ios
+  description: 'Apple''s largest iPhone 18 Pro, 256 GB (launched Sep 2026). Silver, Glacier, Burgundy or Black.'
+  tags: [phone, iphone, new, pro, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 129999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300016'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.091, 0.034, 0.172]
+    label_color: '#f5f5f7'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/apple-iphone-18-pro
+- sku: IP18P-256
+  name: iPhone 18 Pro 256 GB
+  brand: Apple
+  category: phone
+  subcategory: ios
+  description: 'Apple iPhone 18 Pro, 256 GB (launched Sep 2026).'
+  tags: [phone, iphone, new, pro, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 119999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300023'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.083, 0.034, 0.163]
+    label_color: '#f5f5f7'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/apple-iphone-duo
+- sku: IPDUO-256
+  name: iPhone Duo 256 GB
+  brand: Apple
+  category: phone
+  subcategory: ios
+  description: 'Apple''s first foldable iPhone, 256 GB. Pre-order only on T-Mobile (Oct 17); demo unit on the table.'
+  tags: [phone, iphone, new, foldable, pre_order, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 199999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300030'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.105, 0.045, 0.165]
+    label_color: '#f5f5f7'
+    mass_kg: 0.6
+# src: https://www.t-mobile.com/cell-phone/apple-iphone-air
+- sku: IPAIR-256
+  name: iPhone Air 256 GB
+  brand: Apple
+  category: phone
+  subcategory: ios
+  description: 'Apple iPhone Air, 256 GB (2025 model, still current).'
+  tags: [phone, iphone, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 109999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300047'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.083, 0.034, 0.163]
+    label_color: '#f5f5f7'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/apple-iphone-17
+- sku: IP17-256
+  name: iPhone 17 256 GB
+  brand: Apple
+  category: phone
+  subcategory: ios
+  description: 'Apple iPhone 17, 256 GB.'
+  tags: [phone, iphone, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 92999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300054'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.083, 0.034, 0.163]
+    label_color: '#f5f5f7'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/apple-iphone-17e
+- sku: IP17E-256
+  name: iPhone 17e 256 GB
+  brand: Apple
+  category: phone
+  subcategory: ios
+  description: 'Apple''s entry iPhone 17e, 256 GB.'
+  tags: [phone, iphone, budget, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 69999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300061'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.083, 0.034, 0.163]
+    label_color: '#f5f5f7'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/apple-iphone-16
+- sku: IP16-128
+  name: iPhone 16 128 GB
+  brand: Apple
+  category: phone
+  subcategory: ios
+  description: 'Apple iPhone 16, 128 GB. Last year''s model, still sold.'
+  tags: [phone, iphone, last_gen, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 82999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300078'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.083, 0.034, 0.163]
+    label_color: '#d8d8d8'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/google-pixel-11-pro-xl
+- sku: PX11PXL-256
+  name: Pixel 11 Pro XL 256 GB
+  brand: Google
+  category: phone
+  subcategory: android
+  description: 'Google Pixel 11 Pro XL, 256 GB (launched Aug 2026).'
+  tags: [phone, pixel, new, pro, google, android]
+  dietary: []
+  allergens: []
+  price_cents: 129999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300085'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.087, 0.035, 0.175]
+    label_color: '#e8eaed'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/google-pixel-11-pro
+- sku: PX11P-256
+  name: Pixel 11 Pro 256 GB
+  brand: Google
+  category: phone
+  subcategory: android
+  description: 'Google Pixel 11 Pro, 256 GB (launched Aug 2026).'
+  tags: [phone, pixel, new, pro, google, android]
+  dietary: []
+  allergens: []
+  price_cents: 109999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300092'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.087, 0.035, 0.175]
+    label_color: '#e8eaed'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/google-pixel-11
+- sku: PX11-256
+  name: Pixel 11 256 GB
+  brand: Google
+  category: phone
+  subcategory: android
+  description: 'Google Pixel 11, 256 GB (launched Aug 2026). Obsidian, Frost or Hibiscus.'
+  tags: [phone, pixel, new, google, android]
+  dietary: []
+  allergens: []
+  price_cents: 89999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300108'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.087, 0.035, 0.175]
+    label_color: '#e8eaed'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/google-pixel-11-pro-fold
+- sku: PX11PF-256
+  name: Pixel 11 Pro Fold 256 GB
+  brand: Google
+  category: phone
+  subcategory: android
+  description: 'Google''s foldable Pixel 11 Pro Fold, 256 GB.'
+  tags: [phone, pixel, new, foldable, google, android]
+  dietary: []
+  allergens: []
+  price_cents: 189999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300115'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.105, 0.045, 0.175]
+    label_color: '#e8eaed'
+    mass_kg: 0.6
+# src: https://www.t-mobile.com/cell-phone/google-pixel-10a
+- sku: PX10A-128
+  name: Pixel 10a 128 GB
+  brand: Google
+  category: phone
+  subcategory: android
+  description: 'Google''s mid-range Pixel 10a, 128 GB.'
+  tags: [phone, pixel, budget, google, android]
+  dietary: []
+  allergens: []
+  price_cents: 49999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300122'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.087, 0.035, 0.175]
+    label_color: '#e8eaed'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/google-pixel-9
+- sku: PX9-128
+  name: Pixel 9 128 GB
+  brand: Google
+  category: phone
+  subcategory: android
+  description: 'Google Pixel 9, 128 GB. Last-gen Pixel, still sold. Obsidian or Wintergreen.'
+  tags: [phone, pixel, last_gen, google, android]
+  dietary: []
+  allergens: []
+  price_cents: 79999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300139'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.087, 0.035, 0.175]
+    label_color: '#2b2f33'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/samsung-galaxy-s26-ultra
+- sku: GS26U-256
+  name: Galaxy S26 Ultra 256 GB
+  brand: Samsung
+  category: phone
+  subcategory: android
+  description: 'Samsung Galaxy S26 Ultra, 256 GB.'
+  tags: [phone, galaxy, pro, samsung, android]
+  dietary: []
+  allergens: []
+  price_cents: 139999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300146'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.093, 0.028, 0.175]
+    label_color: '#16181d'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/samsung-galaxy-s26
+- sku: GS26-256
+  name: Galaxy S26 256 GB
+  brand: Samsung
+  category: phone
+  subcategory: android
+  description: 'Samsung Galaxy S26, 256 GB.'
+  tags: [phone, galaxy, samsung, android]
+  dietary: []
+  allergens: []
+  price_cents: 99999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300153'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.085, 0.022, 0.165]
+    label_color: '#16181d'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/samsung-galaxy-s26-fe
+- sku: GS26FE-128
+  name: Galaxy S26 FE 128 GB
+  brand: Samsung
+  category: phone
+  subcategory: android
+  description: 'Samsung Galaxy S26 FE, 128 GB.'
+  tags: [phone, galaxy, budget, samsung, android]
+  dietary: []
+  allergens: []
+  price_cents: 79999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300160'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.085, 0.022, 0.165]
+    label_color: '#16181d'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/samsung-galaxy-z-fold8
+- sku: ZFOLD8-256
+  name: Galaxy Z Fold8 256 GB
+  brand: Samsung
+  category: phone
+  subcategory: android
+  description: 'Samsung''s book-style foldable Galaxy Z Fold8, 256 GB (launched summer 2026).'
+  tags: [phone, galaxy, new, foldable, samsung, android]
+  dietary: []
+  allergens: []
+  price_cents: 189999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300177'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.105, 0.045, 0.175]
+    label_color: '#16181d'
+    mass_kg: 0.6
+# src: https://www.t-mobile.com/cell-phone/samsung-galaxy-z-flip8
+- sku: ZFLIP8-256
+  name: Galaxy Z Flip8 256 GB
+  brand: Samsung
+  category: phone
+  subcategory: android
+  description: 'Samsung''s flip foldable Galaxy Z Flip8, 256 GB (launched summer 2026).'
+  tags: [phone, galaxy, new, foldable, flip, samsung, android]
+  dietary: []
+  allergens: []
+  price_cents: 119999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300184'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.045, 0.135]
+    label_color: '#16181d'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/samsung-galaxy-s25
+- sku: GS25-128
+  name: Galaxy S25 128 GB
+  brand: Samsung
+  category: phone
+  subcategory: android
+  description: 'Samsung Galaxy S25, 128 GB. Last-gen Galaxy, still sold.'
+  tags: [phone, galaxy, last_gen, samsung, android]
+  dietary: []
+  allergens: []
+  price_cents: 79999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300191'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.085, 0.022, 0.165]
+    label_color: '#4a5a7a'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/motorola-razr-plus-2026
+- sku: RAZRP26-256
+  name: razr+ 2026 256 GB
+  brand: Motorola
+  category: phone
+  subcategory: android
+  description: 'Motorola razr+ 2026 flip phone, 256 GB.'
+  tags: [phone, razr, foldable, flip, motorola, android]
+  dietary: []
+  allergens: []
+  price_cents: 99999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300207'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.05, 0.15]
+    label_color: '#55565a'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/motorola-razr-2026
+- sku: RAZR26-256
+  name: razr 2026 256 GB
+  brand: Motorola
+  category: phone
+  subcategory: android
+  description: 'Motorola razr 2026 flip phone, 256 GB.'
+  tags: [phone, razr, foldable, flip, motorola, android]
+  dietary: []
+  allergens: []
+  price_cents: 76999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300214'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.05, 0.15]
+    label_color: '#3a3a3c'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/motorola-moto-g-2026
+- sku: MOTOG26-128
+  name: moto g 2026 128 GB
+  brand: Motorola
+  category: phone
+  subcategory: android
+  description: 'Motorola moto g 2026, 128 GB. Budget 5G phone.'
+  tags: [phone, moto, budget, motorola, android]
+  dietary: []
+  allergens: []
+  price_cents: 22999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300221'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.085, 0.03, 0.172]
+    label_color: '#1f3a5f'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/cell-phone/t-mobile-revvl-8-pro
+- sku: REVVL8P-256
+  name: REVVL 8 Pro 256 GB
+  brand: T-Mobile
+  category: phone
+  subcategory: android
+  description: 'T-Mobile''s own REVVL 8 Pro, 256 GB. Budget 5G phone.'
+  tags: [phone, revvl, budget, house_brand, t-mobile, android]
+  dietary: []
+  allergens: []
+  price_cents: 24999
+  unit: each
+  size: 256 GB
+  barcode: '2000000300238'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.085, 0.03, 0.172]
+    label_color: '#e20074'
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/tablet/apple-ipad-a16
+- sku: IPAD-A16-128
+  name: iPad (A16) 128 GB Wi-Fi + Cellular
+  brand: Apple
+  category: tablet
+  subcategory: ipad
+  description: 'Apple iPad (A16 chip), 128 GB, Wi-Fi + Cellular.'
+  tags: [tablet, ipad, cellular, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 59999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300245'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.205, 0.03, 0.28]
+    label_color: '#f5f5f7'
+    label_text: iPad (A16) 128 GB Cellular
+    mass_kg: 0.9
+# src: https://www.t-mobile.com/tablet/apple-ipad-air-11-inch-m4
+- sku: IPADAIR11-128
+  name: iPad Air 11-inch (M4) 128 GB Wi-Fi + Cellular
+  brand: Apple
+  category: tablet
+  subcategory: ipad
+  description: 'Apple iPad Air 11-inch with M4, 128 GB, Wi-Fi + Cellular.'
+  tags: [tablet, ipad, cellular, apple, ios]
+  dietary: []
+  allergens: []
+  price_cents: 89999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300252'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.205, 0.03, 0.28]
+    label_color: '#f5f5f7'
+    label_text: iPad Air 11 (M4) 128 GB Cellular
+    mass_kg: 0.9
+# src: https://www.t-mobile.com/tablet/samsung-galaxy-tab-s10-fe-5g
+- sku: TABS10FE-128
+  name: Galaxy Tab S10 FE 5G 128 GB
+  brand: Samsung
+  category: tablet
+  subcategory: android_tablet
+  description: 'Samsung Galaxy Tab S10 FE 5G, 128 GB.'
+  tags: [tablet, galaxy, cellular, samsung, android]
+  dietary: []
+  allergens: []
+  price_cents: 64999
+  unit: each
+  size: 128 GB
+  barcode: '2000000300269'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.2, 0.035, 0.29]
+    label_color: '#16181d'
+    label_text: Galaxy Tab S10 FE 5G 128 GB
+    mass_kg: 0.9
+# src: https://www.t-mobile.com/smart-watch/apple-watch-series-12-42mm
+- sku: AWS12-42
+  name: Apple Watch Series 12 42mm (GPS + Cellular)
+  brand: Apple
+  category: wearable
+  subcategory: smartwatch
+  description: 'Apple Watch Series 12, 42 mm, GPS + Cellular. Needs an iPhone.'
+  tags: [watch, lte, fitness, apple, requires_ios, 'fits:ip18pm-256', 'fits:ip18p-256', 'fits:ipduo-256', 'fits:ipair-256', 'fits:ip17-256', 'fits:ip17e-256', 'fits:ip16-128']
+  dietary: []
+  allergens: []
+  price_cents: 49999
+  unit: each
+  size: 42 mm
+  barcode: '2000000300276'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.06, 0.14]
+    label_color: '#f5f5f7'
+    label_text: Apple Watch Series 12 42mm
+    mass_kg: 0.35
+# src: https://www.t-mobile.com/smart-watch/apple-watch-ultra-4
+- sku: AWU4-49
+  name: Apple Watch Ultra 4 (GPS + Cellular)
+  brand: Apple
+  category: wearable
+  subcategory: smartwatch
+  description: 'Apple Watch Ultra 4, 49 mm, GPS + Cellular. Needs an iPhone.'
+  tags: [watch, lte, fitness, outdoor, rugged, apple, requires_ios, 'fits:ip18pm-256', 'fits:ip18p-256', 'fits:ipduo-256', 'fits:ipair-256', 'fits:ip17-256', 'fits:ip17e-256', 'fits:ip16-128']
+  dietary: []
+  allergens: []
+  price_cents: 79999
+  unit: each
+  size: 49 mm
+  barcode: '2000000300283'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.07, 0.15]
+    label_color: '#f5f5f7'
+    label_text: Apple Watch Ultra 4
+    mass_kg: 0.45
+# src: https://www.t-mobile.com/smart-watch/apple-watch-se-3-40mm
+- sku: AWSE3-40
+  name: Apple Watch SE 3 40mm (GPS + Cellular)
+  brand: Apple
+  category: wearable
+  subcategory: smartwatch
+  description: 'Apple Watch SE 3, 40 mm, GPS + Cellular. Needs an iPhone.'
+  tags: [watch, lte, fitness, budget, apple, requires_ios, 'fits:ip18pm-256', 'fits:ip18p-256', 'fits:ipduo-256', 'fits:ipair-256', 'fits:ip17-256', 'fits:ip17e-256', 'fits:ip16-128']
+  dietary: []
+  allergens: []
+  price_cents: 29999
+  unit: each
+  size: 40 mm
+  barcode: '2000000300290'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.06, 0.14]
+    label_color: '#f5f5f7'
+    label_text: Apple Watch SE 3 40mm
+    mass_kg: 0.35
+# src: https://www.t-mobile.com/smart-watch/google-pixel-watch-5-41mm
+- sku: PXW5-41
+  name: 'Pixel Watch 5 (41mm, LTE)'
+  brand: Google
+  category: wearable
+  subcategory: smartwatch
+  description: 'Google Pixel Watch 5, 41 mm, LTE. Needs an Android phone.'
+  tags: [watch, lte, fitness, google, requires_android, 'fits:px11pxl-256', 'fits:px11p-256', 'fits:px11-256', 'fits:px11pf-256', 'fits:px10a-128', 'fits:px9-128', 'fits:gs26u-256', 'fits:gs26-256', 'fits:gs26fe-128', 'fits:zfold8-256', 'fits:zflip8-256', 'fits:gs25-128', 'fits:razrp26-256', 'fits:razr26-256', 'fits:motog26-128', 'fits:revvl8p-256', 'fits:px7']
+  dietary: []
+  allergens: []
+  price_cents: 49999
+  unit: each
+  size: 41 mm
+  barcode: '2000000300306'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.06, 0.1]
+    label_color: '#e8eaed'
+    mass_kg: 0.35
+# src: https://www.t-mobile.com/smart-watch/samsung-galaxy-watch9-40mm
+- sku: GW9-40
+  name: Galaxy Watch9 40mm (LTE)
+  brand: Samsung
+  category: wearable
+  subcategory: smartwatch
+  description: 'Samsung Galaxy Watch9, 40 mm, LTE. Needs an Android phone.'
+  tags: [watch, lte, fitness, samsung, requires_android, 'fits:px11pxl-256', 'fits:px11p-256', 'fits:px11-256', 'fits:px11pf-256', 'fits:px10a-128', 'fits:px9-128', 'fits:gs26u-256', 'fits:gs26-256', 'fits:gs26fe-128', 'fits:zfold8-256', 'fits:zflip8-256', 'fits:gs25-128', 'fits:razrp26-256', 'fits:razr26-256', 'fits:motog26-128', 'fits:revvl8p-256', 'fits:px7']
+  dietary: []
+  allergens: []
+  price_cents: 42999
+  unit: each
+  size: 40 mm
+  barcode: '2000000300313'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.06, 0.12]
+    label_color: '#16181d'
+    mass_kg: 0.35
+# src: https://www.t-mobile.com/smart-watch/t-mobile-syncup-kids-watch-2
+- sku: SYNCUP-KW2
+  name: SyncUP KIDS Watch 2
+  brand: T-Mobile
+  category: wearable
+  subcategory: kids_watch
+  description: 'T-Mobile SyncUP KIDS Watch 2: calls, texts and GPS for kids; parents use the app on any phone.'
+  tags: [watch, lte, kids, gps, house_brand, t-mobile]
+  dietary: []
+  allergens: []
+  price_cents: 17400
+  unit: each
+  barcode: '2000000300320'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.06, 0.15]
+    label_color: '#e20074'
+    mass_kg: 0.3
+# src: https://www.androidauthority.com/google-pixel-watch-3-features-price-3415632
+- sku: WATCH-PX3
+  name: 'Pixel Watch 3 (41mm, LTE)'
+  brand: Google
+  category: wearable
+  subcategory: smartwatch
+  description: 'Google Pixel Watch 3, 41 mm, LTE. Last-gen clearance stock (Pixel Watch 5 is current).'
+  tags: [watch, lte, fitness, last_gen, clearance, google, requires_android, 'fits:px11pxl-256', 'fits:px11p-256', 'fits:px11-256', 'fits:px11pf-256', 'fits:px10a-128', 'fits:px9-128', 'fits:gs26u-256', 'fits:gs26-256', 'fits:gs26fe-128', 'fits:zfold8-256', 'fits:zflip8-256', 'fits:gs25-128', 'fits:razrp26-256', 'fits:razr26-256', 'fits:motog26-128', 'fits:revvl8p-256', 'fits:px7']
+  dietary: []
+  allergens: []
+  price_cents: 44999
+  unit: each
+  size: 41 mm
+  barcode: '2000000300337'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.06, 0.1]
+    label_color: '#3a3d40'
+    mass_kg: 0.35
+# src: https://www.t-mobile.com/home-internet
+- sku: GW-5G
+  name: 5G Home Internet Gateway
+  brand: T-Mobile
+  category: home_internet
+  subcategory: gateway
+  description: T-Mobile 5G Home Internet Gateway (Wi-Fi 7 on top tiers). $0 with a Home Internet line.
+  tags: [home, internet, 5g, wifi, gateway, t-mobile]
+  dietary: []
+  allergens: []
+  price_cents: 0
+  unit: each
+  barcode: '2000000300344'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.17, 0.17, 0.27]
+    label_color: '#e20074'
+    mass_kg: 1.6
+# src: https://www.t-mobile.com/hotspot-iot-connected-devices/franklin-t10-mobile-hotspot
+- sku: HS-T10
+  name: Franklin T10 Mobile Hotspot
+  brand: Franklin Wireless
+  category: home_internet
+  subcategory: hotspot
+  description: Franklin T10 mobile hotspot for travel Wi-Fi.
+  tags: [hotspot, travel, wifi, franklin]
+  dietary: []
+  allergens: []
+  price_cents: 9000
+  unit: each
+  barcode: '2000000300351'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.12, 0.04, 0.16]
+    label_color: '#0a3d62'
+    label_text: T10 5G Mobile Hotspot
+    mass_kg: 0.35
+# src: https://www.t-mobile.com/hotspot-iot-connected-devices/inseego-mifi-pro-m4
+- sku: HS-M4
+  name: Inseego MiFi PRO M4
+  brand: Inseego
+  category: home_internet
+  subcategory: hotspot
+  description: Inseego MiFi PRO M4 mobile hotspot.
+  tags: [hotspot, travel, wifi, inseego]
+  dietary: []
+  allergens: []
+  price_cents: 19999
+  unit: each
+  barcode: '2000000300368'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.13, 0.05, 0.17]
+    label_color: '#222222'
+    mass_kg: 0.35
+# src: https://www.t-mobile.com/accessory/t-mobile-internet-5g-antenna
+- sku: ANT-5G
+  name: T-Mobile Internet 5G Antenna
+  brand: T-Mobile
+  category: home_internet
+  subcategory: antenna
+  description: T-Mobile Internet 5G window antenna; boosts signal for the Home Internet gateway.
+  tags: [home, internet, 5g, antenna, t-mobile, 'fits:gw-5g']
+  dietary: []
+  allergens: []
+  price_cents: 9999
+  unit: each
+  barcode: '2000000300375'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.2, 0.08, 0.25]
+    label_color: '#e9e9ef'
+    label_text: Internet 5G Antenna
+    mass_kg: 0.6
+# src: https://www.t-mobile.com/hotspot-iot-connected-devices/tcl-syncup-tracker-2
+- sku: TRK-SYNCUP2
+  name: SyncUP TRACKER 2
+  brand: TCL
+  category: connected
+  subcategory: tracker
+  description: 'SyncUP TRACKER 2 (TCL): LTE GPS tracker for kids, pets or bags. Needs its own line.'
+  tags: [tracker, gps, lte, kids, pets, tcl]
+  dietary: []
+  allergens: []
+  price_cents: 5400
+  unit: each
+  barcode: '2000000300382'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.03, 0.15]
+    label_color: '#e20074'
+    mass_kg: 0.12
+# src: https://www.t-mobile.com/accessory/sim-starter-kit
+- sku: SIM-KIT
+  name: T-Mobile SIM Starter Kit
+  brand: T-Mobile
+  category: connected
+  subcategory: sim
+  description: T-Mobile SIM starter kit for new lines and bring-your-own-device. Kept behind the counter.
+  tags: [sim, activation, byod, new_line, t-mobile]
+  dietary: []
+  allergens: []
+  price_cents: 2500
+  unit: each
+  barcode: '2000000300399'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.005, 0.15]
+    label_color: '#e20074'
+    label_text: SIM Starter Kit
+    mass_kg: 0.02
+# src: https://www.t-mobile.com/accessory/apple-airpods-pro-3
+- sku: AIRPODS-PRO3
+  name: AirPods Pro 3
+  brand: Apple
+  category: audio
+  subcategory: earbuds
+  description: Apple AirPods Pro 3 noise-cancelling earbuds.
+  tags: [earbuds, anc, wireless, apple, universal]
+  dietary: []
+  allergens: []
+  price_cents: 24999
+  unit: each
+  barcode: '2000000300405'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.045, 0.1]
+    label_color: '#f5f5f7'
+    mass_kg: 0.2
+# src: https://www.t-mobile.com/accessory/apple-airpods-5
+- sku: AIRPODS-5
+  name: AirPods 5
+  brand: Apple
+  category: audio
+  subcategory: earbuds
+  description: Apple AirPods 5 wireless earbuds.
+  tags: [earbuds, wireless, apple, universal]
+  dietary: []
+  allergens: []
+  price_cents: 12999
+  unit: each
+  barcode: '2000000300412'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.04, 0.09]
+    label_color: '#f5f5f7'
+    mass_kg: 0.2
+# src: https://www.t-mobile.com/accessory/apple-airpods-4-with-active-noise-cancellation
+- sku: AIRPODS-4ANC
+  name: AirPods 4 with Active Noise Cancellation
+  brand: Apple
+  category: audio
+  subcategory: earbuds
+  description: Apple AirPods 4 with Active Noise Cancellation.
+  tags: [earbuds, anc, wireless, apple, universal]
+  dietary: []
+  allergens: []
+  price_cents: 17999
+  unit: each
+  barcode: '2000000300429'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.04, 0.09]
+    label_color: '#f5f5f7'
+    label_text: AirPods 4 ANC
+    mass_kg: 0.2
+# src: https://www.t-mobile.com/accessory/samsung-galaxy-buds4-pro
+- sku: BUDS4-PRO
+  name: Galaxy Buds4 Pro
+  brand: Samsung
+  category: audio
+  subcategory: earbuds
+  description: Samsung Galaxy Buds4 Pro noise-cancelling earbuds.
+  tags: [earbuds, anc, wireless, samsung, universal]
+  dietary: []
+  allergens: []
+  price_cents: 24999
+  unit: each
+  barcode: '2000000300436'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.05, 0.09]
+    label_color: '#1c1c1e'
+    mass_kg: 0.2
+# src: https://www.t-mobile.com/accessory/samsung-galaxy-buds4
+- sku: BUDS4
+  name: Galaxy Buds4
+  brand: Samsung
+  category: audio
+  subcategory: earbuds
+  description: Samsung Galaxy Buds4 wireless earbuds.
+  tags: [earbuds, wireless, samsung, universal]
+  dietary: []
+  allergens: []
+  price_cents: 17999
+  unit: each
+  barcode: '2000000300443'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.05, 0.09]
+    label_color: '#1c1c1e'
+    mass_kg: 0.2
+# src: https://www.t-mobile.com/accessory/google-pixel-buds-pro2
+- sku: BUDS-PRO
+  name: Pixel Buds Pro 2
+  brand: Google
+  category: audio
+  subcategory: earbuds
+  description: Google Pixel Buds Pro 2 noise-cancelling earbuds.
+  tags: [earbuds, anc, wireless, google, universal]
+  dietary: []
+  allergens: []
+  price_cents: 22999
+  unit: each
+  barcode: '2000000300450'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.045, 0.1]
+    label_color: '#e9dfcf'
+    mass_kg: 0.2
+# src: https://www.t-mobile.com/accessory/google-pixel-buds-2a
+- sku: PXBUDS-2A
+  name: Pixel Buds 2a
+  brand: Google
+  category: audio
+  subcategory: earbuds
+  description: Google Pixel Buds 2a wireless earbuds.
+  tags: [earbuds, wireless, budget, google, universal]
+  dietary: []
+  allergens: []
+  price_cents: 12999
+  unit: each
+  barcode: '2000000300467'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.045, 0.1]
+    label_color: '#e9dfcf'
+    mass_kg: 0.2
+# src: https://www.t-mobile.com/accessory/beats-powerbeats-pro-2
+- sku: PBPRO2
+  name: Powerbeats Pro 2
+  brand: Beats
+  category: audio
+  subcategory: earbuds
+  description: Beats Powerbeats Pro 2 ear-hook sport earbuds.
+  tags: [earbuds, anc, wireless, sport, running, beats, universal]
+  dietary: []
+  allergens: []
+  price_cents: 24999
+  unit: each
+  barcode: '2000000300474'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.13, 0.06, 0.16]
+    label_color: '#c8102e'
+    mass_kg: 0.3
+# src: https://www.t-mobile.com/accessory/beats-flex-all-day-wireless-earphones
+- sku: BUDS-RUN
+  name: Beats Flex All-Day Wireless Earphones
+  brand: Beats
+  category: audio
+  subcategory: earbuds
+  description: 'Beats Flex all-day wireless earphones (neckband), good for runs and workouts.'
+  tags: [earbuds, wireless, running, sport, beats, universal]
+  dietary: []
+  allergens: []
+  price_cents: 6999
+  unit: each
+  barcode: '2000000300481'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.04, 0.16]
+    label_color: '#2f6b45'
+    label_text: Beats Flex Wireless Earphones
+    mass_kg: 0.12
+# src: https://www.t-mobile.com/accessory/beats-solo-4-headphones
+- sku: BEATS-SOLO4
+  name: Beats Solo 4 Headphones
+  brand: Beats
+  category: audio
+  subcategory: headphones
+  description: Beats Solo 4 on-ear wireless headphones.
+  tags: [headphones, wireless, beats, universal]
+  dietary: []
+  allergens: []
+  price_cents: 19999
+  unit: each
+  barcode: '2000000300498'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.18, 0.08, 0.21]
+    label_color: '#c8102e'
+    mass_kg: 0.5
+# src: https://www.t-mobile.com/accessory/jbl-flip-7
+- sku: JBL-FLIP7
+  name: JBL Flip 7
+  brand: JBL
+  category: audio
+  subcategory: speaker
+  description: JBL Flip 7 portable waterproof Bluetooth speaker.
+  tags: [speaker, bluetooth, waterproof, jbl, universal]
+  dietary: []
+  allergens: []
+  price_cents: 14999
+  unit: each
+  barcode: '2000000300504'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.1, 0.22]
+    label_color: '#ff5a00'
+    mass_kg: 0.75
+# src: https://www.t-mobile.com/accessory/jbl-clip-5
+- sku: JBL-CLIP5
+  name: JBL Clip 5
+  brand: JBL
+  category: audio
+  subcategory: speaker
+  description: JBL Clip 5 clip-on portable Bluetooth speaker.
+  tags: [speaker, bluetooth, waterproof, jbl, universal]
+  dietary: []
+  allergens: []
+  price_cents: 7999
+  unit: each
+  barcode: '2000000300511'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.12, 0.06, 0.17]
+    label_color: '#ff5a00'
+    mass_kg: 0.4
+# src: https://www.t-mobile.com/accessory/apple-clear-case-with-magsafe-for-iphone-18-pro-max
+- sku: CASE-IP18PM-CLR
+  name: Apple Clear Case with MagSafe for iPhone 18 Pro Max
+  brand: Apple
+  category: case
+  subcategory: case_clear
+  description: Apple Clear Case with MagSafe for iPhone 18 Pro Max.
+  tags: [case, clear, magsafe, apple, ios, iphone, 'fits:ip18pm-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300528'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.025, 0.19]
+    label_color: '#e6eef2'
+    label_text: Clear Case MagSafe iPhone 18 Pro Max
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/apple-silicone-case-with-magsafe-for-iphone-18-pro
+- sku: CASE-IP18P-SIL
+  name: Apple Silicone Case with MagSafe for iPhone 18 Pro
+  brand: Apple
+  category: case
+  subcategory: case_slim
+  description: Apple Silicone Case with MagSafe for iPhone 18 Pro.
+  tags: [case, silicone, magsafe, apple, ios, iphone, 'fits:ip18p-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300535'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.025, 0.18]
+    label_color: '#9cb8d6'
+    label_text: Silicone Case MagSafe iPhone 18 Pro
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/apple-clear-case-with-magsafe-for-iphone-18-pro
+- sku: CASE-IP18P-CLR
+  name: Apple Clear Case with MagSafe for iPhone 18 Pro
+  brand: Apple
+  category: case
+  subcategory: case_clear
+  description: Apple Clear Case with MagSafe for iPhone 18 Pro.
+  tags: [case, clear, magsafe, apple, ios, iphone, 'fits:ip18p-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300542'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.025, 0.18]
+    label_color: '#e6eef2'
+    label_text: Clear Case MagSafe iPhone 18 Pro
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/zagg-crystal-palace-snap-with-kickstand-case-for-apple-iphone-18-pro-17-pro
+- sku: CASE-IP18P-ZCP
+  name: ZAGG Crystal Palace Snap with Kickstand Case for iPhone 18 Pro/17 Pro
+  brand: ZAGG
+  category: case
+  subcategory: case_clear
+  description: 'ZAGG Crystal Palace Snap clear case with kickstand, MagSafe-compatible. Fits iPhone 18 Pro and 17 Pro.'
+  tags: [case, clear, kickstand, magsafe, zagg, ios, iphone, 'fits:ip18p-256']
+  dietary: []
+  allergens: []
+  price_cents: 5499
+  unit: each
+  barcode: '2000000300559'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.2]
+    label_color: '#0e2a47'
+    label_text: Crystal Palace Snap iPhone 18 Pro
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/pelican-voyager-magsafe-case-with-holster-for-apple-iphone-18-pro-17-pro
+- sku: CASE-IP18P-PEL
+  name: Pelican Voyager MagSafe Case with Holster for iPhone 18 Pro/17 Pro
+  brand: Pelican
+  category: case
+  subcategory: case_rugged
+  description: Pelican Voyager rugged MagSafe case with belt holster. Fits iPhone 18 Pro and 17 Pro.
+  tags: [case, rugged, holster, magsafe, pelican, ios, iphone, 'fits:ip18p-256']
+  dietary: []
+  allergens: []
+  price_cents: 6499
+  unit: each
+  barcode: '2000000300566'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.04, 0.21]
+    label_color: '#f2b705'
+    label_text: Voyager MagSafe + Holster iPhone 18 Pro
+    mass_kg: 0.16
+# src: https://www.t-mobile.com/accessory/apple-clear-case-with-magsafe-for-iphone-17
+- sku: CASE-IP17-CLR
+  name: Apple Clear Case with MagSafe for iPhone 17
+  brand: Apple
+  category: case
+  subcategory: case_clear
+  description: Apple Clear Case with MagSafe for iPhone 17.
+  tags: [case, clear, magsafe, apple, ios, iphone, 'fits:ip17-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300573'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.025, 0.18]
+    label_color: '#e6eef2'
+    label_text: Clear Case MagSafe iPhone 17
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/tech21-evocheck-case-with-magsafe-for-apple-iphone-17
+- sku: CASE-IP17-T21
+  name: Tech21 EvoCheck Case with MagSafe for iPhone 17
+  brand: Tech21
+  category: case
+  subcategory: case_slim
+  description: Tech21 EvoCheck protective case with MagSafe for iPhone 17.
+  tags: [case, protective, magsafe, tech21, ios, iphone, 'fits:ip17-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300580'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.2]
+    label_color: '#1b75bc'
+    label_text: EvoCheck MagSafe iPhone 17
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/tech21-evolite-case-with-magsafe-for-apple-iphone-16
+- sku: CASE-IP16-MAG
+  name: Tech21 EvoLite Case with MagSafe for iPhone 16
+  brand: Tech21
+  category: case
+  subcategory: case_slim
+  description: Tech21 EvoLite slim case with MagSafe for iPhone 16.
+  tags: [case, slim, magsafe, tech21, ios, iphone, 'fits:ip16-128']
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000300597'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.2]
+    label_color: '#9cb8d6'
+    label_text: EvoLite MagSafe iPhone 16
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/goto-flex-case-magsafe-for-apple-iphone-16
+- sku: CASE-IP16-GOTO
+  name: GoTo Flex Case MagSafe for iPhone 16
+  brand: GoTo
+  category: case
+  subcategory: case_slim
+  description: 'GoTo Flex MagSafe case for iPhone 16 (GoTo = T-Mobile''s house accessory brand).'
+  tags: [case, slim, magsafe, house_brand, goto, ios, iphone, 'fits:ip16-128']
+  dietary: []
+  allergens: []
+  price_cents: 2499
+  unit: each
+  barcode: '2000000300603'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.2]
+    label_color: '#d6006e'
+    label_text: Flex Case MagSafe iPhone 16
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/google-magnetic-case-for-google-pixel-11
+- sku: CASE-PX11-MAG
+  name: Google Magnetic Case for Pixel 11
+  brand: Google
+  category: case
+  subcategory: case_slim
+  description: Google Magnetic Case (Pixelsnap) for Pixel 11.
+  tags: [case, magnetic, qi2, google, android, pixel, 'fits:px11-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300610'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.025, 0.19]
+    label_color: '#2b2f33'
+    label_text: Magnetic Case Pixel 11
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/google-magnetic-case-for-google-pixel-11-pro
+- sku: CASE-PX11P-MAG
+  name: Google Magnetic Case for Pixel 11 Pro
+  brand: Google
+  category: case
+  subcategory: case_slim
+  description: Google Magnetic Case (Pixelsnap) for Pixel 11 Pro.
+  tags: [case, magnetic, qi2, google, android, pixel, 'fits:px11p-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300627'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.025, 0.19]
+    label_color: '#2b2f33'
+    label_text: Magnetic Case Pixel 11 Pro
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/samsung-clear-magnet-case-for-samsung-galaxy-s26-ultra
+- sku: CASE-GS26U-CLR
+  name: Samsung Clear Magnet Case for Galaxy S26 Ultra
+  brand: Samsung
+  category: case
+  subcategory: case_clear
+  description: Samsung Clear Magnet Case for Galaxy S26 Ultra.
+  tags: [case, clear, magnetic, qi2, samsung, android, galaxy, 'fits:gs26u-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300634'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.2]
+    label_color: '#d9e4ec'
+    label_text: Clear Magnet Case Galaxy S26 Ultra
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/samsung-clear-magnet-case-for-samsung-galaxy-s26
+- sku: CASE-GS26-CLR
+  name: Samsung Clear Magnet Case for Galaxy S26
+  brand: Samsung
+  category: case
+  subcategory: case_clear
+  description: Samsung Clear Magnet Case for Galaxy S26.
+  tags: [case, clear, magnetic, qi2, samsung, android, galaxy, 'fits:gs26-256']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300641'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.025, 0.19]
+    label_color: '#d9e4ec'
+    label_text: Clear Magnet Case Galaxy S26
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/samsung-silicone-magnet-case-for-samsung-galaxy-s26
+- sku: CASE-GS26-SIL
+  name: Samsung Silicone Magnet Case for Galaxy S26
+  brand: Samsung
+  category: case
+  subcategory: case_slim
+  description: Samsung Silicone Magnet Case for Galaxy S26.
+  tags: [case, silicone, magnetic, qi2, samsung, android, galaxy, 'fits:gs26-256']
+  dietary: []
+  allergens: []
+  price_cents: 5499
+  unit: each
+  barcode: '2000000300658'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.025, 0.19]
+    label_color: '#4a5a7a'
+    label_text: Silicone Magnet Case Galaxy S26
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/goto-flex-case-for-samsung-galaxy-s25
+- sku: CASE-GS25-GOTO
+  name: GoTo Flex Case for Galaxy S25
+  brand: GoTo
+  category: case
+  subcategory: case_slim
+  description: GoTo Flex case for Galaxy S25.
+  tags: [case, slim, house_brand, goto, android, galaxy, 'fits:gs25-128']
+  dietary: []
+  allergens: []
+  price_cents: 1999
+  unit: each
+  barcode: '2000000300665'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.2]
+    label_color: '#d6006e'
+    label_text: Flex Case Galaxy S25
+    mass_kg: 0.08
+# src: https://case-mate.com/collections/pixel-9-pro-cases
+- sku: CASE-PX9-CLR
+  name: Case-Mate Signature Clear Case for Pixel 9 / 9 Pro
+  brand: Case-Mate
+  category: case
+  subcategory: case_clear
+  description: Case-Mate Signature Clear case for Pixel 9 / 9 Pro. Last-gen stock.
+  tags: [case, clear, last_gen, case-mate, android, pixel, 'fits:px9-128']
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  barcode: '2000000300672'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.2]
+    label_color: '#cfe3ea'
+    label_text: Signature Clear Pixel 9 / 9 Pro
+    mass_kg: 0.08
+# src: https://www.shi.com/product/48739992
+- sku: CASE-PX9-RUG
+  name: UAG Pathfinder Case for Pixel 9 / 9 Pro
+  brand: UAG
+  category: case
+  subcategory: case_rugged
+  description: UAG Pathfinder rugged case for Pixel 9 / 9 Pro. Last-gen stock.
+  tags: [case, rugged, last_gen, uag, android, pixel, 'fits:px9-128']
+  dietary: []
+  allergens: []
+  price_cents: 4995
+  unit: each
+  barcode: '2000000300689'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.035, 0.2]
+    label_color: '#3c3f3a'
+    label_text: Pathfinder Pixel 9 / 9 Pro
+    mass_kg: 0.14
+# src: https://9to5google.com/2022/10/18/review-google-pixel-7-case/
+- sku: CASE-PX7-BLK
+  name: Google Pixel 7 Case (Obsidian)
+  brand: Google
+  category: case
+  subcategory: case_slim
+  description: Google Pixel 7 Case in Obsidian. Last-gen clearance; does not fit newer Pixels.
+  tags: [case, last_gen, clearance, google, android, pixel, 'fits:px7']
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  barcode: '2000000300696'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.025, 0.18]
+    label_color: '#1f2326'
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/zagg-glass-xtr6-screen-protector-for-apple-iphone-18-pro-17-pro
+- sku: GLASS-IP18P-XTR6
+  name: ZAGG Glass XTR6 Screen Protector for iPhone 18 Pro/17 Pro
+  brand: ZAGG
+  category: screen
+  subcategory: glass_premium
+  description: ZAGG InvisibleShield Glass XTR6 screen protector for iPhone 18 Pro / 17 Pro.
+  tags: [screen, screen_protector, glass, premium, zagg, ios, iphone, 'fits:ip18p-256']
+  dietary: []
+  allergens: []
+  price_cents: 5999
+  unit: each
+  barcode: '2000000300702'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.012, 0.2]
+    label_color: '#0e2a47'
+    label_text: Glass XTR6 iPhone 18 Pro / 17 Pro
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/goto-tempered-glass-screen-protector-for-apple-iphone-18-pro-17-pro
+- sku: GLASS-IP18P-GOTO
+  name: GoTo Tempered Glass Screen Protector for iPhone 18 Pro/17 Pro
+  brand: GoTo
+  category: screen
+  subcategory: glass_basic
+  description: GoTo tempered glass screen protector for iPhone 18 Pro / 17 Pro.
+  tags: [screen, screen_protector, glass, house_brand, goto, ios, iphone, 'fits:ip18p-256']
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000300719'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.012, 0.2]
+    label_color: '#d6006e'
+    label_text: Tempered Glass iPhone 18 Pro / 17 Pro
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/zagg-glass-xtr5-biometric-screen-protector-for-google-pixel-11-11-pro
+- sku: GLASS-PX11
+  name: ZAGG Glass XTR5 (Biometric) Screen Protector for Pixel 11/11 Pro
+  brand: ZAGG
+  category: screen
+  subcategory: glass_premium
+  description: ZAGG Glass XTR5 screen protector for Pixel 11 / 11 Pro; works with the in-display fingerprint reader.
+  tags: [screen, screen_protector, glass, premium, zagg, android, pixel, 'fits:px11-256', 'fits:px11p-256']
+  dietary: []
+  allergens: []
+  price_cents: 5999
+  unit: each
+  barcode: '2000000300726'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.012, 0.2]
+    label_color: '#0e2a47'
+    label_text: Glass XTR5 Pixel 11 / 11 Pro
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/zagg-xtr5-glass-screen-protector-for-samsung-galaxy-s26
+- sku: GLASS-GS26
+  name: ZAGG XTR5 Glass Screen Protector for Galaxy S26
+  brand: ZAGG
+  category: screen
+  subcategory: glass_premium
+  description: ZAGG XTR5 glass screen protector for Galaxy S26.
+  tags: [screen, screen_protector, glass, premium, zagg, android, galaxy, 'fits:gs26-256']
+  dietary: []
+  allergens: []
+  price_cents: 5999
+  unit: each
+  barcode: '2000000300733'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.012, 0.2]
+    label_color: '#0e2a47'
+    label_text: Glass XTR5 Galaxy S26
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/goto-tempered-glass-screen-protector-for-samsung-galaxy-s26
+- sku: GLASS-GS26-GOTO
+  name: GoTo Tempered Glass Screen Protector for Galaxy S26
+  brand: GoTo
+  category: screen
+  subcategory: glass_basic
+  description: GoTo tempered glass screen protector for Galaxy S26.
+  tags: [screen, screen_protector, glass, house_brand, goto, android, galaxy, 'fits:gs26-256']
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000300740'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.012, 0.2]
+    label_color: '#d6006e'
+    label_text: Tempered Glass Galaxy S26
+    mass_kg: 0.08
+# src: https://www.shi.com/product/48276182/ZAGG-InvisibleShield-Glass-Elite
+- sku: GLASS-PX9
+  name: ZAGG InvisibleShield Glass Elite for Pixel 9 / 9 Pro
+  brand: ZAGG
+  category: screen
+  subcategory: glass_premium
+  description: ZAGG InvisibleShield Glass Elite screen protector for Pixel 9 / 9 Pro. Last-gen stock.
+  tags: [screen, screen_protector, glass, premium, last_gen, zagg, android, pixel, 'fits:px9-128']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300757'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.012, 0.2]
+    label_color: '#e7f0f4'
+    label_text: Glass Elite Pixel 9 / 9 Pro
+    mass_kg: 0.08
+# src: https://www.t-mobile.com/accessory/goto-usb-c-20w-wall-charger
+- sku: CHG-20W
+  name: GoTo USB-C 20W Wall Charger
+  brand: GoTo
+  category: charger
+  subcategory: wall_charger
+  description: GoTo 20W USB-C wall charger. Works with any USB-C phone.
+  tags: [charger, usb-c, wall, house_brand, goto, universal]
+  dietary: []
+  allergens: []
+  price_cents: 1499
+  unit: each
+  size: 20 W
+  barcode: '2000000300764'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.04, 0.16]
+    label_color: '#f4f4f2'
+    mass_kg: 0.1
+# src: https://www.t-mobile.com/accessory/samsung-45w-power-adapter
+- sku: CHG-45W
+  name: Samsung 45W Power Adapter
+  brand: Samsung
+  category: charger
+  subcategory: wall_charger
+  description: Samsung 45W USB-C super-fast wall charger (USB-C PD/PPS). Works with any USB-C phone.
+  tags: [charger, usb-c, wall, fast, samsung, universal]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  size: 45 W
+  barcode: '2000000300771'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.045, 0.17]
+    label_color: '#202020'
+    mass_kg: 0.13
+# src: https://www.t-mobile.com/accessory/apple-240w-usb-c-charge-cable-2m
+- sku: CBL-USBC-2M
+  name: Apple 240W USB-C Charge Cable (2 m)
+  brand: Apple
+  category: charger
+  subcategory: cable
+  description: 'Apple 240W USB-C charge cable, 2 m, braided. Works with any USB-C device.'
+  tags: [cable, usb-c, apple, universal]
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  size: 2 m
+  barcode: '2000000300788'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.1]
+    label_color: '#c4472b'
+    label_text: 240W USB-C Charge Cable 2 m
+    mass_kg: 0.12
+# src: https://www.t-mobile.com/accessory/belkin-10k-20w-battery-with-usb-c-cable
+- sku: PB-10K
+  name: Belkin 10K 20W Battery with USB-C Cable
+  brand: Belkin
+  category: charger
+  subcategory: power_bank
+  description: 'Belkin 10,000 mAh 20W portable battery with a USB-C cable.'
+  tags: [battery, travel, power_bank, usb-c, belkin, universal]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  size: '10,000 mAh'
+  barcode: '2000000300795'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.03, 0.17]
+    label_color: '#5a6470'
+    label_text: 10K 20W Battery + USB-C Cable
+    mass_kg: 0.3
+# src: https://www.t-mobile.com/accessory/apple-20w-usb-c-power-adapter
+- sku: CHG-APL-20W
+  name: Apple 20W USB-C Power Adapter
+  brand: Apple
+  category: charger
+  subcategory: wall_charger
+  description: Apple 20W USB-C power adapter.
+  tags: [charger, usb-c, wall, apple, universal]
+  dietary: []
+  allergens: []
+  price_cents: 1999
+  unit: each
+  size: 20 W
+  barcode: '2000000300801'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.065, 0.04, 0.09]
+    label_color: '#f5f5f7'
+    mass_kg: 0.1
+# src: https://www.t-mobile.com/accessory/samsung-25w-power-adapter
+- sku: CHG-SAM-25W
+  name: Samsung 25W Power Adapter
+  brand: Samsung
+  category: charger
+  subcategory: wall_charger
+  description: Samsung 25W USB-C power adapter.
+  tags: [charger, usb-c, wall, fast, samsung, universal]
+  dietary: []
+  allergens: []
+  price_cents: 1999
+  unit: each
+  size: 25 W
+  barcode: '2000000300818'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.04, 0.16]
+    label_color: '#16181d'
+    mass_kg: 0.1
+# src: https://www.t-mobile.com/accessory/google-45w-power-adapter
+- sku: CHG-GGL-45W
+  name: Google 45W USB-C Power Adapter
+  brand: Google
+  category: charger
+  subcategory: wall_charger
+  description: Google 45W USB-C power adapter.
+  tags: [charger, usb-c, wall, fast, google, universal]
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  size: 45 W
+  barcode: '2000000300825'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.045, 0.12]
+    label_color: '#e8eaed'
+    mass_kg: 0.13
+# src: https://www.t-mobile.com/accessory/apple-magsafe-charger-2m
+- sku: CHG-MAGSAFE-2M
+  name: Apple MagSafe Charger (2 m)
+  brand: Apple
+  category: charger
+  subcategory: wireless_charger
+  description: 'Apple MagSafe charger, 2 m. Snaps onto MagSafe iPhones.'
+  tags: [charger, wireless, magsafe, apple, ios, 'fits:ip18pm-256', 'fits:ip18p-256', 'fits:ipair-256', 'fits:ip17-256', 'fits:ip16-128']
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  size: 2 m
+  barcode: '2000000300832'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.035, 0.1]
+    label_color: '#f5f5f7'
+    mass_kg: 0.12
+# src: https://www.t-mobile.com/accessory/google-pixelsnap-charger
+- sku: CHG-PXSNAP
+  name: Google Pixelsnap Charger
+  brand: Google
+  category: charger
+  subcategory: wireless_charger
+  description: Google Pixelsnap magnetic Qi2 charger for the Pixel 10 and 11 series.
+  tags: [charger, wireless, magnetic, qi2, google, android, 'fits:px11pxl-256', 'fits:px11p-256', 'fits:px11-256', 'fits:px11pf-256']
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000300849'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.04, 0.11]
+    label_color: '#e8eaed'
+    mass_kg: 0.12
+# src: https://www.t-mobile.com/accessory/belkin-25w-3-in-1-foldable-magnetic-charger
+- sku: CHG-BLK-3IN1
+  name: Belkin 25W 3-in-1 Foldable Magnetic Charger
+  brand: Belkin
+  category: charger
+  subcategory: wireless_charger
+  description: 'Belkin 25W 3-in-1 foldable magnetic charger for a phone, a watch and earbuds.'
+  tags: [charger, wireless, magnetic, qi2, travel, belkin, 'fits:ip18pm-256', 'fits:ip18p-256', 'fits:ipair-256', 'fits:ip17-256', 'fits:ip16-128', 'fits:px11pxl-256', 'fits:px11p-256', 'fits:px11-256', 'fits:px11pf-256']
+  dietary: []
+  allergens: []
+  price_cents: 9999
+  unit: each
+  size: 25 W
+  barcode: '2000000300856'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.12, 0.05, 0.18]
+    label_color: '#f2f2f2'
+    label_text: 3-in-1 Magnetic Charger 25W
+    mass_kg: 0.5
+# src: https://www.t-mobile.com/accessory/belkin-75w-car-charger-with-retractable-cable
+- sku: CAR-BLK-75W
+  name: Belkin 75W Car Charger with Retractable Cable
+  brand: Belkin
+  category: charger
+  subcategory: car_charger
+  description: Belkin 75W car charger with a retractable USB-C cable.
+  tags: [charger, car, usb-c, belkin, universal]
+  dietary: []
+  allergens: []
+  price_cents: 3499
+  unit: each
+  size: 75 W
+  barcode: '2000000300863'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.04, 0.18]
+    label_color: '#f2f2f2'
+    label_text: 75W Car Charger Retractable
+    mass_kg: 0.12
+# src: https://www.t-mobile.com/accessory/mophie-powerstation-mini-5k-w-stand
+- sku: PB-MOPHIE-5K
+  name: mophie Powerstation Mini 5K with Stand
+  brand: mophie
+  category: charger
+  subcategory: power_bank
+  description: mophie Powerstation Mini 5K battery with a built-in stand.
+  tags: [battery, travel, power_bank, mophie, universal]
+  dietary: []
+  allergens: []
+  price_cents: 6999
+  unit: each
+  size: '5,000 mAh'
+  barcode: '2000000300870'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.035, 0.16]
+    label_color: '#111111'
+    label_text: Powerstation Mini 5K Stand
+    mass_kg: 0.18
+# src: https://www.t-mobile.com/accessory/iottie-qi2-mini-wireless-charging-car-vent-mount
+- sku: MNT-IOTTIE-QI2
+  name: iOttie Qi2 Mini Wireless Charging Car Vent Mount
+  brand: iOttie
+  category: charger
+  subcategory: car_mount
+  description: iOttie Qi2 Mini wireless charging car vent mount.
+  tags: [car, mount, wireless, qi2, iottie, 'fits:ip18pm-256', 'fits:ip18p-256', 'fits:ipair-256', 'fits:ip17-256', 'fits:ip16-128', 'fits:px11pxl-256', 'fits:px11p-256', 'fits:px11-256', 'fits:px11pf-256']
+  dietary: []
+  allergens: []
+  price_cents: 5499
+  unit: each
+  barcode: '2000000300887'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.06, 0.17]
+    label_color: '#1f1f1f'
+    label_text: Qi2 Mini Car Vent Mount
+    mass_kg: 0.2
+# src: https://www.t-mobile.com/accessory/popsockets-popgrip-for-magnetic
+- sku: GRIP-POP-MAG
+  name: PopSockets PopGrip for MagSafe
+  brand: PopSockets
+  category: case
+  subcategory: grip
+  description: 'PopSockets PopGrip for MagSafe: magnetic grip and stand.'
+  tags: [grip, stand, magsafe, popsockets, 'fits:ip18pm-256', 'fits:ip18p-256', 'fits:ipair-256', 'fits:ip17-256', 'fits:ip16-128', 'fits:px11pxl-256', 'fits:px11p-256', 'fits:px11-256', 'fits:px11pf-256']
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000300894'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.08, 0.03, 0.15]
+    label_color: '#ff6f61'
+    mass_kg: 0.04
+# src: https://www.t-mobile.com/accessory/popsockets-popgrip
+- sku: GRIP-POP
+  name: PopSockets PopGrip
+  brand: PopSockets
+  category: case
+  subcategory: grip
+  description: 'PopSockets PopGrip: stick-on grip and stand. Impulse item at the counter.'
+  tags: [grip, stand, popsockets]
+  dietary: []
+  allergens: []
+  price_cents: 999
+  unit: each
+  barcode: '2000000300900'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.07, 0.03, 0.13]
+    label_color: '#ff6f61'
+    mass_kg: 0.04
+# src: https://www.t-mobile.com/accessory/apple-airtag-1-pack-2nd-generation
+- sku: TAG-AIRTAG2
+  name: AirTag (2nd Generation) 1 Pack
+  brand: Apple
+  category: connected
+  subcategory: tracker
+  description: 'Apple AirTag (2nd generation), 1 pack. Find My needs an iPhone.'
+  tags: [tracker, find_my, apple, requires_ios, 'fits:ip18pm-256', 'fits:ip18p-256', 'fits:ipduo-256', 'fits:ipair-256', 'fits:ip17-256', 'fits:ip17e-256', 'fits:ip16-128']
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  size: 1 pack
+  barcode: '2000000300917'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.055, 0.025, 0.055]
+    label_color: '#f5f5f7'
+    mass_kg: 0.04

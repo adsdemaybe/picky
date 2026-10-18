@@ -1,23 +1,22 @@
 """TripOrchestrator: runs the trip state machine end to end (CLAUDE.md §2) using only ``services.*``.
 
-It is the gateway's ``TripController`` (the only thing that mutates a ``Trip``) and publishes every user-visible
-event. Flow per trip::
+It is the gateway's ``TripController`` (the only thing that mutates a ``Trip``) and publishes every trip-flow event
+(envelope ``events.trip_envelope(trip)``) plus ``robot.state`` for every robot. Flow per trip::
 
-    intent -> agent.expand_intent -> list.ready -> agent.source_list -> sourcing.split (+ online lines in the cart)
-      -> recommender.recommend / checkout_batch -> recs.ready (+ transparency log) -> routing.plan_route
-      -> route.planned -> trust.evaluate (projected cart) -> awaiting_login
-    login -> robot.reset -> per stop: [optional: approval -> yes/no -> replan] -> navigate -> scan -> blur + identify
-      -> catalog.apply_scan -> scan.result -> [produce: rank_freshness -> pick.choices -> approval]
-      -> trust.evaluate(line) [-> over_threshold approval] -> pick x qty -> place_in_basket -> record_pick
-      -> item.picked -> add_line -> cart.updated -> verify_basket -> basket.verified
-    -> checkout-batch question -> start_checkout: trust.evaluate -> checkout approval bound to cart_hash
-      -> trust.checkout -> checkout.completed -> paid -> record_purchase -> agent.compose_followup
-      -> messaging.send -> followup.sent -> reply -> agent.interpret_reply -> recommender.record_feedback
-      -> feedback.received + profile.updated -> done
+    intent -> agent.expand_intent (skipped when the fleet passes a per-store shopping_list) -> list.ready
+      -> agent.source_list -> sourcing.split (+ online lines in the cart) -> recommender.recommend / checkout_batch
+      -> recs.ready (+ transparency log) -> routing.plan_route (from the assigned robot's pose) -> route.planned
+      -> trust.evaluate (projected cart)
+      -> auto_execute (fleet / request trips): EXECUTING right away | manual trips: awaiting_login -> POST /login
+    EXECUTING: goal = fleet.execute_trip(trip_id, robot_id)  (the robot brain does the in-store part through
+      trips.assign_robot / set_stop_status / check_line / ask / add_line / replan / update_list)
+      completed -> checkout-batch question -> start_checkout; failed -> checkout if the cart has lines (+ error) else
+      FAILED; cancelled -> FAILED
+    start_checkout: trust.evaluate -> checkout approval bound to cart_hash -> trust.checkout -> checkout.completed
+      -> paid -> record_purchase -> agent.compose_followup -> messaging.send -> followup.sent -> reply
+      -> agent.interpret_reply -> recommender.record_feedback -> feedback.received + profile.updated -> done
 
-Failures never kill the trip unless planning itself is impossible: every degraded step emits an ``error`` event and
-the trip continues (OOS -> re-source online; pick failed -> stop failed; sim disconnected -> robot fake; approval
-timeout -> skip / freshest).
+Failures never kill the trip unless planning itself is impossible: every degraded step emits an ``error`` event.
 """
 
 import asyncio
@@ -29,14 +28,14 @@ from typing import Any
 
 from contracts.api import AddLineResult, CheckoutStatus, CreateTripRequest, RobotLoginRequest
 from contracts.catalog import StoreInfo, online_shipping_cents
-from contracts.common import ONLINE_STORE_ID, Pose2D, money
-from contracts.events import make_event
+from contracts.common import ONLINE_STORE_ID, Pose2D, money, utcnow
+from contracts.events import make_event, trip_envelope
+from contracts.fleet import FleetRequest, GoalStatus
 from contracts.messaging import InboundMessage, OutboundMessage, ReplyInterpretation
 from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, UserProfile
-from contracts.routing import Route, RouteLeg, RouteRequest, Stop, StopStatus
+from contracts.routing import Route, RouteRequest, Stop, StopStatus
 from contracts.services import Services
 from contracts.shopping import TRIP_TRANSITIONS, Cart, CartLine, Intent, ListItem, Recommendation, TripState
-from contracts.sim import RobotError, RobotStatus
 from contracts.tools import AgentReply
 from contracts.trip import Trip, TripTransition
 from contracts.trust import (
@@ -46,7 +45,6 @@ from contracts.trust import (
     ApprovalResponse,
     CheckoutRequest,
     MandateDecision,
-    MandateReason,
     MandateVerdict,
     TransparencyEntry,
     compute_cart_hash,
@@ -74,9 +72,10 @@ class OrchestratorConfig:
     approval_timeout_s: float = 120.0
     checkout_timeout_s: float = 300.0
     auto_login: bool = False
-    """True = start executing as soon as the route is planned (headless demo / tests)."""
+    """True = manual trips also start executing as soon as the route is planned (tests). Fleet-created trips
+    (``auto_execute``) always do."""
     auto_checkout: bool = True
-    """Start checkout when the last stop is done."""
+    """Start checkout when the in-store goal ends."""
     auto_followup: bool = True
     """Send the post-purchase question right after payment (POST /api/trips/{id}/followup re-sends it)."""
     followup_timeout_s: float | None = None
@@ -96,31 +95,46 @@ class TripOrchestrator:
         self,
         services: Services,
         config: OrchestratorConfig | None = None,
-        fallback_robot: Callable[[], Any] | None = None,
+        **_ignored: Any,
     ) -> None:
         self.services = services
         self.config = config or OrchestratorConfig()
-        self._fallback_robot = fallback_robot
         self._trips: dict[str, Trip] = {}
         self._fsm: dict[str, StateMachine] = {}
         self._locks: dict[str, asyncio.Lock] = {}
-        self._at: dict[str, str | None] = {}
+        self._robot_trip: dict[str, str] = {}
+        """robot_id -> trip it executes (robot.state envelope)."""
         self._deferred_online: dict[str, list[CartLine]] = {}
         self._used_approvals: dict[str, set[str]] = {}
+        self._sent_trip: dict[str, str] = {}
+        self._routed_items: dict[str, set[str]] = {}
+        """trip_id -> list item ids that have EVER had a route stop (a re-plan installs only the remaining stops, so
+        finished / in-progress items are not in Trip.route any more and must not be re-added as 'missing')."""
+        """Outbound follow-up message_id -> trip_id (a text reply with ``in_reply_to`` finds its trip)."""
         self._declined_skus: dict[str, set[str]] = {}
         """user_id -> detour SKUs the shopper said no to (passed as exclude_skus on the next trips)."""
         self._tasks: set[asyncio.Task[Any]] = set()
         self._exec_tasks: dict[str, asyncio.Task[Any]] = {}
-        self._robot_lock: asyncio.Lock | None = None
         self._online_info: StoreInfo | None = None
         self._started = False
+        self._state_task: asyncio.Task[Any] | None = None
 
     # ==================================================================================================================
     # lifecycle
     # ==================================================================================================================
     async def start(self) -> None:
-        """Register the approval listener and the messaging inbound handler; start messaging."""
+        """Register the approval listener and the messaging inbound handler; start the fleet (robot monitoring),
+        the robot.state forwarder and messaging."""
         self._wire()
+        if self._state_task is None and self.services.robot is not None:
+            self._state_task = self._spawn(self._forward_states(), name="robot-states")
+        fleet = self.services.fleet
+        if fleet is not None:
+            try:
+                await fleet.start()
+            except Exception as exc:  # noqa: BLE001 - trips still plan; execution reports the problem
+                log.warning("fleet.start failed: %s", exc)
+                await self._error(None, "fleet", f"fleet manager failed to start: {exc}")
         messaging = self.services.messaging
         if messaging is not None:
             try:
@@ -130,10 +144,15 @@ class TripOrchestrator:
                 await self._error(None, "messaging", f"messaging unavailable: {exc}")
 
     async def stop(self) -> None:
+        fleet = self.services.fleet
+        if fleet is not None:
+            with contextlib.suppress(Exception):
+                await fleet.shutdown()
         tasks = list(self._tasks)
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        self._state_task = None
         messaging = self.services.messaging
         if messaging is not None:
             with contextlib.suppress(Exception):
@@ -146,6 +165,8 @@ class TripOrchestrator:
         approvals = self.services.approvals
         if approvals is not None and hasattr(approvals, "add_listener"):
             approvals.add_listener(self._on_approval)
+        if approvals is not None and getattr(approvals, "envelope_hook", False) is None:
+            approvals.envelope_hook = self.approval_envelope
         messaging = self.services.messaging
         if messaging is not None:
             messaging.on_inbound(self.handle_inbound)
@@ -164,7 +185,7 @@ class TripOrchestrator:
         return [t.model_copy(deep=True) for t in trips]
 
     def is_executing(self, trip_id: str) -> bool:
-        """True while the in-store run (robot loop + checkout question) is still going."""
+        """True while the in-store run (fleet shop goal + checkout question) is still going."""
         task = self._exec_tasks.get(trip_id)
         return task is not None and not task.done()
 
@@ -201,34 +222,227 @@ class TripOrchestrator:
             trip_id=trip_id,
         )
         user_ids = [req.user_id, *[u for u in req.user_ids if u != req.user_id]]
+        preset = None
+        if req.shopping_list is not None:
+            preset = req.shopping_list.model_copy(update={"trip_id": trip_id, "store_id": store_id}, deep=True)
         trip = Trip(
             trip_id=trip_id,
             user_id=req.user_id,
             user_ids=user_ids,
             store_id=store_id,
             intent=intent,
+            shopping_list=preset,
             cart=Cart(cart_id=new_id("cart"), trip_id=trip_id, user_id=req.user_id),
             history=[TripTransition(from_state=None, to_state=S.INTENT, reason="created")],
+            auto_execute=req.auto_execute,
+            robot_logged_in=req.auto_execute,
+            robot_id=req.robot_id,
+            request_id=req.request_id,
         )
         self._trips[trip_id] = trip
         self._fsm[trip_id] = StateMachine(TRIP_TRANSITIONS, initial=S.INTENT, any_to=[S.FAILED], terminal=TERMINAL)
         self._locks[trip_id] = asyncio.Lock()
         await self._publish("trip.created", trip_id, trip=trip.model_copy(deep=True))
         await self._publish("intent.received", trip_id, intent=intent)
-        self._spawn(self._plan(trip_id), name=f"plan-{trip_id}")
+        self._spawn(self._plan(trip_id, preset is not None), name=f"plan-{trip_id}")
         return trip.model_copy(deep=True)
 
+    async def assign_robot(self, trip_id: str, robot_id: str, goal_id: str | None = None) -> Trip:
+        """Fleet -> trip: which robot / goal executes the trip (robot.state for that robot carries this trip_id)."""
+        trip = self._trips[trip_id]
+        old = trip.robot_id
+        if old and old != robot_id and self._robot_trip.get(old) == trip_id:
+            self._robot_trip.pop(old, None)
+        trip.robot_id = robot_id
+        if goal_id is not None:
+            trip.goal_id = goal_id
+        if trip.state not in TERMINAL:
+            self._robot_trip[robot_id] = trip_id
+        trip.updated_at = utcnow()
+        return trip.model_copy(deep=True)
+
+    async def set_stop_status(self, trip_id: str, stop_id: str, status: StopStatus, reason: str = "") -> Trip:
+        """Robot brain -> trip: route stop progress; publishes stop.updated."""
+        trip = self._trips[trip_id]
+        stop = trip.route.stop(stop_id) if trip.route is not None else None
+        if trip.stop_status.get(stop_id) != status or reason:
+            trip.stop_status[stop_id] = status
+            if status in ("navigating", "arrived"):
+                trip.current_stop_id = stop_id
+            elif trip.current_stop_id == stop_id and status in (*FINISHED_STOP, "skipped"):
+                trip.current_stop_id = None
+            await self._publish(
+                "stop.updated",
+                trip_id,
+                stop_id=stop_id,
+                status=status,
+                reason=reason,
+                rec_id=stop.rec_id if stop else None,
+                slot_id=stop.slot_id if stop else None,
+            )
+        return trip.model_copy(deep=True)
+
+    async def check_line(self, trip_id: str, line: CartLine) -> MandateDecision:
+        """Mandate pre-check of cart + the FULL proposed line with the trip budget; publishes mandate.decision."""
+        trip = self._trips[trip_id]
+        return await self._evaluate(trip, line)
+
+    async def ask(self, trip_id: str, request: ApprovalRequest) -> ApprovalResponse:
+        """The brain's ask_user for goals with a trip: fill ids, channels + expiry from config, flag detours that bust
+        the budget, drive EXECUTING <-> AWAITING_APPROVAL, record the transparency outcome."""
+        trip = self._trips[trip_id]
+        timeout = self.config.approval_timeout_s
+        update: dict[str, Any] = {
+            "trip_id": trip_id,
+            "user_id": trip.user_id,
+            "store_id": request.store_id or trip.store_id,
+            "robot_id": request.robot_id or trip.robot_id,
+            "goal_id": request.goal_id or trip.goal_id,
+            "channels": list(self.config.approval_channels),
+            "expires_s": min(timeout, 60.0) if request.kind == ApprovalKind.PICK_CHOICE else timeout,
+        }
+        rec = self._find_rec(trip, request.rec_id)
+        if request.kind == ApprovalKind.RECOMMENDATION and not request.multi:
+            payload = dict(request.payload)
+            price = request.amount_cents if request.amount_cents is not None else (rec.price_cents if rec else None)
+            if "over_budget" not in payload:
+                over = self._budget_overage(trip, price)
+                payload.update(over_budget=over > 0, over_budget_cents=over)
+            payload.setdefault("sponsored", rec.sponsored if rec else False)
+            if rec is not None:
+                payload.setdefault("interest", rec.interest)
+            update["payload"] = payload
+            over_cents = int(payload.get("over_budget_cents") or 0)
+            if payload.get("over_budget") and trip.budget_cents is not None and "budget" not in request.title.lower():
+                update["title"] = (
+                    f"{request.title} Heads up: it puts you {money(over_cents)} over your "
+                    f"{money(trip.budget_cents)} budget."
+                )
+        request = request.model_copy(update=update)
+        resp = await self._ask(trip, request)
+        if request.kind == ApprovalKind.RECOMMENDATION:
+            if request.multi:
+                chosen = set(resp.chosen()) if resp.approved else set()
+                for opt in request.options:
+                    opt_rec = self._find_rec(trip, opt.option_id)
+                    await self._record_rec_outcome(trip, opt_rec, "accepted" if opt.option_id in chosen else "declined")
+            elif rec is not None:
+                await self._record_rec_outcome(trip, rec, "accepted" if resp.approved else "declined")
+                if not resp.approved:
+                    self._declined_skus.setdefault(trip.user_id, set()).add(rec.sku)
+        return resp
+
+    async def approval_envelope(self, request: ApprovalRequest) -> dict[str, Any]:
+        """Envelope for approval.* events: the trip's (robot = the asking robot), else the goal's (fleet)."""
+        trip = self._trips.get(request.trip_id) if request.trip_id else None
+        if trip is not None:
+            env = trip_envelope(trip)
+            if request.robot_id:
+                env["robot_id"] = request.robot_id
+            return env
+        fleet = self.services.fleet
+        if request.goal_id and fleet is not None:
+            with contextlib.suppress(Exception):
+                goal = await fleet.get_goal(request.goal_id)
+                return {
+                    "trip_id": goal.trip_id,
+                    "store_id": goal.store_id,
+                    "robot_id": request.robot_id or goal.robot_id,
+                    "user_id": request.user_id,
+                    "request_id": goal.request_id,
+                }
+        return {}
+
+    def _find_rec(self, trip: Trip, rec_id: str | None) -> Recommendation | None:
+        if not rec_id:
+            return None
+        return next((r for r in [*trip.recs, *trip.checkout_recs] if r.rec_id == rec_id), None)
+
     async def update_list(self, trip_id: str, shopping_list: Any) -> Trip:
+        """Pre-trip: replace the list and re-run sourcing / recs / routing. During EXECUTING (the brain's add_item):
+        new items are sourced and appended to the route as PENDING stops (``trips.replan`` then orders them)."""
         trip = self._trips[trip_id]
         shopping_list = shopping_list.model_copy(update={"trip_id": trip_id})
+        old_ids = {i.item_id for i in (trip.shopping_list.items if trip.shopping_list else [])}
         trip.shopping_list = shopping_list
         if trip.state in PRE_TRIP:
             await self._transition(trip, S.LIST_READY, "list edited")
             await self._publish("list.ready", trip_id, shopping_list=shopping_list)
             self._spawn(self._source_recs_route(trip_id), name=f"replan-{trip_id}")
-        else:
-            await self._publish("list.ready", trip_id, shopping_list=shopping_list)
+            return trip.model_copy(deep=True)
+        new_items = [i for i in shopping_list.items if i.item_id not in old_ids]
+        if new_items and trip.state in (S.EXECUTING, S.AWAITING_APPROVAL, S.ROUTE_PLANNED):
+            try:
+                await self._append_items(trip, new_items)
+            except Exception as exc:  # noqa: BLE001
+                await self._error(trip_id, "gateway", f"could not add {', '.join(i.query for i in new_items)}: {exc}")
+        await self._publish("list.ready", trip_id, shopping_list=trip.shopping_list)
         return trip.model_copy(deep=True)
+
+    async def _append_items(self, trip: Trip, items: list[ListItem]) -> None:
+        """Source items added mid-trip and append them as pending route stops (online ones go to the cart)."""
+        assert trip.shopping_list is not None
+        need = [i for i in items if i.sku is None or i.sourcing == "unresolved"]
+        sourced: dict[str, ListItem] = {}
+        agent = self.services.agent
+        if need and agent is not None:
+            with contextlib.suppress(Exception):
+                sub = trip.shopping_list.model_copy(update={"items": need})
+                res = await agent.source_list(sub, trip.store_id)
+                sourced = {i.item_id: i for i in res.items}
+        if sourced:
+            trip.shopping_list = trip.shopping_list.model_copy(
+                update={"items": [sourced.get(i.item_id, i) for i in trip.shopping_list.items]}
+            )
+        added = [sourced.get(i.item_id, i) for i in items]
+        for item in added:
+            if item.sourcing == "online":
+                await self._reroute_online(trip, item)
+        await self._add_missing_stops(trip, [i for i in added if i.sourcing == "in_store"])
+
+    async def _add_missing_stops(self, trip: Trip, items: list[ListItem] | None = None) -> list[Stop]:
+        """Pending mandatory stops for in-store list items no route stop covers yet."""
+        if trip.route is None or trip.shopping_list is None:
+            return []
+        covered = {iid for st in trip.route.stops for iid in st.item_ids} | self._routed_items.get(trip.trip_id, set())
+        candidates = items if items is not None else trip.shopping_list.by_sourcing("in_store")
+        catalog = self.services.catalog
+        new_stops: list[Stop] = []
+        existing = {st.stop_id for st in trip.route.stops}
+        for item in candidates:
+            if item.item_id in covered or item.sku is None or catalog is None:
+                continue
+            locs = []
+            with contextlib.suppress(Exception):
+                locs = await catalog.get_locations(item.sku, trip.store_id)
+            if not locs:
+                await self._reroute_online(trip, item)
+                continue
+            loc = next((x for x in locs if x.qty > 0), locs[0])
+            stop_id = f"item:{item.sku}"
+            if stop_id in existing:
+                stop_id = f"item:{item.sku}:{item.item_id}"
+            existing.add(stop_id)
+            new_stops.append(
+                Stop(
+                    stop_id=stop_id,
+                    kind="mandatory",
+                    pose=loc.approach_pose,
+                    label=item.query,
+                    slot_id=loc.slot_id,
+                    skus=[item.sku],
+                    qty=item.qty,
+                    item_ids=[item.item_id],
+                    user_ids=[item.for_user_id or trip.user_id],
+                    service_time_s=8.0,
+                )
+            )
+        if new_stops:
+            trip.route = trip.route.model_copy(update={"stops": [*trip.route.stops, *new_stops]})
+            self._routed_items.setdefault(trip.trip_id, set()).update(i for st in new_stops for i in st.item_ids)
+            for st in new_stops:
+                await self.set_stop_status(trip.trip_id, st.stop_id, "pending", "added mid-trip")
+        return new_stops
 
     async def add_line(self, trip_id: str, line: CartLine, approval_id: str | None = None) -> AddLineResult:
         trip = self._trips[trip_id]
@@ -268,6 +482,7 @@ class TripOrchestrator:
         if trip.route is None:
             route = await self._plan_route(trip)
             return route
+        await self._add_missing_stops(trip)
         remaining = [
             s.model_copy(update={"detour_m": None, "detour_s": None})
             for s in trip.route.stops
@@ -336,9 +551,14 @@ class TripOrchestrator:
     # extra gateway entry points (REST / WS / messaging)
     # ==================================================================================================================
     async def login(self, trip_id: str, req: RobotLoginRequest) -> Trip:
+        """Manual trips: the shopper is at a robot -> EXECUTING -> fleet.execute_trip. No-op for auto_execute trips."""
         trip = self._trips[trip_id]
         if req.user_id not in trip.user_ids and req.user_id != trip.user_id:
             raise PermissionError(f"user {req.user_id} is not on trip {trip_id}")
+        if trip.auto_execute:
+            return trip.model_copy(deep=True)
+        if req.robot_id:
+            trip.robot_id = req.robot_id
         trip.robot_logged_in = True
         if trip.state in (S.ROUTE_PLANNED, S.AWAITING_LOGIN):
             await self._start_execution(trip)
@@ -380,7 +600,11 @@ class TripOrchestrator:
         messaging = self.services.messaging
         if messaging is not None:
             try:
+                if msg.message_id:
+                    self._sent_trip[msg.message_id] = trip_id
                 res = await messaging.send(msg)
+                if res.message_id:
+                    self._sent_trip[res.message_id] = trip_id
                 if not res.ok:
                     await self._error(trip_id, "messaging", f"follow-up not delivered: {res.error}")
             except Exception as exc:  # noqa: BLE001
@@ -389,13 +613,42 @@ class TripOrchestrator:
             self._spawn(self._followup_timeout(trip_id, self.config.followup_timeout_s))
         return msg
 
+    def _inbound_target(self, msg: InboundMessage) -> tuple[Trip | None, list[ApprovalRequest]]:
+        """Which trip and pending approvals an inbound text is about. A user can have several live trips (a split
+        request, or an older trip still running), so: explicit ``msg.trip_id`` > a reply to an approval text
+        (``in_reply_to`` -> broker map) or to a follow-up > the user's OLDEST pending texted approval across all live
+        trips (texts go out in that order; a numeric reply prefers the oldest one with options) > newest live trip."""
+        approvals = self.services.approvals
+        replied_trip = self._sent_trip.get(msg.in_reply_to) if msg.in_reply_to else None
+        explicit = self._trips.get(msg.trip_id or replied_trip or "")
+        if approvals is None:
+            return explicit or self.active_trip_for(msg.user_id), []
+        lookup = getattr(approvals, "approval_for_message", None)
+        replied = lookup(msg.in_reply_to) if (msg.in_reply_to and callable(lookup)) else None
+        if replied is not None and explicit is None:
+            explicit = self._trips.get(replied.trip_id or "")
+        if replied is not None:
+            live = [p for p in approvals.pending(user_id=replied.user_id) if p.approval_id == replied.approval_id]
+            return explicit or self.active_trip_for(msg.user_id), live  # answered already -> nothing to resolve
+        if explicit is not None:
+            return explicit, approvals.pending(explicit.trip_id)
+        mine = approvals.pending(user_id=msg.user_id) if msg.user_id else []
+        texted = sorted([p for p in mine if "photon" in p.channels] or mine, key=lambda p: p.created_at)
+        if texted:
+            target = texted[0]
+            if any(ch.isdigit() for ch in msg.text):
+                target = next((p for p in texted if p.options), target)
+            trip = self._trips.get(target.trip_id or "")
+            return trip or self.active_trip_for(msg.user_id), [target]
+        trip = self.active_trip_for(msg.user_id)
+        return trip, (approvals.pending(trip.trip_id) if trip is not None else [])
+
     async def handle_inbound(self, msg: InboundMessage) -> ReplyInterpretation:
         """Messaging inbound (and POST /api/dev/inbound): approval answers, feedback, new intents, chat."""
-        trip = self.active_trip_for(msg.user_id)
+        trip, pending = self._inbound_target(msg)
         if trip is not None and msg.trip_id is None:
             msg = msg.model_copy(update={"trip_id": trip.trip_id})
         approvals = self.services.approvals
-        pending = approvals.pending(trip.trip_id) if (approvals is not None and trip is not None) else []
         agent = self.services.agent
         try:
             if agent is None:
@@ -424,9 +677,15 @@ class TripOrchestrator:
         elif interp.kind == "feedback" and trip is not None:
             await self._feedback_from_reply(trip, msg, interp)
         elif interp.kind == "intent" and msg.user_id is not None and (trip is None or trip.state in TERMINAL):
-            await self.create_trip(
-                CreateTripRequest(user_id=msg.user_id, text=interp.intent_text or msg.text, channel=msg.channel)
-            )
+            text = interp.intent_text or msg.text
+            fleet = self.services.fleet
+            if fleet is not None:  # new NL requests go through the fleet (store choice, goals, robots)
+                try:
+                    await fleet.submit_request(FleetRequest(text=text, user_id=msg.user_id, channel=msg.channel))
+                except Exception as exc:  # noqa: BLE001
+                    await self._error(None, "fleet", f"could not start that request: {exc}")
+            else:
+                await self.create_trip(CreateTripRequest(user_id=msg.user_id, text=text, channel=msg.channel))
         elif trip is not None:
             reply = await self.chat(trip.trip_id, msg.text, msg.channel)
             if msg.channel == "photon" and self.services.messaging is not None and reply.text:
@@ -463,13 +722,16 @@ class TripOrchestrator:
     # ==================================================================================================================
     # planning
     # ==================================================================================================================
-    async def _plan(self, trip_id: str) -> None:
+    async def _plan(self, trip_id: str, preset: bool = False) -> None:
         trip = self._trips[trip_id]
         try:
-            agent = self.services.require("agent")
-            profile = await self._profile(trip.user_id)
-            assert trip.intent is not None
-            shopping_list = await agent.expand_intent(trip.intent, profile)
+            if preset and trip.shopping_list is not None:  # the fleet's per-store sub-list: no expand_intent
+                shopping_list = trip.shopping_list
+            else:
+                agent = self.services.require("agent")
+                profile = await self._profile(trip.user_id)
+                assert trip.intent is not None
+                shopping_list = await agent.expand_intent(trip.intent, profile)
             shopping_list = shopping_list.model_copy(update={"trip_id": trip_id})
             trip.shopping_list = shopping_list
             await self._transition(trip, S.LIST_READY, "intent expanded")
@@ -493,7 +755,7 @@ class TripOrchestrator:
                 log.exception("planning failed for %s", trip_id)
                 await self._fail(trip, "gateway", f"planning failed: {exc}")
                 return
-        if trip.robot_logged_in or self.config.auto_login:
+        if trip.auto_execute or trip.robot_logged_in or self.config.auto_login:
             trip.robot_logged_in = True
             await self._start_execution(trip)
         else:
@@ -631,22 +893,25 @@ class TripOrchestrator:
     def _fit_detours(
         recs: list[Recommendation], limit: int, headroom: int | None
     ) -> tuple[list[Recommendation], int | None]:
-        """Up to ``limit`` detours, in order, while they fit ``headroom``; plus at most one that does not fit (its ask
-        says it busts the budget, so the shopper decides). Returns the kept detours and the headroom they leave."""
+        """Up to ``limit`` detours, in order, while they fit ``headroom``; plus at most one plain detour and one
+        near-expiry markdown that do not fit (their asks say they bust the budget, so the shopper decides; the markdown
+        gets its own slot so a tight budget never hides it behind a pricier detour). Returns the kept detours and the
+        headroom they leave."""
         if headroom is None:
             return recs[:limit], None
         kept: list[Recommendation] = []
-        over_kept = False
+        over_kept: set[bool] = set()  # True = the near-expiry over-budget slot is used, False = the plain one
         for rec in recs:
             if len(kept) >= limit:
                 break
             price = rec.price_cents or 0
+            markdown = rec.kind == "near_expiry_offer"
             if price <= headroom:
                 kept.append(rec)
                 headroom -= price
-            elif not over_kept:
+            elif markdown not in over_kept:
                 kept.append(rec)
-                over_kept = True
+                over_kept.add(markdown)
         return kept, headroom
 
     @staticmethod
@@ -749,7 +1014,7 @@ class TripOrchestrator:
 
     async def _install_route(self, trip: Trip, route: Route, replan: bool) -> None:
         trip.route = route
-        self._at[trip.trip_id] = route.order[0] if route.order else None
+        self._routed_items.setdefault(trip.trip_id, set()).update(i for st in route.stops for i in st.item_ids)
         changed: list[tuple[str, StopStatus, str]] = []
         for stop in route.stops:
             if stop.kind not in ("mandatory", "optional"):
@@ -802,333 +1067,62 @@ class TripOrchestrator:
         trip.mandate_decision = decision
 
     # ==================================================================================================================
-    # execution
+    # execution: the in-store part is a fleet shop goal run by a robot brain
     # ==================================================================================================================
     async def _start_execution(self, trip: Trip) -> None:
-        if trip.state == S.EXECUTING:
+        if trip.state == S.EXECUTING or self.is_executing(trip.trip_id):
             return
-        if not await self._transition(trip, S.EXECUTING, "shopper logged in to the robot"):
+        reason = "auto-execute: the fleet runs it" if trip.auto_execute else "shopper logged in to the robot"
+        if not await self._transition(trip, S.EXECUTING, reason):
             return
         self._exec_tasks[trip.trip_id] = self._spawn(self._execute(trip.trip_id), name=f"exec-{trip.trip_id}")
 
     async def _execute(self, trip_id: str) -> None:
+        """EXECUTING: ``goal = fleet.execute_trip(trip_id, robot_id)``; then completed -> (checkout batch) -> checkout;
+        failed -> checkout if the cart has active lines (+ error) else FAILED; cancelled -> FAILED with the reason."""
         trip = self._trips[trip_id]
-        if self._robot_lock is None:
-            self._robot_lock = asyncio.Lock()
-        async with self._robot_lock:  # one physical robot
-            forwarders: list[asyncio.Task[Any]] = []
-            try:
-                robot = self.services.robot
-                if robot is None:
-                    await self._error(trip_id, "robot", "no robot wired; skipping the in-store part")
-                else:
-                    if hasattr(robot, "set_trip"):
-                        robot.set_trip(trip_id)
-                    forwarders = self._start_forwarders(trip_id, robot)
-                    try:
-                        await self._robot_call(trip, "reset", trip.store_id)
-                    except RobotError as exc:
-                        await self._error(trip_id, "robot", f"reset failed: {exc}", code=exc.code)
-                    forwarders = self._restart_forwarders_if_swapped(trip_id, robot, forwarders)
-                    while (stop := self._next_stop(trip)) is not None:
-                        await self._visit(trip, stop)
-                        forwarders = self._restart_forwarders_if_swapped(trip_id, robot, forwarders)
-                        robot = self.services.robot
-                    await self._go_to_end(trip)
-                await self._wrap_up_shopping(trip)
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                log.exception("execution crashed for %s", trip_id)
-                await self._error(trip_id, "gateway", f"execution error: {exc}", recoverable=False)
-            finally:
-                for t in forwarders:
-                    t.cancel()
-        if self.config.auto_checkout and trip.state in (S.EXECUTING,):
+        goal = None
+        try:
+            fleet = self.services.fleet
+            if fleet is None:
+                await self._error(trip_id, "fleet", "no fleet wired; skipping the in-store part")
+            else:
+                goal = await fleet.execute_trip(trip_id, trip.robot_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.exception("in-store execution crashed for %s", trip_id)
+            await self._error(trip_id, "fleet", f"in-store execution failed: {exc}", recoverable=False)
+        finally:
+            trip.current_stop_id = None
+            if trip.robot_id and self._robot_trip.get(trip.robot_id) == trip_id:
+                self._robot_trip.pop(trip.robot_id, None)
+        if trip.state in TERMINAL:
+            return
+        status = goal.status if goal is not None else None
+        if status == GoalStatus.CANCELLED:
+            why = (goal.error or goal.summary or "cancelled") if goal is not None else "cancelled"
+            await self._fail(trip, "fleet", f"the in-store goal was cancelled: {why}")
+            return
+        if status != GoalStatus.COMPLETED:
+            why = "no robot available" if goal is not None and goal.failure_code == "no_robot" else ""
+            if goal is not None:
+                why = why or goal.error or goal.summary or f"goal {status}"
+            why = why or "in-store part did not run"
+            if not trip.cart.active_lines():
+                await self._fail(trip, "fleet", f"in-store shopping failed ({why}) and the cart is empty")
+                return
+            await self._error(
+                trip_id, "fleet", f"in-store shopping ended early ({why}); checking out what is in the cart"
+            )
+        try:
+            await self._wrap_up_shopping(trip)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            await self._error(trip_id, "gateway", f"checkout suggestions failed: {exc}")
+        if self.config.auto_checkout and trip.state == S.EXECUTING:
             await self.start_checkout(trip_id)
-
-    def _next_stop(self, trip: Trip) -> Stop | None:
-        if trip.route is None:
-            return None
-        for stop in trip.route.ordered_stops():
-            if stop.kind in ("mandatory", "optional") and trip.stop_status.get(stop.stop_id, "pending") == "pending":
-                return stop
-        return None
-
-    async def _set_stop(self, trip: Trip, stop: Stop, status: StopStatus, reason: str = "") -> None:
-        trip.stop_status[stop.stop_id] = status
-        await self._publish(
-            "stop.updated",
-            trip.trip_id,
-            stop_id=stop.stop_id,
-            status=status,
-            reason=reason,
-            rec_id=stop.rec_id,
-            slot_id=stop.slot_id,
-        )
-
-    async def _visit(self, trip: Trip, stop: Stop) -> None:
-        trip_id = trip.trip_id
-        sku = stop.skus[0] if stop.skus else None
-        rec = next((r for r in trip.recs if r.rec_id == stop.rec_id), None) if stop.rec_id else None
-        if sku is None or stop.slot_id is None:
-            await self._set_stop(trip, stop, "failed", "stop has no slot/sku")
-            return
-
-        # optional detour: ask first (declining saves the walk), then re-plan
-        if stop.kind == "optional":
-            accepted = await self._ask_detour(trip, stop, rec)
-            await self._record_rec_outcome(trip, rec, "accepted" if accepted else "declined")
-            if not accepted:
-                self._declined_skus.setdefault(trip.user_id, set()).add(sku)
-                await self._set_stop(trip, stop, "declined", "shopper said no")
-                try:
-                    await self.replan(trip_id)
-                except Exception as exc:  # noqa: BLE001
-                    await self._error(trip_id, "routing", f"re-plan failed: {exc}")
-                return
-
-        # navigate
-        trip.current_stop_id = stop.stop_id
-        await self._set_stop(trip, stop, "navigating")
-        try:
-            state = await self._navigate_to(trip, stop)
-        except RobotError as exc:
-            await self._set_stop(trip, stop, "failed", f"navigation failed: {exc.code}")
-            await self._error(trip_id, "robot", f"could not reach {stop.label}: {exc}", code=exc.code)
-            return
-        self._at[trip_id] = stop.stop_id
-        await self._set_stop(trip, stop, "arrived")
-        await self._publish("robot.arrived", trip_id, stop_id=stop.stop_id, slot_id=stop.slot_id, pose=state.pose)
-
-        # scan + identify (faces blurred first)
-        report = None
-        frame = None
-        try:
-            raw = await self._robot_call(trip, "scan", stop.slot_id)
-            frame = await self._blur(raw)
-            perception = self.services.perception
-            if perception is not None and frame is not None:
-                report = await perception.identify(frame, trip.store_id, stop.slot_id, sku)
-                report = report.model_copy(update={"trip_id": trip_id})
-                if self.services.catalog is not None:
-                    with contextlib.suppress(Exception):
-                        await self.services.catalog.apply_scan(report)
-                await self._publish("scan.result", trip_id, report=report)
-        except RobotError as exc:
-            await self._error(trip_id, "robot", f"scan failed: {exc}", code=exc.code)
-        except Exception as exc:  # noqa: BLE001
-            await self._error(trip_id, "perception", f"scan/identify failed: {exc}")
-
-        if report is not None and report.observed_count == 0 and (report.count_is_exact or report.mismatch):
-            await self._out_of_stock(trip, stop, sku)
-            return
-
-        product = None
-        if self.services.catalog is not None:
-            with contextlib.suppress(Exception):
-                product = await self.services.catalog.get_product(sku)
-        unit = await self._unit_price(trip, sku, rec, product)
-        line = CartLine(
-            line_id=new_id("line"),
-            sku=sku,
-            name=product.name if product else (rec.product_name if rec else stop.label),
-            category=product.category if product else "uncategorized",
-            qty=max(stop.qty, 1),
-            unit_price_cents=unit,
-            source="in_store",
-            store_id=trip.store_id,
-            slot_id=stop.slot_id,
-            status="picked",
-            rec_id=stop.rec_id,
-            deal_id=(rec.deal.deal_id if rec and rec.deal else None),
-            list_item_id=stop.item_ids[0] if stop.item_ids else None,
-            user_id=(stop.user_ids[0] if stop.user_ids else trip.user_id),
-        )
-
-        # mandate pre-check on the line before we pick anything
-        approval_id = None
-        decision = await self._evaluate(trip, line)
-        if decision.verdict == MandateVerdict.DENY:
-            await self._set_stop(trip, stop, "failed", "blocked by mandate: " + "; ".join(decision.messages))
-            return
-        if decision.verdict == MandateVerdict.NEEDS_APPROVAL:
-            req = self._approval(
-                trip,
-                ApprovalKind.OVER_THRESHOLD,
-                self._over_title(line.name or sku, line.total_cents, decision),
-                body="; ".join(decision.messages),
-                amount_cents=line.total_cents,
-                sku=sku,
-                rec_id=stop.rec_id,
-                payload={"reasons": [str(r) for r in decision.reasons]},
-            )
-            resp = await self._ask(trip, req)
-            if not resp.approved:
-                await self._set_stop(trip, stop, "declined", "over threshold; shopper declined")
-                return
-            approval_id = req.approval_id
-
-        # produce: freshness top-3 -> shopper picks
-        chosen: list[str | None] = [None] * line.qty
-        is_produce = product is not None and product.category == "produce"
-        if is_produce and frame is not None and self.services.perception is not None:
-            chosen = await self._pick_choice(trip, stop, sku, frame, line.qty)
-
-        # pick + place
-        picked_ids: list[str] = []
-        for instance_id in chosen:
-            item = await self._pick_one(trip, stop, sku, instance_id)
-            if item is None:
-                break
-            picked_ids.append(item.instance_id)
-            await self._publish(
-                "item.picked",
-                trip_id,
-                sku=sku,
-                slot_id=stop.slot_id,
-                instance_id=item.instance_id,
-                line_id=line.line_id,
-                stop_id=stop.stop_id,
-            )
-        if not picked_ids:
-            await self._set_stop(trip, stop, "failed", "pick failed")
-            return
-        line = line.model_copy(update={"qty": len(picked_ids), "instance_ids": picked_ids})
-        res = await self.add_line(trip_id, line, approval_id=approval_id)
-        if not res.added:
-            await self._error(trip_id, "trust", f"{line.name} picked but not added: {res.decision.verdict}")
-        await self._verify_basket(trip)
-        await self._set_stop(trip, stop, "done", f"picked {len(picked_ids)}")
-
-    @staticmethod
-    def _over_title(name: str, cents: int, decision: MandateDecision) -> str:
-        """Shopper-facing question for a line the mandate wants confirmed, naming the rule that fired."""
-        reasons = set(decision.reasons)
-        if MandateReason.OVER_BUDGET in reasons and decision.budget_cents is not None:
-            over = (decision.total_cents or 0) - decision.budget_cents
-            return (
-                f"{name} ({money(cents)}) puts you {money(over)} over your {money(decision.budget_cents)} budget. "
-                "Add it anyway?"
-            )
-        if MandateReason.ABOVE_ASK_THRESHOLD in reasons:
-            return f"{name} is {money(cents)}, above your ask-me limit. Add it?"
-        return f"{name} is {money(cents)}. Add it anyway?"
-
-    async def _ask_detour(self, trip: Trip, stop: Stop, rec: Recommendation | None) -> bool:
-        name = (rec.product_name if rec else None) or stop.label or (stop.skus[0] if stop.skus else "this")
-        price = f" ({money(rec.price_cents)})" if rec and rec.price_cents is not None else ""
-        extra = ""
-        if stop.detour_m is not None:
-            extra = f" Detour: +{stop.detour_m:.0f} m"
-            if stop.detour_s is not None:
-                extra += f", {stop.detour_s:.0f} s"
-        over = self._budget_overage(trip, rec.price_cents if rec else None)
-        title = f"Grab {name}{price}?"
-        if over and trip.budget_cents is not None:  # say it up front: the shopper decides, the budget is not silent
-            title += f" Heads up: it puts you {money(over)} over your {money(trip.budget_cents)} budget."
-        req = self._approval(
-            trip,
-            ApprovalKind.RECOMMENDATION,
-            title,
-            body=((rec.reason if rec else "") + ("." if rec else "") + extra).strip(),
-            amount_cents=rec.price_cents if rec else None,
-            sku=stop.skus[0] if stop.skus else None,
-            rec_id=stop.rec_id,
-            payload={
-                "interest": stop.interest,
-                "sponsored": rec.sponsored if rec else False,
-                "over_budget": over > 0,
-                "over_budget_cents": over,
-            },
-        )
-        resp = await self._ask(trip, req)
-        return resp.approved
-
-    async def _pick_choice(self, trip: Trip, stop: Stop, sku: str, frame: Any, qty: int) -> list[str | None]:
-        perception = self.services.require("perception")
-        try:
-            choice = await perception.rank_freshness(frame, stop.slot_id, sku, k=3)
-        except Exception as exc:  # noqa: BLE001
-            await self._error(trip.trip_id, "perception", f"freshness ranking failed: {exc}")
-            return [None] * qty
-        flat = len(choice.candidates) > 1 and len({round(c.score, 3) for c in choice.candidates}) == 1
-        if not choice.candidates or flat:
-            return [None] * qty  # nothing to choose between (no freshness signal)
-        ranked = sorted(choice.candidates, key=lambda c: c.rank)
-        req = self._approval(
-            trip,
-            ApprovalKind.PICK_CHOICE,
-            f"Which {stop.label or sku}? #1 is the freshest",
-            sku=sku,
-            options=[
-                ApprovalOption(
-                    option_id=c.instance_id,
-                    label=f"#{c.rank} · freshness {c.score:.0%}",
-                    detail=c.reason or None,
-                    thumbnail_b64=c.thumbnail_b64,
-                )
-                for c in ranked
-            ],
-            expires_s=min(self.config.approval_timeout_s, 60.0),
-        )
-        await self._publish("pick.choices", trip.trip_id, choice=choice, approval_id=req.approval_id)
-        resp = await self._ask(trip, req)
-        first = (resp.chosen() or [ranked[0].instance_id])[0] if resp.approved else ranked[0].instance_id
-        order = [first] + [c.instance_id for c in ranked if c.instance_id != first]
-        out: list[str | None] = list(order[:qty])
-        out += [None] * (qty - len(out))
-        return out
-
-    async def _pick_one(self, trip: Trip, stop: Stop, sku: str, instance_id: str | None) -> Any:
-        for attempt in range(2):
-            try:
-                item = await self._robot_call(trip, "pick", stop.slot_id, sku, instance_id if attempt == 0 else None)
-                await self._robot_call(trip, "place_in_basket")
-            except RobotError as exc:
-                if exc.code in ("grasp_failed", "busy") and attempt == 0:
-                    continue
-                if exc.code == "no_instance" and instance_id is not None and attempt == 0:
-                    continue
-                await self._error(trip.trip_id, "robot", f"pick of {sku} failed: {exc}", code=exc.code)
-                return None
-            if self.services.catalog is not None:
-                with contextlib.suppress(Exception):
-                    await self.services.catalog.record_pick(trip.store_id, stop.slot_id, sku, 1, trip.trip_id)
-            return item
-        return None
-
-    async def _verify_basket(self, trip: Trip) -> None:
-        perception = self.services.perception
-        if perception is None or self.services.robot is None:
-            return
-        expected: dict[str, int] = {}
-        for ln in trip.cart.active_lines():
-            if ln.source == "in_store":
-                expected[ln.sku] = expected.get(ln.sku, 0) + ln.qty
-        try:
-            raw = await self._robot_call(trip, "capture", "basket")
-            frame = await self._blur(raw)
-            if frame is None:
-                return
-            check = await perception.verify_basket(frame, expected)
-            await self._publish("basket.verified", trip.trip_id, check=check)
-            if not check.ok:
-                await self._error(
-                    trip.trip_id, "perception", f"basket mismatch: missing {check.missing} extra {check.unexpected}"
-                )
-        except Exception as exc:  # noqa: BLE001
-            await self._error(trip.trip_id, "perception", f"basket check failed: {exc}")
-
-    async def _out_of_stock(self, trip: Trip, stop: Stop, sku: str) -> None:
-        await self._set_stop(trip, stop, "failed", "out of stock on the shelf; ordering online")
-        if stop.kind == "optional":
-            return
-        items = [i for i in (trip.shopping_list.items if trip.shopping_list else []) if i.item_id in stop.item_ids]
-        if not items:
-            items = [ListItem(item_id=new_id("item"), query=stop.label or sku, sku=sku, qty=max(stop.qty, 1))]
-        for item in items:
-            await self._reroute_online(trip, item)
 
     async def _reroute_online(self, trip: Trip, item: ListItem) -> None:
         if item.sku is None:
@@ -1146,19 +1140,6 @@ class TripOrchestrator:
         res = await self.add_line(trip.trip_id, line)
         if not res.added and res.decision.verdict == MandateVerdict.NEEDS_APPROVAL:
             self._deferred_online.setdefault(trip.trip_id, []).append(line)
-
-    async def _go_to_end(self, trip: Trip) -> None:
-        if trip.route is None or not trip.route.order:
-            return
-        end_id = trip.route.order[-1]
-        end = trip.route.stop(end_id)
-        if end is None or end.kind != "end" or self._at.get(trip.trip_id) == end_id:
-            return
-        try:
-            await self._navigate_to(trip, end)
-            self._at[trip.trip_id] = end_id
-        except RobotError as exc:
-            await self._error(trip.trip_id, "robot", f"could not reach checkout: {exc}", code=exc.code)
 
     async def _wrap_up_shopping(self, trip: Trip) -> None:
         trip.current_stop_id = None
@@ -1343,6 +1324,9 @@ class TripOrchestrator:
             approval_id=new_id("appr"),
             trip_id=trip.trip_id,
             user_id=trip.user_id,
+            store_id=trip.store_id,
+            robot_id=trip.robot_id,
+            goal_id=trip.goal_id,
             kind=kind,
             title=title,
             channels=list(self.config.approval_channels),  # type: ignore[arg-type]
@@ -1363,7 +1347,7 @@ class TripOrchestrator:
                 await self._transition(trip, S.EXECUTING, "answered")
 
     async def _on_approval(self, phase: str, request: ApprovalRequest, response: ApprovalResponse | None) -> None:
-        trip = self._trips.get(request.trip_id)
+        trip = self._trips.get(request.trip_id) if request.trip_id else None
         if trip is None:
             return
         if phase == "requested" and all(a.approval_id != request.approval_id for a in trip.approvals):
@@ -1409,117 +1393,46 @@ class TripOrchestrator:
             await self.services.trust.record_transparency(entry)
 
     # ==================================================================================================================
-    # robot helpers
+    # robots: live robot.state (all robots) + poses
     # ==================================================================================================================
-    async def _robot_call(self, trip: Trip, method: str, *args: Any) -> Any:
-        robot = self.services.require("robot")
-        try:
-            return await getattr(robot, method)(*args)
-        except RobotError as exc:
-            if exc.code != "disconnected" or self._fallback_robot is None:
-                raise
-            fallback = self._fallback_robot()
-            if fallback is None or fallback is robot:
-                raise
-            await self._error(trip.trip_id, "robot", "sim disconnected; switching to the 2D robot fake", code=exc.code)
-            self.services.robot = fallback
-            if hasattr(fallback, "set_trip"):
-                fallback.set_trip(trip.trip_id)
-            await fallback.reset(trip.store_id)
-            if method == "reset":
-                return await fallback.state()
-            return await getattr(fallback, method)(*args)
-
-    async def _navigate_to(self, trip: Trip, stop: Stop) -> Any:
-        """Follow the routed leg; on path_blocked/timeout re-plan from the current pose and retry once."""
-        try:
-            return await self._robot_call(trip, "navigate", await self._waypoints_to(trip, stop))
-        except RobotError as exc:
-            if exc.code not in ("path_blocked", "timeout"):
-                raise
-            log.info("trip %s: %s to %s; re-planning once", trip.trip_id, exc.code, stop.stop_id)
-            try:
-                await self.replan(trip.trip_id)
-            except Exception:  # noqa: BLE001
-                raise exc from None
-            return await self._robot_call(trip, "navigate", await self._waypoints_to(trip, stop))
-
-    async def _waypoints_to(self, trip: Trip, stop: Stop) -> list[Pose2D]:
-        leg = self._leg_to(trip, stop.stop_id)
-        if leg is None or (self._at.get(trip.trip_id) not in (None, leg.from_stop_id)):
-            with contextlib.suppress(Exception):
-                await self.replan(trip.trip_id)
-            leg = self._leg_to(trip, stop.stop_id)
-        if leg is not None and leg.waypoints:
-            return list(leg.waypoints)
+    async def _forward_states(self) -> None:
+        """Every robot's state -> full rate on the frame hub (/ws/frames), <= robot_state_hz per robot (+ every status
+        change) on the sequenced bus (/ws). Envelope: store_id, robot_id (+ the trip it executes)."""
         robot = self.services.robot
-        here = (await robot.state()).pose if robot is not None else stop.pose
-        return [here, stop.pose]
-
-    def _leg_to(self, trip: Trip, stop_id: str) -> RouteLeg | None:
-        if trip.route is None:
-            return None
-        return next((leg for leg in trip.route.legs if leg.to_stop_id == stop_id), None)
-
-    async def _blur(self, frame: Any) -> Any:
-        """Face-blur a RAW frame; never return an unblurred frame (None instead)."""
-        if frame is None:
-            return None
-        perception = self.services.perception
-        if perception is not None:
-            try:
-                return await perception.blur_faces(frame)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("blur_faces failed: %s", exc)
-        return frame if frame.blurred else None
-
-    def _start_forwarders(self, trip_id: str, robot: Any) -> list[asyncio.Task[Any]]:
-        self._forwarding_robot = robot
-        return [
-            self._spawn(self._forward_states(trip_id, robot), name=f"states-{trip_id}"),
-            self._spawn(self._forward_frames(trip_id, robot), name=f"frames-{trip_id}"),
-        ]
-
-    def _restart_forwarders_if_swapped(
-        self, trip_id: str, robot: Any, tasks: list[asyncio.Task[Any]]
-    ) -> list[asyncio.Task[Any]]:
-        current = self.services.robot
-        if current is None or current is getattr(self, "_forwarding_robot", robot):
-            return tasks
-        for t in tasks:
-            t.cancel()
-        return self._start_forwarders(trip_id, current)
-
-    async def _forward_states(self, trip_id: str, robot: Any) -> None:
+        if robot is None:
+            return
         period = 1.0 / self.config.robot_state_hz if self.config.robot_state_hz > 0 else 0.0
-        last_t = 0.0
-        last_status: RobotStatus | None = None
+        last: dict[str, tuple[float, Any]] = {}
         try:
             async for state in robot.states():
-                event = make_event("robot.state", trip_id=trip_id, source="gateway", state=state)
+                rid = getattr(state, "robot_id", None)
+                if rid is None:
+                    continue
+                trip_id = self._robot_trip.get(rid)
+                trip = self._trips.get(trip_id) if trip_id else None
+                env: dict[str, Any] = trip_envelope(trip) if trip is not None else {"trip_id": None}
+                env.update(store_id=state.store_id or env.get("store_id"), robot_id=rid)
+                event = make_event("robot.state", source="gateway", state=state, **env)
                 hub_pub = getattr(self.services.events, "frames", None)
                 if hub_pub is not None:
                     hub_pub.publish(event)
                 now = time.monotonic()
-                if state.status != last_status or now - last_t >= period:
-                    last_t, last_status = now, state.status
+                prev_t, prev_status = last.get(rid, (0.0, None))
+                if state.status != prev_status or now - prev_t >= period:
+                    last[rid] = (now, state.status)
                     await self._emit(event)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
             log.warning("robot state stream ended: %s", exc)
 
-    async def _forward_frames(self, trip_id: str, robot: Any) -> None:
-        try:
-            async for raw in robot.frames():
-                frame = await self._blur(raw)
-                if frame is None or not frame.blurred:
-                    continue
-                await self._emit(make_event("frame", trip_id=trip_id, source="gateway", frame=frame))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            log.warning("robot frame stream ended: %s", exc)
+    async def _robot_pose(self, robot_id: str | None) -> Pose2D | None:
+        robot = self.services.robot
+        if robot is None or robot_id is None:
+            return None
+        with contextlib.suppress(Exception):
+            return (await robot.state(robot_id)).pose
+        return None
 
     # ==================================================================================================================
     # misc helpers
@@ -1543,10 +1456,11 @@ class TripOrchestrator:
             return None
 
     async def _start_pose(self, trip: Trip) -> Pose2D:
-        robot = self.services.robot
-        if trip.state in (S.EXECUTING, S.AWAITING_APPROVAL) and robot is not None:
-            with contextlib.suppress(Exception):
-                return (await robot.state()).pose
+        """Route start: the trip robot's current pose (re-plans, and pre-assigned robots at their docks), else the
+        store entrance."""
+        pose = await self._robot_pose(trip.robot_id)
+        if pose is not None:
+            return pose
         plan = await self.services.require("catalog").get_planogram(trip.store_id)
         return plan.start_pose
 
@@ -1670,8 +1584,10 @@ class TripOrchestrator:
         await self._transition(trip, S.FAILED, message)
 
     async def _publish(self, type_: str, trip_id: str | None, **payload: Any) -> None:
+        trip = self._trips.get(trip_id) if trip_id else None
+        env: dict[str, Any] = trip_envelope(trip) if trip is not None else {"trip_id": trip_id}
         try:
-            event = make_event(type_, trip_id=trip_id, source="gateway", **payload)
+            event = make_event(type_, source="gateway", **{**env, **payload})
         except Exception as exc:  # noqa: BLE001
             log.warning("bad %s event: %s", type_, exc)
             return
