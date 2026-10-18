@@ -16,6 +16,7 @@ const SYSTEM = `You are Magenta, the robot sales associate standing on the floor
 - Every price, saving, date or count you say must come from a tool result in THIS turn. Never guess money. If you don't know, say so.
 - Use tools before answering product questions. To move the shopper, call where_is (you walk them there) or add_to_basket (you fetch boxed phones from the back yourself).
 - Be the honest associate: say when to skip something (they already own it, it doesn't fit) or wait (a payoff or an expected promo). Never upsell. Nothing is sponsored. Line offers are bill credits that need a new line or upgrade, never a shelf price.
+- For "should I upgrade?" use upgrade_advice; for "am I on the right plan?" use plan_check; for "which phone should I get?" use phone_match. They are honest by design: say "wait" or "keep it" when they do.
 - Account changes (plans, bills, porting a number, activation, unlocking, trade-in values) need a human: call call_expert and say so.
 - Only use the shopper's account (their phone, payments, what they own) if my_account returns it; otherwise they haven't checked in.
 - Phones on the tables are demo units; the boxed stock is in the back and only you or staff can get it.
@@ -34,6 +35,9 @@ const DEFS: GrokTool[] = [
   { name: "deals", description: "Shelf deals in stock, line offers and the promo calendar.", parameters: { type: "object", properties: {} } },
   { name: "add_to_basket", description: "Add to the basket (checks fit; refuses an accessory that doesn't fit unless force=true after the shopper insists). Boxed phones are fetched from the back.", parameters: { type: "object", properties: { sku, qty: { type: "integer", minimum: 1, maximum: 5 }, force: { type: "boolean" } }, required: ["sku"] } },
   { name: "remove_from_basket", description: "Take something out of the basket.", parameters: { type: "object", properties: { sku }, required: ["sku"] } },
+  { name: "upgrade_advice", description: "The Timekeeper: honest 'should I upgrade now?' for the checked-in shopper (payoff, promo calendar, trade-in decay, phone health) with today-vs-waiting costs.", parameters: { type: "object", properties: {} } },
+  { name: "plan_check", description: "Household Mix: is the checked-in shopper's household on the cheapest plan setup that fits every line's usage?", parameters: { type: "object", properties: {} } },
+  { name: "phone_match", description: "The Matchmaker: best phone + plan bundles for what the shopper cares about and a monthly budget.", parameters: { type: "object", properties: { priorities: { type: "array", items: { type: "string", enum: ["price", "camera", "battery", "performance", "size"] } }, budget_cents: { type: "integer" }, lines: { type: "integer", minimum: 1, maximum: 5 } }, required: ["priorities", "budget_cents"] } },
   { name: "call_expert", description: "Page a human T-Mobile expert to the shopper.", parameters: { type: "object", properties: { reason: { type: "string" } }, required: ["reason"] } },
   { name: "start_checkout", description: "Shopper wants to pay: start checkout at the counter.", parameters: { type: "object", properties: {} } },
 ];
@@ -51,6 +55,9 @@ function run(name: string, a: Record<string, unknown>, ctx: AssocCtx): ToolResul
     case "deals": return tools.deals();
     case "add_to_basket": return tools.add_to_basket(s("sku"), Math.max(1, Math.min(5, Number(a.qty) || 1)), ctx, !!a.force);
     case "remove_from_basket": return tools.remove_from_basket(s("sku"), ctx);
+    case "upgrade_advice": return tools.upgrade_advice(ctx);
+    case "plan_check": return tools.plan_check(ctx);
+    case "phone_match": return tools.phone_match(Array.isArray(a.priorities) ? (a.priorities as string[]) : [], Number(a.budget_cents) || 10000, Number(a.lines) || 1);
     case "call_expert": return tools.call_expert(s("reason") || "asked for a person");
     case "start_checkout": return tools.start_checkout(ctx);
     default: return { summary: `unknown tool ${name}` };

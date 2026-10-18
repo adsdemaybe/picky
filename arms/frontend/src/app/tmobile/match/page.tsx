@@ -161,7 +161,7 @@ export default function Matchmaker() {
           </div>
           <div role="log" className="flex flex-col gap-2.5" aria-live="polite">
             {preset && <Bubble you>{preset.says}</Bubble>}
-            {all.map((s) => {
+            {!preset && all.map((s) => {
               const a = s.answered(d);
               if (a === null && s !== current) return null;
               return (

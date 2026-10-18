@@ -5,6 +5,7 @@
 // so the demo works with no key, no network and no backend. Pure module: runs on the server and in the browser.
 import { linePromoFor, mayaDevices, tmobileProducts, tmobileStore, tmobileUpcoming, wireless, type WirelessProduct } from "@/data/stores/tmobile";
 import type { Pose } from "./data";
+import { DATA as PLANS, household, match, upgrade, type Priority } from "./directions";
 import { cartTotal, shortName, suggest, targetDevice, unitPrice, type WLine } from "./whisperer";
 
 export type AssocAction =
@@ -305,6 +306,34 @@ export const tools = {
     return { summary: `Removed ${nice(P[sku].name)}.`, actions: [{ type: "remove", sku }] };
   },
 
+  upgrade_advice(ctx: AssocCtx): ToolResult {
+    if (!ctx.known) return { summary: "Not checked in: can't see their phone, payments or trade-in. Ask about camera / battery / price instead, or suggest checking in." };
+    const a = upgrade(PLANS.upgrade_cases.find((c) => c.id === "maya")!);
+    return {
+      summary: [`Timekeeper verdict: ${a.headline}.`, ...a.reasons, `Upgrade today out of pocket: ${money(a.now.cost_cents)}.`, a.later ? `${a.later.label}: ${money(a.later.cost_cents)}.` : ""].filter(Boolean).join("\n"),
+      focus: a.c.target_sku,
+    };
+  },
+
+  plan_check(ctx: AssocCtx): ToolResult {
+    if (!ctx.known) return { summary: "Not checked in: can't see their lines or plan. Offer the Household Mix check after they check in." };
+    const r = household({ id: "maya", name: "Maya", account_ids: ["acct_maya"], streaming: [], note: "" });
+    return {
+      summary: `Household Mix: today ${r.current_label}, ${money(r.current_total_cents)}/mo for ${r.lines.map((l) => `${l.label} (${l.usage_gb_month} GB)`).join(", ")}. Best fit: ${r.best.summary}, ${money(r.best.monthly_cents)}/mo. ${r.saves_cents > 0 ? `Saves ${money(r.saves_cents)}/mo.` : "Already the cheapest setup that fits; no change needed."} Checked ${r.combos_checked} combinations.`,
+    };
+  },
+
+  phone_match(priorities: string[], budget_cents: number, lines = 1): ToolResult {
+    const pr = priorities.filter((p): p is Priority => ["price", "camera", "battery", "performance", "size"].includes(p));
+    const r = match({ lines, budget_monthly_cents: budget_cents, priorities: pr.length ? pr : ["price"], usage: "medium", keep_phone: false });
+    const top = r.bundles.slice(0, 2);
+    return {
+      summary: top.map((b) => `${b.badge}: ${b.title}, ${money(b.monthly_cents)}/mo (plan ${money(b.plan_cents)} + phone ${money(b.device_cents)}). Why: ${b.why.join("; ")}. Trade-offs: ${b.tradeoffs.join("; ")}.`).join("\n"),
+      actions: [{ type: "show", skus: top.map((b) => b.phone_sku).filter((x): x is string => !!x) }],
+      focus: top[0]?.phone_sku ?? null,
+    };
+  },
+
   call_expert(reason: string): ToolResult {
     return { summary: `Paged a T-Mobile expert to the shopper (${reason}). Typical wait: about 3 minutes.`, actions: [{ type: "expert", reason }] };
   },
@@ -431,11 +460,40 @@ function respondInner(t: string, ctx: AssocCtx): Omit<AssocReply, "source" | "ch
     if (!ctx.known)
       return reply(`Happy to help you choose. If you check in with the Picky app I can factor in your current phone and payments. Otherwise, tell me what matters most: camera, battery, size or price?`, [tools.search_products("phone")]);
     const ph = mayaDevices.phone;
+    if (target === "PX9-128") {
+      const a = upgrade(PLANS.upgrade_cases.find((c) => c.id === "maya")!);
+      return reply(
+        `Honest answer: not yet. Your ${ph.name} still has ${ph.installments_left} payments left, ${money(ph.payoff_cents)}, and the Pixel 9 is expected to drop to ${money(a.c.expected_promo!.price_cents)} on ${day(a.c.expected_promo!.starts)}. Upgrading today costs ${money(a.now.cost_cents)} after your trade-in; waiting costs ${money(a.later!.cost_cents)}, so you save ${money(a.saves_cents)}. Your phone's battery and storage are fine. Want to try the Pixel 9 on the table anyway?`,
+        [tools.product_details(target, ctx), tools.where_is(target)],
+        target,
+      );
+    }
     return reply(
       `Honest answer: your ${ph.name} has ${ph.installments_left} payments left, ${money(ph.payoff_cents)}. ${up ? `And the ${shortName(target)} is expected to drop to ${money(up.price_cents)} on ${day(up.starts)}, so waiting saves about ${money(unitPrice(target) - up.price_cents)}. ` : ""}If it's still working for you, I'd wait. Want to try the ${shortName(target)} on the table anyway?`,
       [tools.product_details(target, ctx), tools.where_is(target)],
       target,
     );
+  }
+
+  // Household Mix: is my plan right?
+  if (/\b(right plan|my plan|overpay\w*|paying too much|save on (my )?(bill|plan)|cheaper plan|family plan|best plan|which plan)\b/.test(t)) {
+    if (!ctx.known) return reply(`I can check that for your whole household, every line and every plan, once you check in with the Picky app. Or try the Household Mix page on the website.`);
+    const r = household({ id: "maya", name: "Maya", account_ids: ["acct_maya"], streaming: [], note: "" });
+    return reply(
+      r.saves_cents > 0
+        ? `You could save ${money(r.saves_cents)} a month: ${r.best.summary} instead of ${r.current_label}. Want me to have an expert switch it?`
+        : `Good news: you're already on the best setup. ${r.current_label} is ${money(r.current_total_cents)} a month for ${r.lines.map((l) => l.label).join(" and ")}, and I checked all ${r.combos_checked} combinations; nothing cheaper fits how you both use data.`,
+    );
+  }
+
+  // Matchmaker: which phone?
+  if (/\b(which phone|what phone|best phone|recommend a phone|help me (choose|pick)|phone for me)\b/.test(t)) {
+    const pr = (["camera", "battery", "price", "performance"] as const).filter((k) => t.includes(k) || (k === "price" && /\b(cheap|budget|afford)/.test(t)) || (k === "performance" && /\b(fast|gaming)\b/.test(t)));
+    if (!pr.length) return reply(`Happy to help you pick. What matters most to you: camera, battery, speed, or price? And roughly what monthly budget?`);
+    const budget = Number(t.match(/\$\s?(\d+)/)?.[1] ?? 100) * 100;
+    const x = tools.phone_match([...pr], budget);
+    const b = match({ lines: 1, budget_monthly_cents: budget, priorities: [...pr], usage: "medium", keep_phone: false }).bundles[0];
+    return reply(`For ${pr.join(" and ")} at about ${money(budget)} a month, I'd go with the ${b.phone_sku ? nice(P[b.phone_sku]?.name ?? "") : "phone"} on ${b.plan.name}: ${money(b.monthly_cents)} a month all in. ${b.why[1] ?? ""}. Want to hold one? It's on ${fixtureName(displaySlot(b.phone_sku ?? "")?.fixture_id ?? "")}.`, [x]);
   }
 
   // compare two phones
@@ -559,7 +617,7 @@ export function chipsFor(ctx: AssocCtx, actions: AssocAction[] = []): string[] {
     else if (p.compatible_with?.length) out.push("Does it fit my phone?");
   }
   if (ctx.cart.length) out.push("What's in my basket?", "Check out");
-  if (!f && !ctx.cart.length) out.push("Case for my phone", "Running earbuds", "Should I upgrade?", "Any deals today?");
+  if (!f && !ctx.cart.length) out.push("Case for my phone", "Should I upgrade?", ctx.known ? "Am I on the right plan?" : "Best phone for camera under $100", "Any deals today?");
   out.push("Talk to a person");
   return [...new Set(out)].slice(0, 5);
 }

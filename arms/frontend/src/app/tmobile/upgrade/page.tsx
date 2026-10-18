@@ -167,7 +167,7 @@ function Curve({ a }: { a: Advice }) {
       <path d={`${d} L${x(12)},${y(0)} L${x(0)},${y(0)} Z`} fill="var(--color-magenta)" opacity={0.08} />
       <path d={d} fill="none" stroke="var(--color-magenta)" strokeWidth={2.5} strokeLinejoin="round" />
       <circle cx={x(0)} cy={y(a.curve[0].v)} r={4.5} fill="var(--color-magenta)" />
-      <text x={x(0) + 8} y={y(a.curve[0].v) - 8} fontSize={11} fontWeight={600}>
+      <text x={x(0) + 8} y={y(a.curve[0].v) + 18} fontSize={11} fontWeight={600}>
         today {money(a.curve[0].v)}
       </text>
       {mark && a.later && (

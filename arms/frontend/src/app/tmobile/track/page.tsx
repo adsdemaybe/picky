@@ -5,6 +5,7 @@ import { Panel, SectionTitle } from "@/components/picky";
 import { Button } from "@/components/ui/button";
 import { tmobileProducts, wireless } from "@/data/stores/tmobile";
 import { MAX_CARDS, MIN_SCORE } from "@/lib/whisperer";
+import { DIRECTIONS } from "../advisors/nav";
 
 const RUBRIC = [
   {
@@ -15,6 +16,7 @@ const RUBRIC = [
       "Explicit SKIP (you own a charger that works; that Pixel 7 case won't fit) and WAIT (Beats Flex $20 off Fri Oct 23; 4 payments left on the Pixel 7 and $200 off expected Nov 27)",
       "Every card shows the dollars saved, avoided (estimate) or added, and one tap accepts or declines it",
       "In store, Magenta does the floor associate's job: walks you to the right wall, brings a sealed phone from the back room, and pages a person for account work",
+      "Every advisor handles the no-good-recommendation case: keep your phone (Timekeeper, Matchmaker), you're already on the best plan (Household Mix), leave them alone (Next Best Moment)",
     ],
   },
   {
@@ -23,6 +25,7 @@ const RUBRIC = [
     proof: [
       `Commerce: cart, ${tmobileProducts.length}-product catalog with real prices, shelf deals, stock, compatibility (fits: tags), promo calendar, real line offers`,
       "Customer: the phone she owns (34 months, 4 installments left), items she owns + purchase dates, lines on the account, budget, tech mandate, past declines",
+      "Account & household: per-line usage and hotspot, current plan, tenure, support contacts, bill change, promo credits ending, phone health (battery, storage, security updates), trade-in values",
       "Physical: the slot each item sits in, demo unit vs. sealed back-room stock, where the shopper is standing, detour from the planned route (+0 m when it's on the same wall), what the robot just picked, checkout leg",
     ],
   },
@@ -42,17 +45,26 @@ const RUBRIC = [
     proof: [
       "Runs with no API key and no backend: the same cards every run (deterministic engine in lib/whisperer.ts) and a built-in in-store brain (lib/associate.ts); add XAI_API_KEY for Grok",
       "Voice in and out in the browser (speech recognition + natural TTS), hands-free mode, works on a phone or the robot's screen",
+      "The advisors are real algorithms, not prompts: an exhaustive plan-assignment optimizer, a trade-in decay curve fitted to the trade-in table, an explained weighted risk score with a fix-first action policy",
       "The robot shops the store in the web app replay and in Isaac Sim with physics (rover + lift + SO-101 picking phones into the basket)",
       "Same data the backend uses: data/planograms/store_tmobile.yaml + data/fixtures/wireless.yaml, generated into the app",
     ],
   },
 ];
 
+const EXAMPLES = [
+  "“New Pixel 9 setup”: skip the charger, wait on the phone, two-cases catch",
+  "Tap “Priya, student” or “Ruth, 55+” (keep your phone)",
+  "Garcias: right-size, no discount · Tom: leave alone",
+  "Maya: wait, save $262 · Teo: security updates ended",
+  "Garcias −$82/mo · Nguyens: 3 accounts → 1 · Dev: +$30 that fits",
+];
+
 const CHECK = [
-  "Names one direction: Cart Whisperer (checkout suggestions that actually help)",
+  "Leads with one direction, Cart Whisperer, and also ships the other four with worked examples (Advisors)",
   "Shows a phone-shopping store: T-Mobile, University Way NE (demo layout, 91 real products)",
   "Shows SKIP and WAIT moments live, on the shop page and during the robot trip",
-  "Says it plainly: synthetic shopper, devices and promo calendar",
+  "Says it plainly: synthetic shoppers, households, usage, support histories, plan prices and promo calendar",
   "In person too: a talking robot associate on the floor (In store), same brain, data and basket as the website",
 ];
 
@@ -100,6 +112,20 @@ export default function TmoTrack() {
             </li>
           ))}
         </ul>
+      </section>
+
+      <section>
+        <SectionTitle>The five directions, and the example to open for each</SectionTitle>
+        <div className="grid gap-2 md:grid-cols-5">
+          {DIRECTIONS.map((d, i) => (
+            <Link key={d.href} href={d.href} className="rounded-xl bg-card p-3 ring-1 ring-foreground/[0.07] hover:ring-magenta">
+              <div className="flex items-center gap-2 text-[14px] font-semibold">
+                <d.Icon className="size-4 text-magenta" aria-hidden /> {d.name}
+              </div>
+              <div className="mt-1 text-[12.5px] text-muted-foreground">{EXAMPLES[i]}</div>
+            </Link>
+          ))}
+        </div>
       </section>
 
       <section>

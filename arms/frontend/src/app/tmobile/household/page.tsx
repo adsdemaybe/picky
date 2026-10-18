@@ -37,7 +37,12 @@ export default function HouseholdMix() {
           <div className="mt-1 text-[16px] font-semibold">{r.current_label}</div>
           <div className="mt-2 text-[32px] leading-none font-bold tabular">{money(r.current_total_cents)}</div>
           <div className="text-[12.5px] text-muted-foreground">
-            per month{r.current_streaming_cents ? ` (${money(r.current_service_cents)} service + ${money(r.current_streaming_cents)} streaming they pay separately)` : ""}
+            per month
+            {r.current_streaming_cents
+              ? ` (${money(r.current_service_cents)} service + ${money(r.current_streaming_cents)} streaming they pay separately)`
+              : r.h.streaming.length
+                ? `, including their ${r.h.streaming.length > 1 ? `${r.h.streaming.length} streaming services` : "streaming service"} as plan perks`
+                : ""}
           </div>
           <p className="mt-2 text-[13px] text-muted-foreground">{r.h.note}</p>
           {r.current_misfits.length > 0 && (
