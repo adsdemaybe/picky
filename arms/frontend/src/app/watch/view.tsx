@@ -209,7 +209,9 @@ function PlanStrip() {
               {active && (
                 <span className="text-[12.5px] font-semibold text-sky capitalize">
                   {s.kind === "end" && handoff?.status === "active"
-                    ? `Unloading ${Math.min(handoff.units.filter((u) => u.state === "counter").length + 1, handoff.units.length)}/${handoff.units.length}`
+                    ? handoff.n && handoff.total
+                      ? `Unloading ${handoff.n}/${handoff.total}` // the backend's unit number (checkout.unload)
+                      : `Unloading ${Math.min(handoff.units.filter((u) => u.state === "counter").length + 1, handoff.units.length)}/${handoff.units.length}`
                     : robot.status}
                 </span>
               )}
