@@ -77,6 +77,17 @@ _WHERE_RE = re.compile(
     r"looking for|can you find(?: me)?|help me find)\s+(?:the |some |a |an |any )?(?P<q>[^?.!]+)",
     re.IGNORECASE,
 )
+_INGREDIENTS_RE = re.compile(
+    r"(?:what(?:'s| is| are)? in(?:side)?|ingredients (?:of|in|for)|what(?:'s| is) .{0,12}made (?:of|from|with))"
+    r"\s+(?:the |a |an |that |this )?(?P<q>[^?.!]+)",
+    re.IGNORECASE,
+)
+_CONTAINS_RE = re.compile(
+    r"\b(?:does|do|is|are)\s+(?!you\b|we\b|they\b|i\b|there\b)(?:the |a |an |that |this )?(?P<q>[a-z0-9 '&-]+?)\s+"
+    r"(?:(?:contain|have|has)\s+(?:any\s+)?(?P<ask>[a-z ]+?)|(?P<diet>vegan|vegetarian|gluten[- ]free|dairy[- ]free|"
+    r"nut[- ]free|halal|kosher))\s*[?.!]*$",
+    re.IGNORECASE,
+)
 _CHEAPER_RE = re.compile(
     r"(?:cheaper|less expensive|budget|cheapest)\s+(?:alternative|option|version|one|brand)?s?\s*"
     r"(?:to|for|than|of)?\s+(?:the |a |an |that |this )?(?P<q>[^?.!]+)",
@@ -516,7 +527,8 @@ class _BrainBase:
         if catalog is None or not store_id:
             return None
         cheaper = _CHEAPER_RE.search(text)
-        m = cheaper or _WHERE_RE.search(text)
+        ingr = None if cheaper else (_INGREDIENTS_RE.search(text) or _CONTAINS_RE.search(text))
+        m = cheaper or ingr or _WHERE_RE.search(text)
         if m is None:
             return None
         from contracts.catalog import SearchQuery
@@ -536,6 +548,8 @@ class _BrainBase:
         lead = "" if exact else f"I don't see {query} exactly; the closest is "
         if cheaper:
             return await self._cheaper(p, offer, store_id, lead)
+        if ingr:
+            return _ingredients_reply(p, lead, ingr.groupdict().get("ask") or "", text)
         locs = await catalog.get_locations(p.sku, store_id)
         if not locs:
             return f"We don't carry {p.name} in this store."
@@ -829,3 +843,47 @@ def _compact(result: Any) -> Any:
                 data["decision"] = {k: dec[k] for k in ("verdict", "reasons", "messages") if k in dec}
         return data
     return result
+
+
+_INGREDIENTS_CACHE: tuple[float, dict[str, Any]] = (-1.0, {})
+
+
+def _ingredients_of(sku: str) -> dict[str, Any] | None:
+    """data/ingredients.yaml (scripts/fetch_ingredients.py; Open Food Facts, ODbL), re-read when it changes."""
+    global _INGREDIENTS_CACHE
+    with contextlib.suppress(Exception):
+        import yaml
+
+        from utils.data import data_dir
+
+        path = data_dir() / "ingredients.yaml"
+        mtime = path.stat().st_mtime
+        if mtime != _INGREDIENTS_CACHE[0]:
+            _INGREDIENTS_CACHE = (mtime, (yaml.safe_load(path.read_text()) or {}).get("ingredients", {}))
+    return _INGREDIENTS_CACHE[1].get(sku)
+
+
+def _ingredients_reply(p: Any, lead: str, ask: str, text: str) -> str:
+    info = _ingredients_of(p.sku) or {}
+    items = info.get("ingredients") or []
+    allergens = sorted({*(p.allergens or []), *(info.get("allergens") or [])})
+    diet = re.search(r"vegan|vegetarian|gluten[- ]free|dairy[- ]free|nut[- ]free|halal|kosher", text, re.I)
+    if diet:
+        want = diet.group(0).lower().replace(" ", "_").replace("-", "_")
+        yes = want in (p.dietary or []) or want in (p.tags or [])
+        return f"{lead}{p.name} is {'' if yes else 'not marked '}{diet.group(0).lower()}." + (
+            f" Allergens: {', '.join(allergens)}." if allergens else ""
+        )
+    if ask.strip():
+        word = ask.strip().lower().rstrip("s")
+        hay = " ".join(items + allergens).lower()
+        hit = word in hay or (word in ("nut", "peanut", "tree nut") and "nut" in hay)
+        return f"{lead}{p.name} {'does' if hit else 'does not'} list {ask.strip()}" + (
+            f" (allergens: {', '.join(allergens)})." if allergens else "."
+        )
+    if not items:
+        return f"{lead}I don't have the ingredient list for {p.name} yet."
+    src = f" (from {info.get('matched_product')} on Open Food Facts)" if info.get("matched_product") else ""
+    shown = ", ".join(items[:12]) + (" and more" if len(items) > 12 else "")
+    extra = f" Allergens: {', '.join(allergens)}." if allergens else ""
+    return f"{lead}{p.name}: {shown}{src}.{extra}"
