@@ -2,10 +2,13 @@
 // Live feed connection layer: one store the UI reads, three interchangeable sources.
 //
 //   sim      the in-browser trip replay draws every camera (works with no backend)
-//   gateway  arms/gateway  WS /ws/frames?trip_id=<id>  (contracts/api.md)
-//              ← {"type":"frame","frame":{camera,jpeg_b64,w,h,blurred,pose?,slot_id?,ts}}   only blurred=true is drawn
+//   gateway  arms/gateway  WS /ws/frames?trip_id=<id>|robot_id=<id>  (contracts/api.md v0.2)
+//              ← {"type":"camera.frame","camera_id":"rover-ave-1.front","frame":{camera,jpeg_b64,w,h,blurred,…}}
+//                (legacy {"type":"frame",…} still accepted)   only blurred=true is drawn
 //              ← {"type":"robot.state","state":{pose:{x,y,theta},status,holding,basket_skus,error,ts}}
 //            plus GET /health → {status, contracts_version, real_arms, sim_connected}
+//            A gateway trip followed by the trip store (lib/gateway/tripSource.ts) binds the feed with bindTrip():
+//            cameras then come from the gateway's MJPEG stream / snapshots for that robot (components/LiveFeed.tsx).
 //   stream   one direct URL per camera (MJPEG renders in <img>, MP4/WebM/HLS-in-Safari in <video>)
 //
 // Config persists per browser (localStorage) and can be preset with NEXT_PUBLIC_GATEWAY_URL / NEXT_PUBLIC_STREAM_URL.
@@ -45,6 +48,8 @@ export type FeedLog = { t: number; level: "info" | "warn" | "error"; text: strin
 type Config = { mode: Mode; gatewayUrl: string; tripId: string; streams: Record<Camera, string> };
 
 type FeedStore = Config & {
+  /** Robot of a bound gateway trip (not saved): its cameras are `${robotId}.front|wrist|basket` on the gateway. */
+  robotId: string;
   conn: Conn;
   frames: Partial<Record<Camera, Frame>>;
   telemetry: Telemetry | null;
@@ -57,6 +62,9 @@ type FeedStore = Config & {
   setStream: (cam: Camera, url: string) => void;
   connect: () => void;
   disconnect: () => void;
+  /** Follow a gateway trip's robot (not saved to this browser); unbindTrip() restores the previous source. */
+  bindTrip: (o: { tripId: string; robotId: string; gatewayUrl: string }) => void;
+  unbindTrip: () => void;
 };
 
 const KEY = "picky.feed.v1";
@@ -94,6 +102,11 @@ let retry: ReturnType<typeof setTimeout> | null = null;
 let attempts = 0;
 let frameTimes: number[] = [];
 let wanted = false;
+let bound = false;
+let beforeBind: Pick<Config, "mode" | "tripId" | "gatewayUrl"> | null = null;
+
+/** contracts camera names → this UI's camera slots */
+const FROM_CONTRACT: Record<string, Camera> = { front: "head", head: "head", wrist: "wrist", basket: "basket", ceiling: "overview", overview: "overview" };
 
 export const useFeed = create<FeedStore>((set, get) => {
   const log = (level: FeedLog["level"], text: string) => set((s) => ({ log: [...s.log.slice(-59), { t: Date.now(), level, text }] }));
@@ -115,7 +128,15 @@ export const useFeed = create<FeedStore>((set, get) => {
   const openGateway = () => {
     const { gatewayUrl, tripId } = get();
     const httpBase = gatewayUrl.replace(/\/$/, "");
-    const wsUrl = `${httpBase.replace(/^http/, "ws")}/ws/frames${tripId ? `?trip_id=${encodeURIComponent(tripId)}` : ""}`;
+    // v0.2 needs an id: a trip id, or a robot id typed in the same field (rover-…)
+    const id = tripId.trim();
+    if (!id) {
+      set({ conn: "error" });
+      log("error", "Enter a trip id or robot id (e.g. rover-ave-1)");
+      return;
+    }
+    const q = /^rover-/.test(id) ? `robot_id=${encodeURIComponent(id)}` : `trip_id=${encodeURIComponent(id)}`;
+    const wsUrl = `${httpBase.replace(/^http/, "ws")}/ws/frames?${q}&fps=2&w=640`;
     set({ conn: "connecting" });
     log("info", `Connecting to ${wsUrl}`);
 
@@ -140,24 +161,25 @@ export const useFeed = create<FeedStore>((set, get) => {
       log("info", "Socket open, waiting for frames");
     };
     ws.onmessage = (m) => {
-      let ev: { type?: string; frame?: Record<string, unknown>; state?: Record<string, unknown> };
+      let ev: { type?: string; ts?: string; frame?: Record<string, unknown>; state?: Record<string, unknown> };
       try {
         ev = JSON.parse(m.data);
       } catch {
         return;
       }
-      if (ev.type === "frame" && ev.frame) {
-        const f = ev.frame as { camera?: Camera; jpeg_b64?: string; w?: number; h?: number; blurred?: boolean; ts?: string };
+      if ((ev.type === "frame" || ev.type === "camera.frame") && ev.frame) {
+        const f = ev.frame as { camera?: string; jpeg_b64?: string; w?: number; h?: number; blurred?: boolean; ts?: string };
         if (f.blurred !== true) {
           log("warn", "Dropped a frame that was not face-blurred");
           return;
         }
-        onFrame(f.camera ?? "head", {
+        const ts = f.ts ?? ev.ts;
+        onFrame(FROM_CONTRACT[f.camera ?? ""] ?? "head", {
           src: `data:image/jpeg;base64,${f.jpeg_b64}`,
           w: f.w ?? 640,
           h: f.h ?? 360,
           blurred: true,
-          ts: f.ts ? Date.parse(f.ts) : 0,
+          ts: ts ? Date.parse(ts) : 0,
         });
       } else if (ev.type === "robot.state" && ev.state) {
         const st = ev.state as { pose: Pose; status: string; holding?: string | null; basket_skus?: string[]; error?: string | null; ts?: string };
@@ -187,6 +209,7 @@ export const useFeed = create<FeedStore>((set, get) => {
 
   return {
     ...defaults(),
+    robotId: "",
     conn: "idle",
     frames: {},
     telemetry: null,
@@ -194,7 +217,14 @@ export const useFeed = create<FeedStore>((set, get) => {
     stats: { fps: 0, frames: 0, lastFrameAt: null, latencyMs: null },
     log: [],
 
-    hydrate: () => set(loadSaved()),
+    hydrate: () => {
+      const saved = loadSaved();
+      if (!bound) return set(saved);
+      // while a gateway trip is bound, saved settings apply after unbindTrip()
+      const { mode, tripId, gatewayUrl, ...rest } = saved;
+      beforeBind = { mode: mode ?? beforeBind!.mode, tripId: tripId ?? beforeBind!.tripId, gatewayUrl: gatewayUrl ?? beforeBind!.gatewayUrl };
+      set(rest);
+    },
     setConfig: (c) => {
       set(c);
       saveConfig(cfg());
@@ -230,6 +260,24 @@ export const useFeed = create<FeedStore>((set, get) => {
         ws = null;
       }
       set({ conn: "idle", frames: {}, stats: { fps: 0, frames: 0, lastFrameAt: null, latencyMs: null } });
+    },
+
+    bindTrip: ({ tripId, robotId, gatewayUrl }) => {
+      if (!bound) {
+        const { mode, tripId: t, gatewayUrl: g } = get();
+        beforeBind = { mode, tripId: t, gatewayUrl: g };
+      }
+      bound = true;
+      if (ws) get().disconnect();
+      set({ mode: "gateway", tripId, robotId, gatewayUrl, conn: "live" });
+      log("info", `Following ${robotId} on trip ${tripId}`);
+    },
+    unbindTrip: () => {
+      if (!bound) return;
+      bound = false;
+      get().disconnect();
+      set({ ...(beforeBind ?? {}), robotId: "", conn: "idle", frames: {} });
+      beforeBind = null;
     },
   };
 });

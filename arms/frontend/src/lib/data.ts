@@ -123,6 +123,17 @@ const slotIdx: Record<string, Record<string, Slot>> = {};
 export function slotsOf(storeId: StoreId): Record<string, Slot> {
   return (slotIdx[storeId] ??= Object.fromEntries(STORES[storeId].slots.map((s) => [s.sku, s])));
 }
+
+// Runtime registration for gateway data the generated demo JSON doesn't have yet (lib/gateway/tripSource.ts):
+// products the gateway sends that aren't in data/ on this branch, and stores other than the demo ones.
+export function registerProduct(p: Product) {
+  productBySku[p.sku] = p;
+}
+export function registerStore(planogram: { store_id: string; name: string; entrance: Pose; robot_home?: Pose | null }, kind: "grocery" | "wireless" = "grocery") {
+  const id = planogram.store_id as StoreId;
+  STORES[id] = { ...(planogram as unknown as Store), robot_home: planogram.robot_home ?? planogram.entrance, kind, short: planogram.name };
+  delete slotIdx[id];
+}
 export const isWireless = (sku: string) => tmobileProducts.some((p) => p.sku === sku);
 
 /** The demo's "today" (Sat Oct 17, 2026). Fixed so prerendering is deterministic. */

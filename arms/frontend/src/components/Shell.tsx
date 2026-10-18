@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import { GatewayChip } from "@/components/GatewayBits";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -105,6 +106,8 @@ export function TopBar() {
             );
           })}
         </nav>
+
+        <GatewayChip />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

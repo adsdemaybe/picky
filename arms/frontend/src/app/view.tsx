@@ -250,7 +250,7 @@ function RunningLow({ items }: { items: ReturnType<typeof runningLow> }) {
 }
 
 function LiveBanner() {
-  const { phase, draft, cart, robot, activeStop, stops } = useTrip();
+  const { phase, draft, cart, robot, activeStop, stops, shippingCents } = useTrip();
   if (phase === "idle" || !draft) return null;
   const label =
     phase === "waiting_login"
@@ -273,7 +273,7 @@ function LiveBanner() {
         <div className="truncate text-[14px] text-background/70">{label}</div>
       </div>
       <span className="tabular hidden text-[14px] text-background/80 sm:block">
-        {cart.length} items, {fmt(cartTotal(cart))}
+        {cart.length} items, {fmt(cartTotal(cart) + shippingCents)}
       </span>
       <ChevronRight className="size-5" />
     </Link>
