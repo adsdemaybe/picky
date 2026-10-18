@@ -27,6 +27,7 @@ from .scene import CameraModel, best_roll, box_long_axis_yaw
 
 GRIP_CLOSED = 5.0  # stalls on the object; LeRobot drops the gripper to reduced torque when it does
 GRIP_OPEN = 98.0
+MAX_REACH = 0.36  # m, horizontal; nothing beyond this solves at grasp/carry heights
 
 
 def detect_named(frame: np.ndarray, name: str, model: str):
@@ -36,6 +37,28 @@ def detect_named(frame: np.ndarray, name: str, model: str):
         if d:
             d.label = name
             return d
+    return None
+
+
+def choose_drop_point(kin, cam, box_px, size, heights, seed, shift=(0.0, 0.0), margin=0.75):
+    """Reachable drop spot inside a destination: samples a grid on the ellipse inscribed in its image box (shrunk by
+    `margin`, so points stay off the rim and inside a round plate even when the box is cut by the frame edge), keeps
+    the points the arm reaches at every height in `heights`, and returns the one deepest inside the destination."""
+    x0, y0, x1, y1 = box_px
+    cx, cy, rx, ry = (x0 + x1) / 2, (y0 + y1) / 2, (x1 - x0) / 2, (y1 - y0) / 2
+    grid = [(gu, gv) for gu in np.linspace(-1, 1, 9) for gv in np.linspace(-1, 1, 9) if math.hypot(gu, gv) <= 1.0]
+    grid.sort(key=lambda g: math.hypot(*g))  # deepest inside first: the first reachable point is the best one
+    for gu, gv in grid:
+        pt = cam.pixel_to_world(cx + gu * rx * margin, cy + gv * ry * margin, 0.01, size)
+        pt = pt + np.array([shift[0], shift[1], 0.0])
+        if math.hypot(pt[0], pt[1]) > MAX_REACH:  # cheap reject: proving unreachability with IK is the slow case
+            continue
+        try:
+            for z in heights:
+                kin.ik((pt[0], pt[1], z), seed, quick=True)
+        except ValueError:
+            continue
+        return pt
     return None
 
 
@@ -94,20 +117,7 @@ def plan(
 
     h = object_height
     t = cam.pixel_to_world(*dets[target].center_px, h / 2, size)
-    dd = cam.pixel_to_world(*dets[dest].center_px, 0.01, size)
-    # Wide destinations (plates, bins): drop on the side nearest the robot, 5 cm in from the rim, rather than the
-    # centre - the far half is at the edge of reach and of the camera calibration, where errors are largest.
-    x0, y0, x1, y1 = dets[dest].box_px
-    left = cam.pixel_to_world(x0, (y0 + y1) / 2, 0.01, size)
-    right = cam.pixel_to_world(x1, (y0 + y1) / 2, 0.01, size)
-    radius = float(np.linalg.norm(right[:2] - left[:2])) / 2
-    if radius > 0.06:
-        toward_base = -dd[:2] / np.linalg.norm(dd[:2])
-        dd = dd.copy()
-        dd[:2] = dd[:2] + toward_base * (radius - 0.05)
     t = t + np.array([st["grasp_dx"], st["grasp_dy"], 0.0])
-    dd = dd + np.array([st["drop_dx"], st["drop_dy"], 0.0])
-    p.target_xy, p.dest_xy = (float(t[0]), float(t[1])), (float(dd[0]), float(dd[1]))
     jaw = box_long_axis_yaw(cam, dets[target].box_px, h / 2, size) + math.pi / 2  # close across the thin side
     p.jaw_yaw_deg = math.degrees(jaw)
 
@@ -118,22 +128,40 @@ def plan(
         p.error = f"{target} at ({t[0]:.2f}, {t[1]:.2f}) is out of reach: {e}"
         return p
     p.roll = max(-175.0, min(175.0, best_roll(kin, q_hover, jaw) + st["roll"]))
-    carry_z = h + 0.03
+    carry_z = h + 0.015  # object bottom clears a plate rim by ~1.5 cm; lower carry poses reach further
     hang = h - 0.02  # the object hangs this far below the fingertip (gripped 2 cm below its top)
+    lower_z = 0.01 + hang + 0.01
+
+    dd = choose_drop_point(
+        kin,
+        cam,
+        dets[dest].box_px,
+        size,
+        (carry_z + 0.01, carry_z, lower_z),
+        seed,
+        shift=(st["drop_dx"], st["drop_dy"]),
+    )
+    if dd is None:
+        p.error = (
+            f"no part of the {dest} is within reach - move it within ~30 cm of the arm's base "
+            "(the arm reaches ~32 cm to the side, ~35 cm straight ahead)"
+        )
+        return p
+    p.target_xy, p.dest_xy = (float(t[0]), float(t[1])), (float(dd[0]), float(dd[1]))
     p.waypoints = [
         Waypoint("hover over target", hover, GRIP_OPEN),
         Waypoint("straddle", (t[0], t[1], h - 0.02 + st["grasp_dz"]), GRIP_OPEN),
         Waypoint("close", None, GRIP_CLOSED),
         Waypoint("lift", (t[0], t[1], carry_z), GRIP_CLOSED),
         Waypoint("carry over destination", (dd[0], dd[1], carry_z), GRIP_CLOSED),
-        Waypoint("lower", (dd[0], dd[1], 0.01 + hang + 0.01), GRIP_CLOSED),
+        Waypoint("lower", (dd[0], dd[1], lower_z), GRIP_CLOSED),
         Waypoint("release", None, GRIP_OPEN),
         Waypoint("retreat", (dd[0], dd[1], carry_z + 0.01), GRIP_OPEN),
     ]
     for w in p.waypoints:  # check every waypoint is reachable before moving anything
         if w.xyz:
             try:
-                kin.ik(w.xyz, q_hover)
+                kin.ik(w.xyz, seed)
             except ValueError as e:
                 p.error = f"waypoint '{w.name}' {tuple(round(c, 3) for c in w.xyz)} unreachable: {e}"
                 return p

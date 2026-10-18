@@ -29,7 +29,9 @@ class SO101Kinematics:
         self.limits_deg: dict[str, tuple[float, float]] = {}
         self.active_names = [next(j for j in cfg.joint_names if j in names[i]) for i in self.active]
 
-    def ik(self, xyz: tuple[float, float, float], seed_deg: dict[str, float] | None = None) -> dict[str, float]:
+    def ik(
+        self, xyz: tuple[float, float, float], seed_deg: dict[str, float] | None = None, quick: bool = False
+    ) -> dict[str, float]:
         """Target gripper-tip position in the base frame -> LeRobot joint degrees.
 
         The SO-101 is small (~25 cm upper+lower arm), so a straight-down grasp is only reachable close in. Approach
@@ -50,6 +52,9 @@ class SO101Kinematics:
         # Vertical first, then tilted outward (+1) or inward toward the base (-1); inward tilts need less wrist bend,
         # which matters when a joint's calibrated range is narrow.
         tilts = [(90, 1.0)] + [(p, d) for p in (75, 60, 45, 30, 15) for d in (1.0, -1.0)]
+        if quick:  # reachability checks: few seeds, outward tilts only (~10x faster to say "unreachable")
+            seeds = seeds[:4]
+            tilts = [(90, 1.0), (75, 1.0), (60, 1.0), (45, 1.0)]
         for pitch_deg, direction in tilts:
             p = math.radians(pitch_deg)
             c = direction * math.cos(p)

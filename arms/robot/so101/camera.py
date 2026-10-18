@@ -34,9 +34,28 @@ if frame is not None:
 """
 
 
+def resolve_camera(index: str | int) -> str | int:
+    """'1' -> 1; a name like 'C920' -> the index of the first camera whose name contains it (Windows), so USB
+    re-plugging (which renumbers cameras) can't silently switch which camera is used."""
+    if str(index).isdigit():
+        return int(index)
+    if sys.platform == "win32":
+        try:
+            from pygrabber.dshow_graph import FilterGraph
+
+            names = FilterGraph().get_input_devices()
+            for i, name in enumerate(names):
+                if str(index).lower() in name.lower():
+                    return i
+            raise RuntimeError(f"no camera named like {index!r}; found {names}")
+        except ImportError:
+            pass
+    return index  # a path / URL / device file
+
+
 def open_camera(index: str | int) -> cv2.VideoCapture:
     """DirectShow on Windows: much faster to open than MSMF and keeps camera indices stable."""
-    src = int(index) if str(index).isdigit() else index
+    src = resolve_camera(index)
     if sys.platform == "win32" and isinstance(src, int):
         return cv2.VideoCapture(src, cv2.CAP_DSHOW)
     return cv2.VideoCapture(src)
