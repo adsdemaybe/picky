@@ -33,6 +33,10 @@ Isaac notes (6.0, verified on vhagar):
   ``<rover>/Model/LeKiwi`` as a visual puppet (``arms.sim.rover_puppet``): joints deactivated, rigid bodies and
   colliders removed, base pose = the rover root, lift = an offset on the SO-101 links, arm = IK so the jaws meet the
   held unit. Cameras keep the geometry.py rig. Any failure -> the primitive rover.
+- Joint mode (contracts 0.2.2 ``ArmJointsCmd``, learned policies): the puppet's chain is exposed as an
+  ``ArmKinematics`` (``arm_kinematics``) and ``set_robot_joints`` poses the SO-101 links straight from 6 joint degrees
+  (FK through the USD joint frames). The two policy cameras ('<robot>.policy_side' / '.policy_wrist', 640x480) are
+  ordinary lazily created render products with a 0.01 m near clip.
 """
 
 import argparse
@@ -48,6 +52,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from arms.sim import rover_puppet as puppet
+from arms.sim.arm_joints import POLICY_CAMERA_PREFIX, POLICY_NEAR_CLIP_M
 from arms.sim.assets import (
     ASSET_ROOT_ENV,
     ASSETS_SWITCH_ENV,
@@ -918,7 +923,8 @@ class IsaacBackend:
             base=puppet.robot_delta_in_model(M, (dx, 0.0, 0.0)),
             seed=fixed,
         )
-        return {"chain": chain, "table": table, "M": M, "z_ref": z_ref, "dx": dx}
+        kin = puppet.ArmKinematics(chain=chain, model=M, dx=dx, z_ref=z_ref, table=table, lift_mode="offset")
+        return {"chain": chain, "table": table, "M": M, "z_ref": z_ref, "dx": dx, "kin": kin}
 
     def _pose_puppet(self, rig: dict[str, Any], lift_height_m: float, arm_ext_m: float, closed: bool) -> float:
         """Pose the SO-101 links for this lift + extension; returns the carriage travel (for the Lift group)."""
@@ -990,6 +996,35 @@ class IsaacBackend:
         info = self._robots.get(robot_id)
         if info is not None:
             info["closed"] = closed
+
+    # -- joint mode (contracts 0.2.2 ArmJointsCmd) ---------------------------------------------------------------------
+    def arm_kinematics(self, robot_id: str) -> puppet.ArmKinematics | None:
+        """The rover USD's SO-101 (None for a primitive rover: the core then uses the synthetic arm)."""
+        rig = (self._robots.get(robot_id) or {}).get("puppet")
+        return rig["geo"].get("kin") if rig is not None else None
+
+    def set_robot_joints(self, robot_id: str, pose: Pose2D, lift_height_m: float, q_deg: list[float]) -> bool:
+        """Pose the puppet's SO-101 links from 6 joint degrees (FK through the USD joint frames); False when this
+        rover has no puppet (the core then poses the primitive rig)."""
+        from pxr import Gf  # type: ignore[import-not-found]
+
+        info = self._robots.get(robot_id)
+        rig = info.get("puppet") if info is not None else None
+        if info is None or rig is None or rig["geo"].get("kin") is None:
+            return False
+        kin: puppet.ArmKinematics = rig["geo"]["kin"]
+        info["xf"].SetTranslate(Gf.Vec3d(pose.x, pose.y, 0.0))
+        info["xf"].SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(pose.theta)))
+        dz = kin.travel(lift_height_m)
+        key = ("joints", tuple(round(v, 3) for v in q_deg), round(dz, 4))
+        if key != rig["key"]:
+            rig["key"] = key
+            poses = kin.link_poses(lift_height_m, puppet.q_rad(q_deg))
+            for name, op in rig["ops"].items():
+                op.Set(Gf.Matrix4d(*gf_rows(poses[name])))
+        info["lift"].Set(Gf.Vec3d(0.0, 0.0, dz))
+        self._changed()
+        return True
 
     def add_instance(self, prim: PrimSpec) -> None:
         spec = self._specs.get(prim.store_id or "")
@@ -1072,7 +1107,10 @@ class IsaacBackend:
         # camera eye sits inside front_cam_head, the wrist eye 1-2 cm in front of so101_wrist_cam)
         robot_id, _, kind = camera_id.rpartition(".")
         puppet_wrist = kind == "wrist" and (self._robots.get(robot_id) or {}).get("puppet") is not None
-        c.CreateClippingRangeAttr(Gf.Vec2f(WRIST_NEAR_CLIP_PUPPET_M if puppet_wrist else NEAR_CLIP_M, 200.0))
+        near = WRIST_NEAR_CLIP_PUPPET_M if puppet_wrist else NEAR_CLIP_M
+        if kind.startswith(POLICY_CAMERA_PREFIX):
+            near = POLICY_NEAR_CLIP_M
+        c.CreateClippingRangeAttr(Gf.Vec2f(near, 200.0))
         op = UsdGeom.Xformable(c).AddTransformOp()
         rows = cam.usd_matrix_rows()
         op.Set(Gf.Matrix4d(*[v for row in rows for v in row]))
