@@ -1,10 +1,10 @@
 "use client";
-import { Bot, ChevronRight, Plus, Check } from "lucide-react";
+import { Bot, ChevronRight } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
 import { motion } from "motion/react";
 import { HowItWorks, RobotArt } from "@/components/art";
 import { LottieSlot } from "@/components/media";
+import { Suggestions } from "@/components/Suggestions";
 import { CountUp, Reveal, itemVariants, listVariants } from "@/components/motion";
 import { Meter, Money, Panel, ProductTile, SectionTitle, VerdictChip } from "@/components/picky";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,6 @@ import { fmt } from "@/lib/money";
 import { effective, offersFor, upcomingFor, verdictFor } from "@/lib/prices";
 import { cartTotal, useTrip } from "@/lib/trip";
 import { savedCents, usePurchases } from "@/lib/usePurchases";
-import { cn } from "@/lib/utils";
 
 export default function Home() {
   const { purchases, trips } = usePurchases();
@@ -35,7 +34,7 @@ export default function Home() {
 
       <section className="relative overflow-hidden rounded-[28px] bg-leaf text-white">
         <div className="pointer-events-none absolute -top-24 -right-24 size-[420px] rounded-full bg-lime/20 blur-3xl" aria-hidden />
-        <div className="relative grid items-center gap-2 p-6 md:grid-cols-[1.25fr_1fr] md:p-10">
+        <div className="relative grid items-center gap-2 p-6 md:grid-cols-[1.25fr_1fr] md:px-10 md:py-8">
           <motion.div initial="hidden" animate="show" variants={listVariants}>
             <motion.p variants={itemVariants} className="text-[15px] font-medium text-white/75">
               Saturday, October 17
@@ -59,10 +58,12 @@ export default function Home() {
             </motion.div>
           </motion.div>
           <motion.div initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} transition={{ type: "spring", stiffness: 120, damping: 18, delay: 0.2 }}>
-            <LottieSlot slot="robotHero" className="mx-auto aspect-[8/7] w-full max-w-[380px]" fallback={<RobotArt />} />
+            <LottieSlot slot="robotHero" className="mx-auto aspect-[8/7] w-full max-w-[300px]" fallback={<RobotArt />} />
           </motion.div>
         </div>
       </section>
+
+      <Suggestions />
 
       <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
         <Reveal>
@@ -105,20 +106,6 @@ export default function Home() {
         </Reveal>
       </section>
 
-      <section>
-        <SectionTitle
-          action={
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/order?preset=basics">
-                Restock with the robot <ChevronRight />
-              </Link>
-            </Button>
-          }
-        >
-          Probably running low
-        </SectionTitle>
-        <RunningLow items={low} />
-      </section>
 
       <section className="grid gap-8 lg:grid-cols-2">
         <div>
@@ -189,63 +176,6 @@ export default function Home() {
         </div>
       </section>
     </div>
-  );
-}
-
-function RunningLow({ items }: { items: ReturnType<typeof runningLow> }) {
-  const [added, setAdded] = useState<Set<string>>(new Set());
-  return (
-    <motion.div
-      className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 lg:grid-cols-5"
-      variants={listVariants}
-      initial="hidden"
-      whileInView="show"
-      viewport={{ once: true, margin: "-60px" }}
-    >
-      {items.map((r) => {
-        const p = productBySku[r.sku];
-        const on = added.has(r.sku);
-        const best = offersFor(r.sku).find((o) => o.in_stock);
-        return (
-          <motion.div
-            key={r.sku}
-            variants={itemVariants}
-            whileHover={{ y: -4 }}
-            className="flex w-[160px] shrink-0 snap-start flex-col rounded-2xl bg-card p-3 ring-1 ring-foreground/[0.07] transition-shadow hover:shadow-md md:w-auto"
-          >
-            <div className="grid aspect-[4/3] place-items-center rounded-xl" style={{ background: `${p.label_color}33` }}>
-              <motion.div whileHover={{ rotate: -6, scale: 1.08 }} transition={{ type: "spring", stiffness: 400, damping: 12 }}>
-                <ProductTile color={p.label_color} category={p.category} name={p.name} size={56} />
-              </motion.div>
-            </div>
-            <div className="mt-3 line-clamp-2 min-h-[2.6em] text-[14px] leading-tight font-semibold">{p.name}</div>
-            <div className={cn("mt-1 text-[12.5px]", r.due_in_days <= 0 ? "font-semibold text-tomato" : "text-muted-foreground")}>
-              {r.due_in_days <= 0 ? `Due, bought ${r.since_days} days ago` : `Due in ${r.due_in_days} days`}
-            </div>
-            <div className="mt-3 flex items-center justify-between">
-              {best && <Money cents={effective(best)} className="font-semibold" />}
-              <Button
-                size="icon-sm"
-                variant={on ? "default" : "outline"}
-                className="size-9 rounded-full"
-                aria-label={on ? `Remove ${p.name}` : `Add ${p.name} to the next robot order`}
-                aria-pressed={on}
-                onClick={() =>
-                  setAdded((s) => {
-                    const n = new Set(s);
-                    if (n.has(r.sku)) n.delete(r.sku);
-                    else n.add(r.sku);
-                    return n;
-                  })
-                }
-              >
-                {on ? <Check className="animate-pop" /> : <Plus />}
-              </Button>
-            </div>
-          </motion.div>
-        );
-      })}
-    </motion.div>
   );
 }
 

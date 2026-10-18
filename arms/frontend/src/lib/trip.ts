@@ -5,7 +5,7 @@
 // In demo mode the engine below produces them client-side and pauses on every approval until the shopper answers.
 import { create } from "zustand";
 import { STORES, maya, online, productBySku, slotsOf, type Pose, type Purchase, type StoreId } from "./data";
-import { answerGateway, startGateway, stopGateway, type FollowOptions } from "./gateway/tripSource";
+import { answerGateway, answerVerification, startGateway, stopGateway, type FollowOptions } from "./gateway/tripSource";
 import { draftTotal, mandateCheck, type Draft } from "./order";
 import type { PlannedRoute } from "./routing";
 import { buildTripPlan } from "./trip-plan";
@@ -42,9 +42,13 @@ export type Approval =
       kind: "pick";
       stop_id: string;
       sku: string;
-      candidates: { instance_id: string; lot_id: string; freshness: number; expiry: string | null; note: string; thumb?: string }[];
+      /** `thumb` = base64 JPEG crop of that unit; `photo` = an image URL (either one makes it a photo card) */
+      candidates: { instance_id: string; lot_id: string; freshness: number; expiry: string | null; note: string; thumb?: string; photo?: string }[];
       /** instance the camera ranked first (gateway); the replay recommends the 2nd candidate */
       recommended?: string;
+      /** produce review: choose `need` units (answer = the chosen ids joined by ","); else one tap answers */
+      multi?: boolean;
+      need?: number;
     }
   | {
       id: string;
@@ -65,7 +69,59 @@ export type Approval =
       multi: boolean;
     };
 export type LogEvent = { seq: number; t: number; type: string; summary: string };
-export type RobotStatus = "idle" | "driving" | "scanning" | "picking" | "waiting" | "done";
+/** Per-item purchase check: a photo of what the robot just put in the basket, ✓ / ✗, accepted automatically when the
+ *  countdown runs out. Gateway checks answer their approval; client-side ones (no gateway support yet) only flag. */
+export type Verification = {
+  id: string;
+  sku: string;
+  qty: number;
+  /** object URL / data URI / gateway URL of the photo; null = illustration */
+  photo: string | null;
+  /** tried when `photo` fails to load (gateway product image) */
+  alt_photo?: string | null;
+  note?: string;
+  /** the camera's own verdict, when the gateway sends one */
+  verdict?: "match" | "mismatch" | "uncertain" | null;
+  auto_ms: number;
+  created: number;
+  status: "pending" | "accepted" | "auto" | "rejected";
+  /** gateway approval id to answer; null = a client-side check */
+  approval_id: string | null;
+  /** which camera took the photo, for the caption */
+  camera?: string;
+};
+export type PayKind = "mandate" | "token" | "approval" | "authorized" | "receipt";
+export type PayStatus = "pending" | "active" | "done" | "failed";
+/** payment.agent_step (gateway) or nothing: the Visa payment agent timeline is otherwise derived from the trip. */
+export type PayEvent = {
+  kind: PayKind;
+  status: PayStatus;
+  title?: string;
+  detail?: string;
+  /** the agent's one-line narration (PaymentAgentStep.narration) */
+  narration?: string;
+  /** PaymentAgentStep.label, e.g. "Sandbox / simulated — no real money" */
+  label?: string;
+  /** raw step name (cart_mandate, passkey_requested, token_issued, …) */
+  name?: string;
+  t: number;
+};
+/** One unit at the checkout handoff: still in the basket, in the gripper, or set down on the counter. */
+export type HandoffUnit = { key: string; sku: string; state: "basket" | "arm" | "counter" };
+/** Checkout handoff: the arm takes each unit out of the basket and sets it on the counter (the loop's `handoff` step). */
+export type Handoff = {
+  status: "active" | "done";
+  units: HandoffUnit[];
+  /** who drives the arm: "Scripted skill" / "SmolVLA" (gateway step tier), null = the replay */
+  tier: string | null;
+  startedAt: number;
+  /** checkout.unload (0.2.4): the backend's line for the current unit ("Unloading 3/9: Mild Chunky Salsa → counter ✓") */
+  text?: string;
+  n?: number;
+  total?: number;
+};
+type CheckoutApproval = Extract<Approval, { kind: "checkout" }>;
+export type RobotStatus = "idle" | "driving" | "scanning" | "picking" | "unloading" | "waiting" | "done";
 export type Receipt = {
   receipt_id: string;
   total_cents: number;
@@ -125,11 +181,21 @@ export type TripStore = {
   followup: { text: string; skus: string[]; quick: string[] } | null;
   /** bumped when gateway products are registered at runtime (forces a re-render) */
   productsVersion: number;
+  /** per-item photo checks, oldest first */
+  verifications: Verification[];
+  /** payment.agent_step events (gateway); empty = the timeline is derived */
+  payEvents: PayEvent[];
+  /** the last checkout card (kept after it is answered, for the payment timeline) */
+  lastCheckout: CheckoutApproval | null;
+  /** basket → counter at checkout (null until the robot starts unloading) */
+  handoff: Handoff | null;
   // actions
   placeOrder: (draft: Draft, accepted: string[], mode: Mode) => void;
   followGateway: (o: FollowOptions) => void;
   robotLogin: () => void;
   answer: (value: string) => void;
+  /** ✓ (ok) / ✗ on a purchase check; `auto` = the countdown ran out */
+  verify: (id: string, ok: boolean, auto?: boolean) => void;
   setSpeed: (n: number) => void;
   setAutoAnswer: (b: boolean) => void;
   togglePause: () => void;
@@ -175,7 +241,14 @@ const initial = {
   steps: [] as ThinkStep[],
   followup: null as TripStore["followup"],
   productsVersion: 0,
+  verifications: [] as Verification[],
+  payEvents: [] as PayEvent[],
+  lastCheckout: null as CheckoutApproval | null,
+  handoff: null as Handoff | null,
 };
+
+/** Seconds a purchase check waits before it is accepted automatically. */
+export const VERIFY_AUTO_MS = 8000;
 
 export const useTrip = create<TripStore>((set, get) => {
   const emit = (type: string, summary: string) =>
@@ -232,6 +305,28 @@ export const useTrip = create<TripStore>((set, get) => {
       return { cart };
     });
 
+  /** The handoff step of the replay: each unit goes basket → gripper → counter (what the VLA loop's handoff does). */
+  const unload = async (token: number) => {
+    const units: HandoffUnit[] = get()
+      .cart.filter((c) => c.source === "in_store")
+      .flatMap((c) => Array.from({ length: c.qty }, (_, k) => ({ key: `${c.sku}#${k}`, sku: c.sku, state: "basket" as const })));
+    if (!units.length) return;
+    set((s) => ({ phase: "checkout", activeStop: "end", robot: { ...s.robot, status: "unloading" }, handoff: { status: "active", units, tier: null, startedAt: Date.now() } }));
+    emit("step.started", `handoff: unload ${units.length} items onto the counter`);
+    const mark = (i: number, state: HandoffUnit["state"]) =>
+      set((s) => (s.handoff ? { handoff: { ...s.handoff, units: s.handoff.units.map((u, j) => (j === i ? { ...u, state } : u)) } } : {}));
+    for (let i = 0; i < units.length; i++) {
+      mark(i, "arm");
+      await sleep(1250, token);
+      mark(i, "counter");
+      emit("vla.status", `${productBySku[units[i].sku]?.name ?? units[i].sku}: basket → counter (${i + 1}/${units.length})`);
+      await sleep(250, token);
+    }
+    set((s) => ({ handoff: s.handoff && { ...s.handoff, status: "done" } }));
+    emit("step.completed", `handoff: ${units.length} items on the counter, basket empty`);
+    await sleep(500, token);
+  };
+
   const run = async (token: number) => {
     const s0 = get();
     const route = s0.route!;
@@ -269,19 +364,26 @@ export const useTrip = create<TripStore>((set, get) => {
       let lot: string | undefined;
       const firstFreshPick = p.category === "produce" && slot.lots.length >= 3 && !get().approvalsLog.some((a) => a.kind === "pick");
       if (firstFreshPick) {
-        const cands = [...slot.lots]
-          .sort((a, b) => (b.freshness ?? 0) - (a.freshness ?? 0))
-          .slice(0, 3)
-          .map((l, i) => ({
-            instance_id: `inst_${l.lot_id}`,
-            lot_id: l.lot_id,
-            freshness: l.freshness ?? 0,
-            expiry: l.expiry,
-            note: i === 0 ? "Firm, ready in ~3 days" : i === 1 ? "Ripe by tonight" : "Ripe now, use today",
-          }));
+        const need = Math.max(1, stop.qty ?? 1);
+        const lots = [...slot.lots].sort((a, b) => (b.freshness ?? 0) - (a.freshness ?? 0)).slice(0, 3);
+        // one lot per card for a single item; for several, individual units (two per lot) to choose from
+        const units = need > 1 ? lots.flatMap((l, i) => [0, 1].map((k) => ({ l, i, k }))) : lots.map((l, i) => ({ l, i, k: 0 }));
+        const cands = units.map(({ l, i, k }) => ({
+          instance_id: `inst_${l.lot_id}${need > 1 ? `_${k}` : ""}`,
+          lot_id: l.lot_id,
+          freshness: Math.max(0, (l.freshness ?? 0) - k * 0.04),
+          expiry: l.expiry,
+          note: UNIT_NOTES[i][k],
+        }));
+        const pickIds = need > 1 ? cands.slice(0, need).map((c) => c.instance_id) : [cands[1].instance_id];
         set((s) => ({ robot: { ...s.robot, status: "waiting" } }));
-        const choice = await ask({ id: `ap_pick_${stop.id}`, kind: "pick", stop_id: stop.id, sku: stop.sku!, candidates: cands }, token, cands[1].instance_id);
-        lot = cands.find((c) => c.instance_id === choice)?.lot_id;
+        const choice = await ask(
+          { id: `ap_pick_${stop.id}`, kind: "pick", stop_id: stop.id, sku: stop.sku!, candidates: cands, multi: need > 1, need, recommended: pickIds[0] },
+          token,
+          pickIds.join(","),
+        );
+        const first = choice.split(",")[0];
+        lot = cands.find((c) => c.instance_id === first)?.lot_id;
       }
 
       set((s) => ({ robot: { ...s.robot, status: "picking" } }));
@@ -295,9 +397,17 @@ export const useTrip = create<TripStore>((set, get) => {
       }));
       emit("basket.verified", `${p.name} matched by basket camera`);
       emit("cart.updated", `cart total ${(cartTotal(get().cart) / 100).toFixed(2)}`);
+      // the shopper sees what went in: ✓ / ✗, or it is accepted when the countdown runs out (the robot keeps going)
+      set((s) => ({
+        verifications: [
+          ...s.verifications,
+          { id: `ver_${stop.id}`, sku: stop.sku!, qty: stop.qty ?? 1, photo: null, auto_ms: VERIFY_AUTO_MS, created: Date.now(), status: "pending", approval_id: null, camera: "Wrist camera" },
+        ],
+      }));
     }
 
-    // checkout
+    // checkout: the arm unloads the basket onto the counter, unit by unit, then the payment agent takes over
+    await unload(token);
     set((s) => ({ phase: "checkout", activeStop: "end", stopStatus: { ...s.stopStatus, end: "done" }, robot: { ...s.robot, status: "waiting" } }));
     const cart = get().cart;
     const totals = draftTotal(draft, new Set(get().accepted));
@@ -406,6 +516,21 @@ export const useTrip = create<TripStore>((set, get) => {
       run(t).catch(() => {});
     },
 
+    verify: (id, ok, auto) => {
+      const v = get().verifications.find((x) => x.id === id);
+      if (!v || v.status !== "pending") return;
+      const status: Verification["status"] = auto ? "auto" : ok ? "accepted" : "rejected";
+      set((s) => ({
+        verifications: s.verifications.map((x) => (x.id === id ? { ...x, status } : x)),
+        // ✗ flags the line until the robot (or the gateway) sorts it out
+        cart: ok ? s.cart : s.cart.map((c) => (c.sku === v.sku && c.source === "in_store" ? { ...c, verified: false } : c)),
+      }));
+      const name = productBySku[v.sku]?.name ?? v.sku;
+      emit("purchase.check", `${name}: ${auto ? "accepted automatically" : ok ? "looks right" : "flagged by the shopper"}`);
+      // the gateway auto-accepts on its own clock (labelled auto_accepted); only the shopper's taps are sent
+      if (get().source === "gateway" && !auto) void answerVerification(useTrip, v, ok);
+    },
+
     answer: (value) => {
       const a = get().approval;
       if (!a) return;
@@ -429,7 +554,7 @@ export const useTrip = create<TripStore>((set, get) => {
       if (get().source === "gateway") return;
       set({ autoAnswer: b });
       const a = get().approval;
-      if (b && a) get().answer(a.kind === "pick" ? a.candidates[1].instance_id : a.kind === "checkout" ? "approve" : "yes");
+      if (b && a) get().answer(a.kind === "pick" ? autoPick(a) : a.kind === "checkout" ? "approve" : "yes");
     },
     togglePause: () => {
       if (get().source === "gateway") return;
@@ -443,6 +568,24 @@ export const useTrip = create<TripStore>((set, get) => {
     },
   };
 });
+
+// remember the checkout card after it is answered: the payment timeline still shows its mandate reasons and cart hash
+useTrip.subscribe((s) => {
+  const co = s.approval?.kind === "checkout" ? s.approval : s.pending.find((p): p is CheckoutApproval => p.kind === "checkout");
+  if (co && co !== s.lastCheckout) useTrip.setState({ lastCheckout: co });
+});
+
+const UNIT_NOTES = [
+  ["Firm, ready in ~3 days", "Firm, a little green"],
+  ["Ripe by tonight", "Ripe tomorrow"],
+  ["Ripe now, use today", "Soft spot near the stem"],
+];
+
+/** What "answer for me" picks: the camera's top `need` units (or the replay's 2nd batch for a single pick). */
+function autoPick(a: Extract<Approval, { kind: "pick" }>) {
+  if (a.multi && (a.need ?? 1) > 1) return a.candidates.slice(0, a.need).map((c) => c.instance_id).join(",");
+  return (a.candidates[1] ?? a.candidates[0]).instance_id;
+}
 
 export function cartTotal(cart: CartLine[]) {
   return cart.reduce((s, c) => s + c.qty * c.unit_cents, 0);

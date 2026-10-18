@@ -74,6 +74,8 @@ export type Purchase = {
   ts: string;
   rating: number | null;
   synthetic: boolean;
+  /** gateway purchase history (0.2.3): the robot's photos of the exact units bought */
+  photo_urls?: string[];
 };
 
 export const products = productsJson as Product[];
@@ -138,8 +140,8 @@ export function registerStore(planogram: { store_id: string; name: string; entra
 }
 export const isWireless = (sku: string) => tmobileProducts.some((p) => p.sku === sku);
 
-/** The demo's "today" (Sat Oct 17, 2026). Fixed so prerendering is deterministic. */
-export const TODAY = new Date("2026-10-17T12:00:00-07:00");
+/** The demo's "today" (Sun Oct 18, 2026: judging day). Fixed so prerendering is deterministic. */
+export const TODAY = new Date("2026-10-18T12:00:00-07:00");
 const DAY = 86_400_000;
 
 export const MONTHLY_BUDGET_CENTS = 32_000;

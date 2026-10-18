@@ -4,9 +4,10 @@ import {
   Bot,
   Check,
   ChevronDown,
-  Clock,
   Eye,
+  ListChecks,
   MessageSquare,
+  MonitorPlay,
   Pause,
   Play,
   Receipt,
@@ -23,7 +24,9 @@ import { useRouter } from "next/navigation";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { RobotArt } from "@/components/art";
+import { PaymentAgent, PickReview, VerifyStack, paymentTimeline } from "@/components/TripReview";
 import { BindTripFromUrl } from "@/components/GatewayBits";
+import { HandoffPanel } from "@/components/Handoff";
 import { LiveFeed } from "@/components/LiveFeed";
 import { LottieSlot } from "@/components/media";
 import { Confetti, CountUp } from "@/components/motion";
@@ -113,7 +116,9 @@ export default function TripPage() {
       <div className="grid gap-6 xl:grid-cols-12">
         <div className="flex flex-col gap-6 xl:col-span-8">
           {t.phase === "waiting_login" && t.source !== "gateway" ? <LoginPanel /> : <LiveFeed />}
+          <HandoffPanel />
           <ApprovalPanel />
+          <VerifyStack />
           <StopList />
         </div>
         <div className="flex flex-col gap-6 xl:col-span-4">
@@ -177,9 +182,21 @@ function Planning({ name, error, reconnecting, onRestart }: { name: string | nul
   );
 }
 
-function Controls({ onRestart }: { onRestart: () => void }) {
+/** The other view of the same trip: /trip (details) ⇄ /watch (projector). */
+function SwitchView({ to }: { to: "watch" | "trip" }) {
+  const tripId = useTrip((s) => (s.source === "gateway" ? s.tripId : null));
+  return (
+    <Button asChild variant="ghost" size="sm">
+      <Link href={`/${to}${tripId ? `?trip=${encodeURIComponent(tripId)}` : ""}`}>
+        {to === "watch" ? <MonitorPlay /> : <ListChecks />} {to === "watch" ? "Projector view" : "Trip details"}
+      </Link>
+    </Button>
+  );
+}
+
+export function Controls({ onRestart, switchTo = "watch" }: { onRestart: () => void; switchTo?: "watch" | "trip" }) {
   const { speed, setSpeed, paused, togglePause, autoAnswer, setAutoAnswer, phase, source } = useTrip();
-  if (source === "gateway") return <GatewayControls onRestart={onRestart} />;
+  if (source === "gateway") return <GatewayControls onRestart={onRestart} switchTo={switchTo} />;
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-card px-3 py-2 ring-1 ring-foreground/[0.07]">
       <Button variant="ghost" size="sm" onClick={togglePause} disabled={phase === "done"} aria-label={paused ? "Resume" : "Pause"}>
@@ -197,7 +214,9 @@ function Controls({ onRestart }: { onRestart: () => void }) {
         Answer questions for me
       </label>
       <span className="hidden text-[12.5px] text-muted-foreground md:inline">Demo playback controls</span>
-      <Button variant="ghost" size="sm" onClick={onRestart} className="ml-auto">
+      <span className="ml-auto" />
+      <SwitchView to={switchTo} />
+      <Button variant="ghost" size="sm" onClick={onRestart}>
         <RotateCcw /> New trip
       </Button>
     </div>
@@ -205,7 +224,7 @@ function Controls({ onRestart }: { onRestart: () => void }) {
 }
 
 /** A real robot: no pause / speed / auto-answer (checkout always waits for the shopper). */
-function GatewayControls({ onRestart }: { onRestart: () => void }) {
+function GatewayControls({ onRestart, switchTo }: { onRestart: () => void; switchTo: "watch" | "trip" }) {
   const { robotName, robotId, phase } = useTrip();
   const reconnecting = useGateway(isReconnecting);
   const [stopping, setStopping] = useState(false);
@@ -253,7 +272,9 @@ function GatewayControls({ onRestart }: { onRestart: () => void }) {
           </DialogContent>
         </Dialog>
       )}
-      <Button variant="ghost" size="sm" onClick={onRestart} className="ml-auto">
+      <span className="ml-auto" />
+      <SwitchView to={switchTo} />
+      <Button variant="ghost" size="sm" onClick={onRestart}>
         <RotateCcw /> New trip
       </Button>
     </div>
@@ -289,9 +310,16 @@ function sentence(s: string | null) {
   return t ? t[0].toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? "" : ".") : "";
 }
 
-function ApprovalPanel() {
-  const { approval, answer, receipt, phase, mode, source, tripState, error, approvalsLog } = useTrip();
-  if (receipt) return <ReceiptPanel />;
+export function ApprovalPanel() {
+  const t = useTrip();
+  const { approval, answer, receipt, phase, mode, source, tripState, error, approvalsLog } = t;
+  if (receipt)
+    return (
+      <div className="flex flex-col gap-3">
+        <ReceiptPanel />
+        <PaymentAgent compact />
+      </div>
+    );
   if (source === "gateway" && (tripState === "failed" || (error && phase === "done")))
     return (
       <Panel className="flex items-start gap-3 bg-tomato-wash p-5 text-[15px] text-tomato">
@@ -301,13 +329,16 @@ function ApprovalPanel() {
         </span>
       </Panel>
     );
-  // paid, receipt on its way (checkout.completed follows trip.state_changed)
-  if (!approval && source === "gateway" && (tripState === "paid" || tripState === "followup")) return null;
   // a declined checkout leaves the gateway trip open with the basket held: offer to check out later
   const last = approvalsLog[approvalsLog.length - 1];
   if (!approval && source === "gateway" && last?.kind === "checkout" && last.answer === "decline") return <HeldBasket />;
   if (!approval && phase === "done")
     return <Panel className="p-5 text-[15px]">No problem. Your basket is held at the pickup counter for 30 minutes in case you change your mind.</Panel>;
+  // checkout = the Visa payment agent: its passkey button is the approval; after it, authorizing until the receipt
+  const pay = paymentTimeline(t);
+  if (approval?.kind === "checkout" || (!approval && pay.started && pay.steps.find((s) => s.kind === "approval")?.status === "done")) return <PaymentAgent />;
+  // paid, receipt on its way (checkout.completed follows trip.state_changed)
+  if (!approval && source === "gateway" && (tripState === "paid" || tripState === "followup")) return null;
   return (
     <AnimatePresence mode="popLayout">
       {approval && (
@@ -317,7 +348,7 @@ function ApprovalPanel() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -12, scale: 0.97, transition: { duration: 0.18 } }}
           transition={{ type: "spring", stiffness: 380, damping: 28 }}
-          className="rounded-2xl bg-card p-5 shadow-md ring-2 ring-amber md:p-6"
+          className="@container rounded-2xl bg-card p-5 shadow-md ring-2 ring-amber md:p-6"
           role="alertdialog"
           aria-label="The robot needs an answer"
         >
@@ -336,7 +367,7 @@ function ApprovalBody({ a, answer }: { a: Approval; answer: (v: string) => void 
   if (a.kind === "detour") {
     const p = productBySku[a.sku];
     return (
-      <div className="flex flex-col gap-4 md:flex-row md:items-center">
+      <div className="flex flex-col gap-4 @xl:flex-row @xl:items-center">
         <ProductTile color={p.label_color} category={p.category} name={p.name} size={64} />
         <div className="min-w-0 flex-1">
           <h3 className="text-[24px] leading-tight font-bold">
@@ -357,77 +388,9 @@ function ApprovalBody({ a, answer }: { a: Approval; answer: (v: string) => void 
       </div>
     );
   }
-  if (a.kind === "pick") {
-    const p = productBySku[a.sku];
-    return (
-      <div>
-        <h3 className="text-[24px] leading-tight font-bold">Which {a.sku === "AVOCADO" ? "avocados" : p.name.toLowerCase()} should it take?</h3>
-        <p className="mt-1 text-[15px] text-muted-foreground">The camera ranked everything on the table by ripeness. Here are the best three batches.</p>
-        <div className="mt-4 grid gap-3 sm:grid-cols-3">
-          {a.candidates.map((c, i) => (
-            <motion.button
-              key={c.instance_id}
-              onClick={() => answer(c.instance_id)}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.08 * i }}
-              whileHover={{ y: -4 }}
-              whileTap={{ scale: 0.97 }}
-              className="group cursor-pointer rounded-2xl bg-muted p-4 text-left ring-2 ring-transparent transition-colors hover:bg-leaf-wash hover:ring-leaf"
-            >
-              <div className="flex items-center justify-between">
-                {c.thumb ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img src={`data:image/jpeg;base64,${c.thumb}`} alt={`${p.name}, candidate ${i + 1}`} className="size-10 rounded-lg object-cover" />
-                ) : (
-                  <ProductTile color={p.label_color} category={p.category} name={p.name} size={40} />
-                )}
-                {(a.recommended ? c.instance_id === a.recommended : i === 1) && <Badge variant="lime">Picky&apos;s pick</Badge>}
-              </div>
-              <div className="mt-3 font-heading text-[18px] font-semibold">{c.note}</div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
-                <motion.div className="h-full rounded-full bg-leaf" initial={{ width: 0 }} animate={{ width: `${c.freshness * 100}%` }} transition={{ delay: 0.2 + 0.08 * i, duration: 0.6 }} />
-              </div>
-              <div className="mt-1.5 text-[13px] text-muted-foreground">
-                {Math.round(c.freshness * 100)}% fresh
-                {c.expiry && `, best by ${new Date(c.expiry + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}`}
-              </div>
-            </motion.button>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  if (a.kind === "pick") return <PickReview a={a} answer={answer} />;
   if (a.kind === "question") return <QuestionBody a={a} answer={answer} />;
-  const asks = a.reasons.filter((r) => r.level !== "ok").length;
-  return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-end">
-      <div className="min-w-0 flex-1">
-        <h3 className="text-[24px] leading-tight font-bold">
-          Ready to pay <Money cents={a.total_cents} />?
-        </h3>
-        <ul className="mt-3 flex flex-col gap-1.5 text-[14.5px]">
-          {a.reasons.map((r) => (
-            <li key={r.code + r.text} className="flex items-start gap-2">
-              {r.level === "ok" ? <Check className="mt-0.5 size-4 shrink-0 text-leaf" /> : <Clock className="mt-0.5 size-4 shrink-0 text-amber-ink" />}
-              {r.text}
-            </li>
-          ))}
-        </ul>
-        <p className="mt-3 text-[12.5px] text-muted-foreground">
-          Your rules {asks ? "ask for your approval" : "allow this"}. Paying with Visa ending 4242 in test mode, so no real money moves.
-        </p>
-      </div>
-      <div className="flex gap-2">
-        <Button variant="outline" size="lg" onClick={() => answer("decline")}>
-          Not yet
-        </Button>
-        <Button size="lg" onClick={() => answer("approve")}>
-          Approve and pay
-        </Button>
-      </div>
-    </div>
-  );
+  return <PaymentAgent />;
 }
 
 function HeldBasket() {
@@ -458,7 +421,7 @@ function HeldBasket() {
 function QuestionBody({ a, answer }: { a: Extract<Approval, { kind: "question" }>; answer: (v: string) => void }) {
   const p = a.sku ? productBySku[a.sku] : null;
   return (
-    <div className="flex flex-col gap-4 md:flex-row md:items-center">
+    <div className="flex flex-col gap-4 @xl:flex-row @xl:items-center">
       {p && <ProductTile color={p.label_color} category={p.category} name={p.name} size={64} />}
       <div className="min-w-0 flex-1">
         <h3 className="text-[24px] leading-tight font-bold">
@@ -468,11 +431,19 @@ function QuestionBody({ a, answer }: { a: Extract<Approval, { kind: "question" }
       </div>
       <div className="flex flex-wrap gap-2">
         {a.options.length ? (
-          a.options.map((o) => (
-            <Button key={o.id} size="lg" variant="outline" onClick={() => answer(o.id)} title={o.detail}>
-              {o.label}
-            </Button>
-          ))
+          <>
+            {a.options.map((o) => (
+              <Button key={o.id} size="lg" variant="outline" onClick={() => answer(o.id)} title={o.detail}>
+                {o.label}
+              </Button>
+            ))}
+            {/* "Want any of these before checkout?" (multi): saying no is an answer too */}
+            {a.multi && (
+              <Button size="lg" variant="ghost" onClick={() => answer("no")}>
+                No thanks
+              </Button>
+            )}
+          </>
         ) : (
           <>
             <Button variant="outline" size="lg" onClick={() => answer("no")}>
@@ -637,7 +608,7 @@ function StopList() {
   );
 }
 
-function Basket() {
+export function Basket() {
   const { cart, draft, shippingCents } = useTrip();
   const total = cartTotal(cart) + shippingCents;
   const budget = draft?.budget_cents ?? 4000;
@@ -673,6 +644,10 @@ function Basket() {
                 <span className="flex items-center gap-1 text-[12px] font-semibold text-leaf" title="Checked by the basket camera">
                   <Check className="size-3.5 animate-pop" strokeWidth={3} /> Checked
                 </span>
+              ) : c.verified === false ? (
+                <span className="flex items-center gap-1 text-[12px] font-semibold text-tomato" title="You flagged this pick">
+                  <TriangleAlert className="size-3.5" /> Flagged
+                </span>
               ) : (
                 <span className="text-[12px] text-muted-foreground">Checking</span>
               )}
@@ -705,7 +680,7 @@ function Basket() {
 const STEP_ICON = { thought: Sparkles, tool_call: Wrench, observation: Eye, message: MessageSquare } as const;
 
 /** The robot brain's thinking log: REST history + live brain.step (gateway trips). */
-function RobotThinking() {
+export function RobotThinking() {
   const steps = useTrip((s) => s.steps);
   const name = useTrip((s) => s.robotName);
   // tool results echo the call; keep them only when they failed
@@ -756,7 +731,7 @@ function ThinkRow({ st }: { st: ThinkStep }) {
   );
 }
 
-function EventLog() {
+export function EventLog() {
   const log = useTrip((s) => s.log);
   const [open, setOpen] = useState(false);
   return (

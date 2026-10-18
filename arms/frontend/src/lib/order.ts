@@ -186,6 +186,47 @@ function expandGrocery(text: string): Draft {
   };
 }
 
+/** Restock order from tapped "Running low" suggestions (exact SKUs) for the demo replay; the gateway path posts the
+ *  same SKUs to POST /api/requests. One deal suggestion rides along so the robot has something to ask about. */
+export function restockDraft(items: { sku: string; qty: number }[], storeId: StoreId = "store_ave"): Draft {
+  cur = storeId;
+  const sellable = (sku: string) => productBySku[sku] && (slotsOf(storeId)[sku] || online.items.some((o) => o.sku === sku));
+  const lines = items.filter((i) => sellable(i.sku)).map((i) => line(i.sku, Math.max(1, i.qty)));
+  const skus = new Set(lines.map((l) => l.sku));
+  const recSku = ["AVOCADO", "LIMES", "ONION-WHITE"].some((s) => skus.has(s)) ? "GUAC-KIT" : "CHIPS-TORTILLA";
+  const slot = slotsOf(storeId)[recSku];
+  const recs: Rec[] =
+    skus.has(recSku) || !slot?.deal
+      ? []
+      : [
+          {
+            rec_id: `rec_${recSku.toLowerCase()}`,
+            sku: recSku,
+            unit_cents: priceOf(recSku),
+            original_cents: productBySku[recSku].price_cents,
+            interest: 0.6,
+            reason:
+              recSku === "GUAC-KIT"
+                ? `You're restocking avocados and limes. ${slot.deal.reason}, so it's ${slot.deal.percent_off ?? 0}% off today.`
+                : `${slot.deal.reason}. It's on the front endcap, right on the way to checkout.`,
+            signals: { discount_pct: slot.deal.percent_off ?? 0, deals_pref: maya.profile.prefs.deals ?? 0 },
+            sponsored: false,
+            detour_m: 0,
+            detour_s: 6,
+          },
+        ];
+  const total = lines.reduce((s, l) => s + l.qty * l.unit_cents, 0);
+  return {
+    store_id: storeId,
+    intent: `Restock ${lines.map((l) => `${l.qty} × ${productBySku[l.sku].name}`).join(", ")}`,
+    advice: [],
+    title: "Restock",
+    budget_cents: Math.max(maya.profile.default_budget_cents, Math.ceil((total * 1.25) / 500) * 500),
+    lines,
+    recs,
+  };
+}
+
 export function draftTotal(d: Draft, acceptedRecs: Set<string>) {
   const list = d.lines.reduce((s, l) => s + l.qty * l.unit_cents, 0);
   const recs = d.recs.filter((r) => acceptedRecs.has(r.rec_id)).reduce((s, r) => s + r.unit_cents, 0);
