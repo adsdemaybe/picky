@@ -1128,7 +1128,7 @@ class WorkerCore:
             fx = scene.planogram.fixture(slot.fixture_id)
             if fx is None:
                 raise _Fail("unknown_slot", f"slot {cmd.slot_id} has no fixture")
-            layout = slot_layout(slot, fx, product)
+            layout = slot_layout(slot, fx, product, cmd.store_id)
             scene.spec.slot_layouts[cmd.slot_id] = layout
         if layout is None:
             raise _Fail("internal", f"unknown sku {cmd.sku!r} for slot {cmd.slot_id}")

@@ -47,6 +47,8 @@ from contracts.sim import BASKET_OFFSET_LOCAL, UNIT_FRESHNESS_JITTER, ItemInstan
 from contracts.sim import BASKET_SIZE_M as _BASKET_SIZE_M
 from contracts.sim import instance_id as _instance_id
 
+from .visuals import TableStyle, fixture_style, product_visual, store_visuals
+
 PrimRole = Literal[
     "floor",
     "wall",
@@ -59,6 +61,8 @@ PrimRole = Literal[
     "marker",
     "light",
     "rover",
+    "decor",
+    "sign",
 ]
 PrimShape = Literal["box", "cylinder", "sphere"]
 RoverGroup = Literal["base", "lift", "arm"]
@@ -150,6 +154,12 @@ class PrimSpec(BaseModel):
     price_cents: int | None = None
     store_id: str | None = None
     group: RoverGroup | None = Field(None, description="Rover prims: which moving part it rides.")
+    asset: str | None = Field(None, description="Visual model key (arms/sim/visuals.yaml); None = plain primitive.")
+    display: str | None = Field(None, description="Product display mode from visuals.yaml ('stand').")
+    tilt_deg: float = 0.0
+    model_dims: Vec3 | None = Field(None, description="Visual model size when it differs from the unit's box size.")
+    price_card: bool = Field(True, description="Model units: show the label as a price card in front.")
+    text_color: str | None = Field(None, description="Signs: text color on `color`.")
 
 
 class SlotLayout(BaseModel):
@@ -345,6 +355,7 @@ def store_offsets(order: Sequence[str], sizes: dict[str, tuple[float, float]]) -
 def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
     b = plan.bounds
     sid = plan.store_id
+    colors = store_visuals(sid).colors
     cx, cy = b.x + b.w / 2, b.y + b.h / 2
     t, hh = WALL_THICKNESS_M, WALL_HEIGHT_M
     prims = [
@@ -353,7 +364,7 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
             role="floor",
             center=(cx, cy, -FLOOR_THICKNESS_M / 2),
             size=(b.w + 2 * t, b.h + 2 * t, FLOOR_THICKNESS_M),
-            color=FLOOR_COLOR,
+            color=colors.get("floor", FLOOR_COLOR),
             store_id=sid,
         ),
         PrimSpec(
@@ -361,7 +372,7 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
             role="ceiling",
             center=(cx, cy, CEILING_HEIGHT_M + CEILING_SLAB_GAP_M + 0.025),
             size=(b.w + 2 * t, b.h + 2 * t, 0.05),
-            color=CEILING_COLOR,
+            color=colors.get("ceiling", CEILING_COLOR),
             collider=False,
             store_id=sid,
         ),
@@ -374,7 +385,14 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
     }
     for name, (center, size) in walls.items():
         prims.append(
-            PrimSpec(path=f"{root}/Walls/{name}", role="wall", center=center, size=size, color=WALL_COLOR, store_id=sid)
+            PrimSpec(
+                path=f"{root}/Walls/{name}",
+                role="wall",
+                center=center,
+                size=size,
+                color=colors.get("wall", WALL_COLOR),
+                store_id=sid,
+            )
         )
     for i, ob in enumerate(plan.obstacles):
         prims.append(
@@ -422,9 +440,12 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
 def _fixture_prims(fx: Fixture, root: str, store_id: str) -> list[PrimSpec]:
     r = fx.rect
     froot = f"{root}/Fixtures/{usd_name(fx.fixture_id)}"
-    color = FIXTURE_COLORS.get(fx.kind, "#b8bcc4")
+    theme = store_visuals(store_id)
+    color = theme.colors.get(fx.kind, FIXTURE_COLORS.get(fx.kind, "#b8bcc4"))
     cx, cy = r.x + r.w / 2, r.y + r.h / 2
     common = {"fixture_id": fx.fixture_id, "color": color, "store_id": store_id}
+    if fixture_style(store_id, fx.fixture_id) == "table":
+        return _table_prims(fx, froot, store_id, theme.table)
     if fx.kind == "checkout":
         return [
             PrimSpec(
@@ -482,6 +503,33 @@ def _fixture_prims(fx: Fixture, root: str, store_id: str) -> list[PrimSpec]:
     return prims
 
 
+def _table_prims(fx: Fixture, froot: str, store_id: str, style: TableStyle) -> list[PrimSpec]:
+    """Display table: a wood top whose upper face is the slot board height, on an inset white base."""
+    r = fx.rect
+    cx, cy = r.x + r.w / 2, r.y + r.h / 2
+    top_z = level_heights(fx)[0]
+    t, inset = style.top_thickness_m, style.base_inset_m
+    common = {"fixture_id": fx.fixture_id, "store_id": store_id}
+    return [
+        PrimSpec(
+            path=f"{froot}/top",
+            role="board",
+            center=(cx, cy, top_z - t / 2),
+            size=(r.w, r.h, t),
+            color=style.top_color,
+            **common,
+        ),
+        PrimSpec(
+            path=f"{froot}/base",
+            role="base",
+            center=(cx, cy, (top_z - t) / 2),
+            size=(max(0.1, r.w - 2 * inset), max(0.1, r.h - 2 * inset), top_z - t),
+            color=style.base_color,
+            **common,
+        ),
+    ]
+
+
 def _available_depth(fx: Fixture, pick_dir: float) -> float:
     ax, _ = _axis(pick_dir)
     depth = fx.rect.w if ax != 0 else fx.rect.h
@@ -507,20 +555,31 @@ def unit_lots(lots: Sequence[Lot], n: int) -> list[tuple[str | None, float | Non
     return out[:n]
 
 
-def slot_layout(slot: Slot, fx: Fixture, product: Product) -> SlotLayout:
-    """Grid positions for the units of ``slot`` (store-local centers), front row first."""
+def slot_layout(slot: Slot, fx: Fixture, product: Product, store_id: str | None = None) -> SlotLayout:
+    """Grid positions for the units of ``slot`` (store-local centers), front row first. ``store_id`` enables the
+    store's fixture styles (visuals.yaml): a 'table' holds one layer of display units, ``row_pitch_m`` apart."""
     asset = product.asset
+    table = fixture_style(store_id, fx.fixture_id) == "table"
     w, d, h = asset.dims_m
     pick_dir = pick_face_dir(slot)
     yaw = item_yaw_for(slot)
     inward = (-math.cos(pick_dir), -math.sin(pick_dir))  # into the fixture
     lateral = (math.cos(yaw), math.sin(yaw))  # item-local +x in world (left -> right when facing the shelf)
 
-    cols = max(slot.facings, 4) if fx.kind == "produce_bin" else slot.facings
-    rows = max(1, int(_available_depth(fx, pick_dir) // (d + ITEM_GAP_M)))
+    pitch = d + ITEM_GAP_M
+    lat_pitch = w + ITEM_GAP_M
+    cols = max(slot.facings, 4) if fx.kind == "produce_bin" and not table else slot.facings
+    rows = max(1, int(_available_depth(fx, pick_dir) // pitch))
+    if table:  # display units side by side along the edge, a second row only when they don't fit
+        style = store_visuals(store_id or "").table
+        pitch = lat_pitch = max(pitch, style.row_pitch_m)
+        cols = max(slot.facings, min(slot.capacity or 1, style.max_cols))
+        rows = max(1, min(rows, -(-(slot.capacity or 1) // cols)))
     room = _vertical_room(fx, slot.level)
     layers = max(1, int(room // h)) if room > 0 else 1
-    if fx.kind == "produce_bin":
+    if table:
+        layers = 1  # display units stand side by side, never stacked
+    elif fx.kind == "produce_bin":
         layers = max(layers, 2)  # produce is piled
     positions: list[Vec3] = []
     base = slot.item_position
@@ -529,8 +588,8 @@ def slot_layout(slot: Slot, fx: Fixture, product: Product) -> SlotLayout:
             for col in range(cols):
                 if len(positions) >= MAX_UNITS_PER_SLOT:
                     break
-                lat = (col - (cols - 1) / 2) * (w + ITEM_GAP_M)
-                dep = d / 2 + row * (d + ITEM_GAP_M)
+                lat = (col - (cols - 1) / 2) * lat_pitch
+                dep = d / 2 + row * pitch
                 x = base.x + lateral[0] * lat + inward[0] * dep
                 y = base.y + lateral[1] * lat + inward[1] * dep
                 z = base.z + h / 2 + layer * h
@@ -558,6 +617,9 @@ def unit_prim(
     store_id: str, layout: SlotLayout, iid: str, rank: int, lot_id: str | None, fresh: float | None
 ) -> PrimSpec:
     """The product prim of one unit at its layout rank."""
+    visual = product_visual(layout.sku)
+    if visual is not None and visual.display == "first" and rank != 0:
+        visual = None  # stock behind the display unit stays boxed
     return PrimSpec(
         path=f"{store_root(store_id)}/Products/{usd_name(layout.slot_id)}/{usd_name(iid)}",
         role="product",
@@ -578,7 +640,36 @@ def unit_prim(
         price_cents=layout.price_cents,
         collider=False,
         store_id=store_id,
+        asset=visual.asset if visual else None,
+        display=visual.display if visual else None,
+        tilt_deg=visual.tilt_deg if visual else 0.0,
+        model_dims=visual.model_dims if visual else None,
+        price_card=rank == 0,
     )
+
+
+def _decor_prims(store_id: str, root: str) -> list[PrimSpec]:
+    """Visual-only props from visuals.yaml (brand panels, signs, models). Not colliders, not obstacles."""
+    prims: list[PrimSpec] = []
+    for d in store_visuals(store_id).decor:
+        cx, cy, cz = d.center
+        center = (cx, cy, cz + d.size[2] / 2) if d.kind == "asset" else d.center
+        prims.append(
+            PrimSpec(
+                path=f"{root}/Decor/{usd_name(d.name)}",
+                role="sign" if d.kind == "sign" else "decor",
+                center=center,
+                size=d.size,
+                yaw=d.yaw,
+                color=d.color,
+                collider=False,
+                label_text=d.text,
+                text_color=d.text_color if d.kind == "sign" else None,
+                asset=d.asset,
+                store_id=store_id,
+            )
+        )
+    return prims
 
 
 def unit_instance(store_id: str, layout: SlotLayout, iid: str, rank: int, lot_id: str | None, fresh: float | None):
@@ -609,6 +700,7 @@ def build_scene_spec(
     prims = _store_shell(planogram, root)
     for fx in planogram.fixtures:
         prims += _fixture_prims(fx, root, sid)
+    prims += _decor_prims(sid, root)
 
     instances: list[ItemInstance] = []
     dims: dict[str, Vec3] = {}
@@ -624,7 +716,7 @@ def build_scene_spec(
         if fx is None:  # unreachable with a validated Planogram, kept for safety
             warnings.append(f"{slot.slot_id}: unknown fixture {slot.fixture_id!r}")
             continue
-        layout = slot_layout(slot, fx, product)
+        layout = slot_layout(slot, fx, product, sid)
         layouts[slot.slot_id] = layout
         stocked[product.sku] = product
         n = min(slot.qty, MAX_UNITS_PER_SLOT)

@@ -149,3 +149,26 @@ def label_png(name: str, **kw: object) -> bytes | None:
     out = io.BytesIO()
     img.save(out, format="PNG")
     return out.getvalue()
+
+
+def sign_png(text: str, *, color: str = "#e20074", text_color: str = "#ffffff", aspect: float = 4.0) -> bytes | None:
+    """A store sign: ``text`` centered and as large as fits, on a solid ``color`` panel (PNG bytes; None without
+    Pillow). ``aspect`` = width / height of the sign face."""
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        return None
+    h = 256
+    w = max(h, int(h * aspect))
+    img = Image.new("RGB", (w, h), _hex(color))
+    d = ImageDraw.Draw(img)
+    px = int(h * 0.62)
+    while px > 12:
+        box = d.textbbox((0, 0), text, font=_font(px))
+        if box[2] - box[0] <= w * 0.9 and box[3] - box[1] <= h * 0.8:
+            break
+        px -= 4
+    d.text((w // 2, h // 2), text, fill=_hex(text_color), font=_font(px), anchor="mm")
+    out = io.BytesIO()
+    img.save(out, format="PNG")
+    return out.getvalue()

@@ -39,8 +39,9 @@ from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from arms.sim.geometry import NEAR_CLIP_M, CameraPose
-from arms.sim.labels import label_png
+from arms.sim.labels import label_png, sign_png
 from arms.sim.scene_spec import LIFT_REF_M, PrimSpec, RoverSpec, SceneSpec, Vec3, camera_prim_path, usd_name
+from arms.sim.visuals import asset_usd, load_visuals
 from arms.sim.worker import NullBackend, SimBackend, WorkerCore
 from contracts.common import ARM_MOUNT_X_M, Point3, Pose2D
 from contracts.sim import CameraFrame, SimLog, command_error_result, parse_gateway_to_sim
@@ -275,6 +276,7 @@ class IsaacBackend:
         self._robots: dict[str, dict[str, Any]] = {}
         self._cams: dict[str, _IsaacCamera] = {}
         self._materials: dict[str, Any] = {}
+        self._model_bounds: dict[str, tuple[Any, Any] | None] = {}
         self._specs: dict[str, SceneSpec] = {}
         self._scene_dirty = True
         self._last_update = 0.0
@@ -301,7 +303,6 @@ class IsaacBackend:
         return self._materials[key]
 
     def _label_material(self, spec: SceneSpec, prim: PrimSpec) -> Any:
-        from pxr import Sdf, UsdShade  # type: ignore[import-not-found]
 
         sku = prim.sku or "unknown"
         key = f"label_{usd_name(sku)}_{prim.price_cents or 0}"
@@ -319,6 +320,13 @@ class IsaacBackend:
         if png is None:
             self._materials[key] = self._color_material(prim.color)
             return self._materials[key]
+        self._materials[key] = self._texture_material(key, png)
+        return self._materials[key]
+
+    def _texture_material(self, key: str, png: bytes, emissive: float = 0.0) -> Any:
+        """UsdPreviewSurface with ``png`` as diffuse (and, when ``emissive`` > 0, emissive) texture."""
+        from pxr import Gf, Sdf, UsdShade  # type: ignore[import-not-found]
+
         file = self.label_dir / f"{key}.png"
         file.write_bytes(png)
         path = f"/World/Looks/{key}"
@@ -335,8 +343,10 @@ class IsaacBackend:
         tex.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(reader.ConnectableAPI(), "result")
         tex.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
         sh.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(tex.ConnectableAPI(), "rgb")
+        if emissive:
+            tex.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(emissive, emissive, emissive, 1.0))
+            sh.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(tex.ConnectableAPI(), "rgb")
         mat.CreateSurfaceOutput().ConnectToSource(sh.ConnectableAPI(), "surface")
-        self._materials[key] = mat
         return mat
 
     @staticmethod
@@ -374,6 +384,8 @@ class IsaacBackend:
             light.CreateIntensityAttr(9000.0)
             UsdGeom.XformCommonAPI(light).SetTranslate(Gf.Vec3d(*spec.center))  # RectLight emits along -Z (down)
             return light
+        if spec.role in ("sign", "decor") and (spec.role == "sign" or spec.asset):
+            return self._define_dressing(spec, path)
         g = self._geom(path, spec.shape)
         xf = UsdGeom.XformCommonAPI(g)
         xf.SetTranslate(Gf.Vec3d(*spec.center))
@@ -396,6 +408,8 @@ class IsaacBackend:
         xf = UsdGeom.XformCommonAPI(root)
         xf.SetTranslate(Gf.Vec3d(*prim.center))
         xf.SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(prim.yaw)))
+        if prim.asset and self._model_unit(spec, prim):
+            return self._finish_unit(root, prim)
         body = self._geom(f"{prim.path}/body", prim.shape)
         UsdGeom.XformCommonAPI(body).SetScale(Gf.Vec3f(*prim.size))
         body.CreateDisplayColorAttr([Gf.Vec3f(*_rgb(prim.color))])
@@ -417,6 +431,11 @@ class IsaacBackend:
             )
             st.Set([Gf.Vec2f(0, 0), Gf.Vec2f(1, 0), Gf.Vec2f(1, 1), Gf.Vec2f(0, 1)])
             self._bind(mesh.GetPrim(), self._label_material(spec, prim))
+        return self._finish_unit(root, prim)
+
+    def _finish_unit(self, root: Any, prim: PrimSpec) -> str:
+        from pxr import Sdf  # type: ignore[import-not-found]
+
         p = root.GetPrim()
         for key in ("sku", "instance_id", "slot_id", "lot_id", "barcode"):
             val = getattr(prim, key)
@@ -426,6 +445,145 @@ class IsaacBackend:
             p.CreateAttribute("picky:freshness", Sdf.ValueTypeNames.Float).Set(prim.freshness)
         self._inst_paths[(prim.store_id or "", prim.instance_id or "")] = prim.path
         return prim.path
+
+    # -- visual models (arms/sim/visuals.yaml) -----------------------------------------------------------------------
+    def _quad(self, path: str, w: float, h: float, center: Vec3, mat: Any, yaw: float = 0.0, normal_y: float = -1.0):
+        """Textured w x h quad facing ``normal_y`` (-1 = local -y) at ``center`` (parent frame)."""
+        from pxr import Gf, Sdf, UsdGeom  # type: ignore[import-not-found]
+
+        hw, hh = w / 2, h / 2
+        mesh = UsdGeom.Mesh.Define(self.stage, path)
+        pts = [Gf.Vec3f(-hw, 0, -hh), Gf.Vec3f(hw, 0, -hh), Gf.Vec3f(hw, 0, hh), Gf.Vec3f(-hw, 0, hh)]
+        mesh.CreatePointsAttr(pts)
+        mesh.CreateFaceVertexCountsAttr([4])
+        mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+        mesh.CreateNormalsAttr([Gf.Vec3f(0, normal_y, 0)] * 4)
+        mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
+        mesh.CreateDoubleSidedAttr(True)
+        st = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex)
+        st.Set([Gf.Vec2f(0, 0), Gf.Vec2f(1, 0), Gf.Vec2f(1, 1), Gf.Vec2f(0, 1)])
+        xf = UsdGeom.XformCommonAPI(mesh)
+        xf.SetTranslate(Gf.Vec3d(*center))
+        if yaw:
+            xf.SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(yaw)))
+        self._bind(mesh.GetPrim(), mat)
+        return mesh
+
+    def _bounds(self, asset: str) -> tuple[Any, Any] | None:
+        """(min, max) of the converted model in its own frame, or None when it was not fetched (logged once)."""
+        if asset not in self._model_bounds:
+            from pxr import Usd, UsdGeom  # type: ignore[import-not-found]
+
+            usd = asset_usd(asset)
+            bounds = None
+            if usd.exists():
+                stage = Usd.Stage.Open(str(usd))
+                rng = (
+                    UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render"])
+                    .ComputeWorldBound(stage.GetPseudoRoot())
+                    .ComputeAlignedRange()
+                )
+                if not rng.IsEmpty():
+                    bounds = (rng.GetMin(), rng.GetMax())
+            else:
+                log.warning("visual model %s missing at %s (python -m arms.sim.fetch_visuals); box", asset, usd)
+            self._model_bounds[asset] = bounds
+        return self._model_bounds[asset]
+
+    def _add_model(
+        self, path: str, asset: str, size: Vec3, *, bottom_z: float, tilt_deg: float = 0.0, fit: str = "box"
+    ) -> bool:
+        """Reference ``asset`` at ``path`` (an Xform in the parent's frame), stood up, turned to face local -y,
+        uniformly scaled to fit ``size`` (w, d, h; ``fit='height'`` matches h only), its bottom at ``bottom_z``."""
+        from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
+
+        bounds = self._bounds(asset)
+        src = load_visuals().assets.get(asset)
+        if bounds is None or src is None:
+            return False
+        lo, hi = bounds
+        c = (lo + hi) / 2
+        ex, ey, ez = (hi - lo)[0], (hi - lo)[1], (hi - lo)[2]
+        if src.up == "y":  # +90 deg about x: model +y -> +z, model +z -> -y
+            ex, ey, ez = ex, ez, ey
+        w, d, h = size
+        scale = h / ez if fit == "height" else min(w / ex, d / ey, h / ez)
+        xform = UsdGeom.Xform.Define(self.stage, path)
+        xformable = UsdGeom.Xformable(xform)
+        xformable.ClearXformOpOrder()
+        xformable.AddTranslateOp(opSuffix="place").Set(Gf.Vec3d(0.0, 0.0, bottom_z + ez * scale / 2))
+        xformable.AddRotateZOp(opSuffix="front").Set(src.yaw_deg)
+        xformable.AddRotateXOp(opSuffix="tilt").Set(-tilt_deg)
+        xformable.AddScaleOp().Set(Gf.Vec3f(scale, scale, scale))
+        if src.up == "y":
+            xformable.AddRotateXOp(opSuffix="up").Set(90.0)
+        xformable.AddTranslateOp(opSuffix="center").Set(Gf.Vec3d(-c[0], -c[1], -c[2]))
+        # Reference into a child: the model file's root carries its own transform (the converter's axis/unit fix),
+        # which the bounds above include and which local xform ops on the referencing prim would override.
+        geo = UsdGeom.Xform.Define(self.stage, f"{path}/geo")
+        geo.GetPrim().GetReferences().AddReference(str(asset_usd(asset)))
+        return True
+
+    def _model_unit(self, spec: SceneSpec | None, prim: PrimSpec) -> bool:
+        """Product unit drawn as its 3D model (+ display puck for phones) with a small price card in front."""
+        from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
+
+        w, d, h = prim.size
+        bottom = -h / 2
+        model_size = prim.model_dims or prim.size
+        if prim.display == "stand":
+            puck = UsdGeom.Cylinder.Define(self.stage, f"{prim.path}/stand")
+            puck.CreateRadiusAttr(0.045)
+            puck.CreateHeightAttr(0.018)
+            puck.CreateAxisAttr(UsdGeom.Tokens.z)
+            UsdGeom.XformCommonAPI(puck).SetTranslate(Gf.Vec3d(0.0, 0.01, bottom + 0.009))
+            self._bind(puck.GetPrim(), self._color_material("#f4f4f4"))
+            bottom += 0.018
+        if not self._add_model(
+            f"{prim.path}/model", prim.asset or "", model_size, bottom_z=bottom, tilt_deg=prim.tilt_deg
+        ):
+            if prim.display == "stand":
+                self.stage.RemovePrim(f"{prim.path}/stand")
+            return False
+        if spec is not None and prim.price_card:  # one price card per slot (front unit): name, price, barcode
+            cw = max(0.06, min(0.09, w * 1.2))
+            self._quad(
+                f"{prim.path}/label",
+                cw,
+                cw * 0.75,
+                # stands on the shelf / table beside the unit, in its front plane (inside the fixture edge)
+                (-(max(w / 2, 0.045) + cw / 2 + 0.01), -d / 2 + 0.005, -h / 2 + cw * 0.375),
+                self._label_material(spec, prim),
+            )
+        return True
+
+    def _define_dressing(self, spec: PrimSpec, path: str) -> Any:
+        """Decor model or sign (visuals.yaml): an Xform at ``spec.center`` turned by ``spec.yaw``."""
+        from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
+
+        root = UsdGeom.Xform.Define(self.stage, path)
+        xf = UsdGeom.XformCommonAPI(root)
+        xf.SetTranslate(Gf.Vec3d(*spec.center))
+        xf.SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(spec.yaw)))
+        w, d, h = spec.size
+        if spec.role == "sign":
+            board = self._geom(f"{path}/board", "box")
+            UsdGeom.XformCommonAPI(board).SetScale(Gf.Vec3f(w, d, h))
+            self._bind(board.GetPrim(), self._color_material(spec.color))
+            png = sign_png(
+                spec.label_text or "", color=spec.color, text_color=spec.text_color or "#ffffff", aspect=w / h
+            )
+            if png:
+                key = f"sign_{usd_name(spec.label_text or 'blank')}_{spec.color.lstrip('#')}_{int(w / h * 10)}"
+                if key not in self._materials:
+                    self._materials[key] = self._texture_material(key, png, emissive=0.6)
+                self._quad(f"{path}/face", w * 0.98, h * 0.94, (0.0, -d / 2 - 0.002, 0.0), self._materials[key])
+            return root
+        if not self._add_model(f"{path}/model", spec.asset or "", (w, d, h), bottom_z=-h / 2, fit="height"):
+            box = self._geom(f"{path}/box", "box")
+            UsdGeom.XformCommonAPI(box).SetScale(Gf.Vec3f(w, d, h))
+            self._bind(box.GetPrim(), self._color_material(spec.color))
+        return root
 
     # -- SimBackend ----------------------------------------------------------------------------------------------------
     def build_store(self, spec: SceneSpec, offset: Vec3) -> None:
