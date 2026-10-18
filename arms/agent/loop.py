@@ -974,6 +974,10 @@ class PlanLoop:
         run.last_verdicts[step.step_id] = v
         if v.passed:
             att.post = v
+            if isinstance(step, VerifyStep) and step.purpose == "audit":
+                # the audit passed on a second look: it closes the provisional lines exactly like a first-look pass
+                # (before, checkout stayed blocked with 'basket_audit_pending' after a passing reverify; vhagar run4)
+                run.state.provisional_open = False
             return await self._succeed(run, step, att)
         f = failure_from_verdict(
             v,

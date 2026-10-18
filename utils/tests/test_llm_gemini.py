@@ -402,7 +402,7 @@ async def test_complete_json_bad_request_falls_back_to_tool_forcing():
 
 
 async def test_other_api_errors_propagate():
-    raw = FakeGenai([ClientError(429, "quota")])
+    raw = FakeGenai([ClientError(401, "bad key")])
     with pytest.raises(ClientError):
         await llm.complete_json("x", Item, client=raw)
     with pytest.raises(llm.BadRequestError):
@@ -414,6 +414,13 @@ async def test_overloaded_model_falls_back_to_next_gemini_model():
     resp = await llm.GeminiMessages(raw).messages.create(model="gemini-3.8-flash", messages=[])
     assert [c["model"] for c in raw.calls] == ["gemini-3.8-flash", *llm.GEMINI_FALLBACK_MODELS[:2]]
     assert resp.content  # the third model's answer came back
+
+
+async def test_quota_error_falls_back_to_a_sibling_model():
+    raw = FakeGenai([ClientError(429, "RESOURCE_EXHAUSTED"), g_resp(g_text("ok"))])
+    resp = await llm.GeminiMessages(raw).messages.create(model="gemini-3.8-flash", messages=[])
+    assert [c["model"] for c in raw.calls] == ["gemini-3.8-flash", llm.GEMINI_FALLBACK_MODELS[0]]
+    assert resp.content
 
 
 async def test_fallback_gives_up_after_the_last_model():

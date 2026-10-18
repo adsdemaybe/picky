@@ -11,7 +11,9 @@ The vision model only reports what it sees (boxes, points, yes/no, text); CODE d
 - label_matches: OCR text contains ``expect_text`` (casefold) -> pass; text read but no match -> fail (evidence =
   the text); nothing read -> uncertain.
 - basket_delta / basket_contains: per-SKU box counts on the basket frame (before-count from the baseline's basket
-  frame, else the baseline's state counts at lower confidence).
+  frame, else the baseline's state counts at lower confidence). Occlusion-aware: fewer units than expected in a basket
+  that already holds others (delta), or a subset of the expected units with nothing foreign (contains), is uncertain
+  (the robot state then decides), never a 'missing item' fail; an empty basket or a foreign / extra unit still fails.
 - item_on_shelf: visible count >= min_count -> pass; fewer -> uncertain, never fail (back rows are hidden; the scan
   step is the out-of-stock authority). slot_visible: the slot's product in view -> pass, else uncertain.
 - shelf_tag_reads: OCR -> ``parse_price_cents`` == expected cents.
@@ -19,6 +21,7 @@ The vision model only reports what it sees (boxes, points, yes/no, text); CODE d
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -58,6 +61,10 @@ STATE_BEFORE_CONFIDENCE = 0.6
 TEXT_MATCH_CONFIDENCE = 0.85
 TEXT_MISMATCH_CONFIDENCE = 0.75
 MIN_TEXT_CHARS = 3
+LABEL_PASS_OVERLAP = 0.5
+"""label_matches passes when at least this share of the expected name's significant words is read."""
+LABEL_FAIL_MIN_TOKENS = 2
+"""label_matches fails only on a read with at least this many significant words and none of the expected ones."""
 MIN_EMPTY_CONFIDENCE = 0.5
 GENERIC_HELD_CLASS = "other grocery item"
 
@@ -206,13 +213,47 @@ def judge_gripper(
 
 
 # ---- label -----------------------------------------------------------------------------------------------------------
+_LABEL_FIELD_RE = re.compile(
+    r"\b(brand|product(?:\s+name)?|name|size|price|n/?a|none|unknown|not\s+visible)\b\s*:?", re.I
+)
+_UNIT_TOKENS = frozenset(
+    {"oz", "fl", "lb", "lbs", "ml", "ct", "pk", "pack", "each", "g", "kg", "l", "in", "inch", "sq", "ft"}
+)
+
+
+def _label_tokens(text: str) -> set[str]:
+    """Significant lowercase tokens of a label / product name (>= 3 chars, no units / pure numbers)."""
+    toks = re.findall(r"[a-z0-9%]+", text.casefold())
+    return {t for t in toks if len(t) >= 3 and t not in _UNIT_TOKENS and not t.isdigit()}
+
+
+def label_content(text: str) -> str:
+    """The OCR text without template field names: 'Brand:  Product Name:  Size:' (nothing read) -> ''."""
+    return re.sub(r"[\s:;,.|/-]+", " ", _LABEL_FIELD_RE.sub(" ", text)).strip()
+
+
+def label_overlap(expect: str, text: str) -> float:
+    """Share of the expected name's significant tokens found in the text (1.0 = all of them)."""
+    want = _label_tokens(expect)
+    if not want:
+        return 1.0 if expect.casefold() in text.casefold() else 0.0
+    return len(want & _label_tokens(text)) / len(want)
+
+
 def judge_label(path: str, atom: LabelMatches, ans: CameraAnswers, method: VerifyMethod) -> AtomVerdict | None:
+    """Pass when the expected name is in the text, or at least half of its significant words are; FAIL only on a
+    substantial read that shares none of them; anything in between (or a template-only / empty read) is uncertain.
+    A partial read ('MILD CHUNKY SALSA' without the size) or a cut-off label must not trigger a put-back."""
     if not answer_ok(ans.label) or ans.label is None:
         return None
     text = (ans.label.text or "").strip()
-    if len(text) < MIN_TEXT_CHARS:
+    content = label_content(text)
+    if len(re.sub(r"[^0-9A-Za-z]", "", content)) < MIN_TEXT_CHARS:
         return _av(path, atom, "uncertain", "label unreadable", 0.3, method)
-    ok = atom.expect_text.casefold() in text.casefold()
+    overlap = label_overlap(atom.expect_text, content)
+    ok = atom.expect_text.casefold() in text.casefold() or overlap >= LABEL_PASS_OVERLAP
+    if not ok and (overlap > 0 or len(_label_tokens(content)) < LABEL_FAIL_MIN_TOKENS):
+        return _av(path, atom, "uncertain", f"label partly read {text!r} (expected {atom.expect_text!r})", 0.4, method)
     ev = Evidence(
         kind="text", role="label", frame=ans.frame, text=text, sku=atom.sku if ok else None, matches_expectation=ok
     )
@@ -260,6 +301,11 @@ def judge_basket_delta(
     ok = d == atom.delta
     name = ans.names.get(atom.sku, atom.sku)
     reason = f"camera: basket {d:+d} {name} (want {atom.delta:+d}; {src})"
+    if not ok and 0 <= d < atom.delta and sum(before.values()) > 0:
+        # A unit dropped into a basket that already holds others can land under / behind them: the top-down camera
+        # seeing fewer is not evidence it is missing (measured on Isaac: '+0, want +1' on most places once the
+        # basket had 2+ units). Uncertain -> the robot state decides (combine_verdicts), never a false 'missing'.
+        return _av(path, atom, "uncertain", f"{reason}; may be hidden under the other units", 0.5, method, ev[:6])
     return _av(path, atom, "pass" if ok else "fail", reason, pass_c if ok else fail_c, method, ev[:6], {"delta": d})
 
 
@@ -273,6 +319,13 @@ def judge_basket_contains(
     if atom.exact:
         ok = ok and {s: n for s, n in have.items() if n} == {s: n for s, n in atom.counts.items() if n}
     reason = f"camera: basket {dict(sorted(have.items()))}"
+    seen, want = sum(have.values()), sum(atom.counts.values())
+    extra = any(n > atom.counts.get(s, 0) for s, n in have.items() if n) if atom.exact else False
+    if not ok and not extra and 0 < seen < want and all(have.get(s, 0) <= n for s, n in atom.counts.items()):
+        # Occlusion, not absence: a top-down camera sees the top layer of a full basket (Isaac taco trip: 2 of 11
+        # units visible at the audit). Seeing a subset with nothing foreign is uncertain -> the robot state decides.
+        why = f"{reason}: {seen} of {want} units visible (the rest are under / behind them)"
+        return _av(path, atom, "uncertain", why, 0.5, method, ev[:6], {"basket": have})
     conf = COUNT_PASS_CONFIDENCE if ok else COUNT_FAIL_CONFIDENCE
     return _av(path, atom, "pass" if ok else "fail", reason, conf, method, ev[:6], {"basket": have})
 

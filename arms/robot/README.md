@@ -47,9 +47,15 @@ the multiplexed `SimLink` with the 2D fake built in as the per-store fallback; f
   the WORLD, so the verifier sees the real outcome: `drop_after_lift` (claim, nothing attached), `grasp_miss`,
   `wrong_item` (2D fake: really grabs the neighbouring SKU, `put_back` returns it; Isaac: overlay), `place_miss`,
   `nav_blocked`, `vla_hang`, `policy_unavailable`, `disconnect`, `mislabel`. Same tick rule as above
-- [ ] **P2** T1 tier (`t1.py` `T1Adapter`): stub, unavailable unless configured (T0 takes over): `t1_sim` (simulated,
-  breaker demo), `perceptron_tool` (magic grasp aimed by the verifier's Perceptron grounding; needs
-  `PERCEPTRON_API_KEY`), `openpi_ws` (needs the 0.3.0 `RunSkillCmd` wire + an Isaac worker rebuild)
+- [ ] **P2** T1 tier (`t1.py` `T1Adapter`), unavailable unless configured (T0 takes over): `PICKY_VLA_T1=perceptron`
+  = THE T1 policy, Perceptron Mk1.5 calling Cartesian tools (`vla_mk15.py`: reach_point on the side / wrist image ->
+  ray to the planogram shelf face -> worker IK (`ArmIkCmd`) -> joint rows; set_gripper; move_ee; done), driven joint
+  by joint on Isaac (`vla_t1.py`, contracts 0.2.2 `ArmJointsCmd`, sticky grasp); `perceptron_vla` (robotics VLA
+  service, team key), `smolvla` (vhagar :8200), `scripted`; legacy `t1_sim`, `perceptron_tool`, `openpi_ws`
+- [x] **P1** Pictures while moving (fake + Isaac): front camera at `PICKY_VLA_NAV_CAPTURE_HZ` (2) while driving ->
+  blurred, retained evidence + running statuses; Perceptron look-out on the approach ('observing' status,
+  `PICKY_VLA_NAV_LOOK`); T1 side + wrist at `PICKY_VLA_T1_CAPTURE_HZ` (4) while the arm moves -> the robot's live
+  front / wrist view (`SimRobot.feed_policy_frames`), the last pair = the next observation
 - [ ] **P1** Retry `grasp_failed` once with any instance (attach-on-contact fallback)
 - [ ] **P1** Liveness: no `RobotState` for > 5 s → treat the store as lost (fall back to the fake)
 - [ ] **Later** physical SO-101 on a real rover + LeRobot / LeIsaac VLA (keep `contracts.common` consistent)
@@ -98,7 +104,9 @@ the multiplexed `SimLink` with the 2D fake built in as the per-store fallback; f
 | `vla.py` | `T0Vla`: the VlaService (streams, idempotency, deadlines, cancel, T0 motions, VLA-layer faults) |
 | `faults.py` | `InMemoryFaultInjector` + `FaultOverlay` (`PICKY_FAULTS`, `demo.fault`) |
 | `truth.py` | `RobotTruth`: the TruthSource (state + instances + planogram + overlay) |
-| `t1.py` | `T1Adapter` / `T1Config`: the T1 tier stub (simulated / perceptron_tool / openpi_ws) |
+| `t1.py` | `T1Adapter` / `T1Config`: the T1 tier (policy via PICKY_VLA_T1 / simulated / perceptron_tool / openpi_ws) |
+| `vla_t1.py` | `run_policy_grasp`: the T1 policy loop over `ArmJointsCmd` (pictures while moving, PolicyContext) |
+| `vla_mk15.py` | `Mk15Policy`: Perceptron Mk1.5 tool policy (+ `look` for navigation, per-trip call budget) |
 | `loopback.py` | `LoopbackSimLink`: a stand-in Isaac worker (hello, hosted, results, disconnect) over a `FakeRobot` |
 | `controllers/pure_pursuit.py` | Pure-Python follower (holonomic + diff-drive, final-yaw phase) |
 | `isaac/` | `RoverSO101` (lazy isaacsim/pxr imports), per-step actions (navigate, lift, magic grasp, place, unload) |
@@ -121,10 +129,14 @@ Loop (once the gateway wires it): `PICKY_EXEC_MODE=plan PICKY_FAULTS=drop_on_fir
 moment); other scenarios: `slow_vla`, `flaky_t1` (with `PICKY_VLA_TIERS=t0_scripted,t1_sim`), `isaac_drop`,
 `wrong_salsa` (2D fake), `foggy_basket`. T1 env: `PICKY_VLA_TIERS` (`t1_pretrained` / `t1_sim`),
 `PICKY_VLA_POLICY_PROTOCOL` (`openpi_ws` default | `perceptron_tool`), `PICKY_VLA_POLICY_URL`, `PICKY_VLA_T1_MODEL`,
-`PERCEPTRON_API_KEY`. All are read through `utils.config.settings` with `getattr` defaults, so they take effect once
+`PERCEPTRON_API_KEY`; learned / Mk1.5 T1: `PICKY_VLA_T1` (perceptron | perceptron_vla | smolvla | scripted | off),
+`PICKY_VLA_T1_TIMEOUT_S` / `_MAX_CHUNKS` / `_EXEC_STEPS` / `_HOME_DEG` / `_INSTRUCTION` / `_CAPTURE_HZ`,
+`PICKY_PERCEPTRON_CALL_BUDGET`, `PICKY_VLA_MK15_TIMEOUT_S`; pictures while driving: `PICKY_VLA_NAV_CAPTURE_HZ`,
+`PICKY_VLA_NAV_LOOK` (isaac | always | off), `PICKY_VLA_NAV_LOOK_M`. All are read through `utils.config.settings` with `getattr` defaults, so they take effect once
 the utils step adds the Settings fields. Fallback: drop `vla` / `robot` from `PICKY_REAL_ARMS`, or
 `PICKY_EXEC_MODE=direct` (the exact v0.2 brain path).
 Isaac side: `make sim` on the GPU box (see arms/sim/README.md); `PICKY_SO101_DIR` = SO-ARM100 checkout for the URDF.
+Perceptron robotics VLA (`PICKY_VLA_T1=perceptron_vla`): the client, the one-command pipeline (`python -m arms.robot.perceptron_vla pipeline`), key setup and the in-sim test are in `docs/vla-loop/perceptron-vla.md` ("Runbook"); it needs the team key `PERCEPTRON_ROBOTICS_API_KEY`, not the Mk1.5 `PERCEPTRON_API_KEY`.
 
 ## Contributing to this arm
 

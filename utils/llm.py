@@ -715,10 +715,11 @@ def _is_bad_request(exc: Exception) -> bool:
     return getattr(exc, "code", None) == 400 or getattr(exc, "status_code", None) == 400
 
 
-# Tried in order when the requested Gemini model is overloaded (503) or unknown/retired (404). Quota errors (429)
-# still propagate: another model on the same key rarely helps and callers already fall back to their fakes.
+# Tried in order when the requested Gemini model is overloaded (503), unknown/retired (404) or out of quota (429:
+# Gemini API rate limits are per model, so a sibling model usually still answers; measured on vhagar 2026-10-18, the
+# planner's first call hit 429 RESOURCE_EXHAUSTED on gemini-3.8-flash while the request interpreter had just used it).
 GEMINI_FALLBACK_MODELS: tuple[str, ...] = ("gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest")
-_GEMINI_FALLBACK_CODES = frozenset({404, 500, 503})
+_GEMINI_FALLBACK_CODES = frozenset({404, 429, 500, 503})
 
 
 def _status_code(exc: Exception) -> int | None:
@@ -733,7 +734,7 @@ class GeminiMessages:
     """Anthropic-Messages-shaped facade over a ``google.genai.Client``: ``await c.messages.create(**kwargs)``
     returns an :class:`LLMResponse`. Translation: :func:`to_gemini_request` / :func:`from_gemini_response`.
     A 400 from the API is re-raised as :class:`BadRequestError` (original as ``__cause__``); a 503/404/500 on the
-    requested model retries the call on :data:`GEMINI_FALLBACK_MODELS` before raising."""
+    requested model retries the call on :data:`GEMINI_FALLBACK_MODELS` before raising (429 too)."""
 
     provider: Provider = "gemini"
 

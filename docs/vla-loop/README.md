@@ -6,6 +6,8 @@
 > provider decision since this was written: the planner / brain use **Gemini** via `utils.llm` (Claude optional with
 > `PICKY_LLM_PROVIDER=anthropic`); read "Claude planner" below as "LLM planner (Gemini)".
 
+> **Learned T1 grasps (branch `feat/perceptron-vla`, contracts 0.2.2 `ArmJointsCmd`):** [`perceptron-vla.md`](perceptron-vla.md) covers the Perceptron robotics VLA client, the one-command pipeline, key setup and the in-sim test runbook. [`dataset.md`](dataset.md) describes the sim LeRobot dataset `picky_shelf_pick_v1`, and `arms/sim/DEPLOY.md` §8–9 the Isaac test stack with its measured runs.
+
 The project lead's brief: "the LLM takes the natural language input, and then it splits into steps (movement to the
 actual location + actually grabbing the stuff from the shelf) which these instructions get sent to the vla api. tie
 in a verifier with a fake camera api". This package is that API, plus deterministic fakes, the orchestrator and tests.

@@ -2053,7 +2053,7 @@ catalog = [
     { name = "duckdb" },
     { name = "pgvector" },
     { name = "psycopg", extra = ["binary"] },
-    { name = "sqlalchemy" },
+    { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 messaging = [
     { name = "photonhq-api" },
@@ -2128,7 +2128,7 @@ requires-dist = [
     { name = "scikit-image", marker = "extra == 'routing'", specifier = ">=0.24" },
     { name = "scipy", marker = "extra == 'routing'", specifier = ">=1.13" },
     { name = "sentence-transformers", marker = "extra == 'recommender'", specifier = ">=6.1" },
-    { name = "sqlalchemy", marker = "extra == 'catalog'", specifier = ">=2.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], marker = "extra == 'catalog'", specifier = ">=2.0" },
     { name = "stripe", marker = "extra == 'trust'", specifier = ">=10.0" },
     { name = "timm", marker = "extra == 'perception'", specifier = ">=1.0.15" },
     { name = "torch", marker = "extra == 'perception'" },
@@ -3380,6 +3380,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/dc/28/f44c4524ce8a68935bd6f23ee801165072fb8c1e477fc9855efd9eaa2360/sqlalchemy-2.1.5-cp315-cp315t-win_amd64.whl", hash = "sha256:173054351d863ddada188284e309e87a9f030132c8d534e05458971ff061aa1e", size = 2507526, upload-time = "2026-10-16T22:51:56.262Z" },
     { url = "https://files.pythonhosted.org/packages/b1/fc/e90c91f6c2709a431f9b75e41bd31216337859411359f4a4fc2615c989e3/sqlalchemy-2.1.5-cp315-cp315t-win_arm64.whl", hash = "sha256:22c8d0873168a54f614e381559ea83d547b2cc5488b95b049bdc92667586bd5f", size = 2426204, upload-time = "2026-10-16T22:32:56.011Z" },
     { url = "https://files.pythonhosted.org/packages/de/e9/61176e4753f74ab5f6e72a56314ee654d25c31e6fc98c99060442998cccb/sqlalchemy-2.1.5-py3-none-any.whl", hash = "sha256:2f77b77b716f005b2dc3cc059d56df6a919bfb5b439e4149890a9df6c36be9e3", size = 2060214, upload-time = "2026-10-16T22:43:30.801Z" },
+]
+
+[package.optional-dependencies]
+asyncio = [
+    { name = "greenlet" },
 ]
 
 [[package]]

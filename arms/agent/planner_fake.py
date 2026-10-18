@@ -62,6 +62,19 @@ from contracts.planogram import Planogram
 from contracts.policy import ReplanRequest
 from contracts.tools import parse_brain_tool_input
 
+UNLABELED_CATEGORIES = frozenset({"produce"})
+"""Loose produce carries no printed label (the Isaac per-item models have none either): no label_matches atom."""
+
+
+def label_text(product: Any) -> str | None:
+    """Text a grasp's ``label_matches`` expects on the held item: the printed label (SimAsset.label_text, else the
+    product name); None for unlabeled items (loose produce) so the verifier never OCRs an avocado."""
+    if product is None or str(getattr(product, "category", "")).lower() in UNLABELED_CATEGORIES:
+        return None
+    asset = getattr(product, "asset", None)
+    return getattr(asset, "label_text", None) or product.name
+
+
 _NUM = {
     "one": 1,
     "two": 2,
@@ -461,7 +474,7 @@ class ScriptedPlanner:
                     sku=it.sku,
                     slot_id=it.slot_id,
                     approach_pose=loc.approach_pose,
-                    expect_text=p.name if p else None,
+                    expect_text=label_text(p),
                 )
                 steps.append(
                     GraspStep(
@@ -781,7 +794,7 @@ class ScriptedPlanner:
                     sku=inp.sku,
                     slot_id=inp.slot_id,
                     approach_pose=loc.approach_pose,
-                    expect_text=p.name if p else None,
+                    expect_text=label_text(p),
                 )
                 out.append(
                     GraspStep(

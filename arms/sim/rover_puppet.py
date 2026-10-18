@@ -449,3 +449,164 @@ def names_ok(names: Iterable[str]) -> bool:
     """True when every SO-101 link the puppet poses is present (else the backend keeps the primitive arm)."""
     have = set(names)
     return all(n in have for n in ARM_LINKS)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# Joint-level kinematics (learned-policy arm control, contracts 0.2.2 ArmJointsCmd)
+# --------------------------------------------------------------------------------------------------------------------
+JOINT_ORDER: tuple[str, ...] = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
+"""= contracts.skill_server.SO101_JOINT_NAMES (kept stdlib-only here): the order of every joint vector on the wire."""
+
+
+def q_rad(q_deg: Sequence[float]) -> dict[str, float]:
+    """6 joint degrees (JOINT_ORDER) -> the radians dict ``ArmChain.fk`` takes."""
+    return {n: math.radians(float(v)) for n, v in zip(JOINT_ORDER, q_deg, strict=False)}
+
+
+def q_deg(q: Mapping[str, float]) -> list[float]:
+    """Radians dict -> 6 joint degrees in JOINT_ORDER (missing joints = 0)."""
+    return [math.degrees(q.get(n, 0.0)) for n in JOINT_ORDER]
+
+
+@dataclass
+class ArmKinematics:
+    """The SO-101 of one rover model, in the ROBOT frame (x forward, y left, z up; the base center on the floor).
+
+    Built by the Isaac backend from the rover USD (``chain`` read from the stage, ``model`` = robot <- /LeKiwi,
+    ``lift_mode='offset'``: lift travel = lift height - ``z_ref``, the scripted pose comes from ``table``), or
+    ``synthetic_kinematics()`` for primitive rovers / tests (``lift_mode='absolute'``: the shoulder-lift joint sits AT
+    the lift height). The worker core uses it for joint mode: link poses (visual puppet), the TCP (sticky grasp) and
+    the policy cameras (``arms.sim.arm_joints``; ``wrist_cam`` caches the wrist camera mount in the gripper frame)."""
+
+    chain: ArmChain
+    model: Mat = IDENTITY
+    dx: float = 0.0
+    z_ref: float = 0.0
+    travel_m: float = LIFT_TRAVEL_M
+    table: ReachTable | None = None
+    lift_mode: str = "offset"
+    wrist_cam: Mat | None = None
+    stow_seed: dict[str, float] = field(default_factory=dict)
+    _stow_cache: dict[tuple[float, float, bool], dict[str, float]] = field(default_factory=dict, repr=False)
+
+    # ---- frames ----------------------------------------------------------------------------------------------------
+    def travel(self, lift_height_m: float) -> float:
+        """Carriage travel of the Lift group (visuals) for this lift height."""
+        if self.lift_mode == "absolute":
+            return lift_height_m
+        return lift_offset(lift_height_m, self.z_ref, self.travel_m)
+
+    def base_at_travel(self, travel_m: float) -> Mat:
+        """Model-frame matrix left-multiplied onto the arm (``ArmChain.fk(base=...)``) for a carriage travel."""
+        return robot_delta_in_model(self.model, (self.dx, 0.0, travel_m))
+
+    def base(self, lift_height_m: float) -> Mat:
+        return self.base_at_travel(self.travel(lift_height_m))
+
+    def ref_height(self, lift_height_m: float) -> float:
+        """Robot-frame height of the arm's reference point (the scripted level TCP) for this lift height: = the lift
+        height inside the travel range (the policy side camera rides it)."""
+        if self.lift_mode == "absolute":
+            return lift_height_m
+        return self.z_ref + self.travel(lift_height_m)
+
+    def link_poses(self, lift_height_m: float, q: Mapping[str, float]) -> dict[str, Mat]:
+        """Link poses in the MODEL frame (what the puppet's xformOps take) for joint radians ``q``."""
+        return self.chain.fk(q, self.base(lift_height_m))
+
+    def robot_poses(self, lift_height_m: float, q: Mapping[str, float]) -> dict[str, Mat]:
+        """Link poses in the ROBOT frame."""
+        return {k: mat_mul(self.model, v) for k, v in self.link_poses(lift_height_m, q).items()}
+
+    def tcp(self, lift_height_m: float, q: Mapping[str, float]) -> Vec3:
+        """Jaw center (TCP) in the robot frame."""
+        return apply(self.model, self.chain.tcp_point(self.link_poses(lift_height_m, q)))
+
+    def clamp_deg(self, q_deg_in: Sequence[float]) -> list[float]:
+        """Joint degrees clamped to the chain's joint limits (what fk will actually pose)."""
+        out = []
+        for n, v in zip(JOINT_ORDER, q_deg_in, strict=False):
+            j = self.chain.joint(n)
+            out.append(math.degrees(j.clamp(math.radians(float(v)))) if j is not None else float(v))
+        return out
+
+    # ---- the scripted (T0) pose ------------------------------------------------------------------------------------
+    def scripted_q(self, lift_height_m: float, arm_ext_m: float, closed: bool) -> dict[str, float]:
+        """Joint radians of the scripted rig for (lift, arm extension, jaws): the puppet pose of the magic grasp, so
+        entering joint mode starts exactly where the scripted arm stands (no visual jump)."""
+        grip = math.radians(GRIPPER_CLOSED_DEG if closed else GRIPPER_OPEN_DEG)
+        if self.table is not None:
+            drop = max(0.0, self.z_ref - lift_height_m)
+            q = self.table.config(arm_ext_m + (TCP_LEAD_M if closed else 0.0), drop)
+            q["wrist_roll"] = math.radians(WRIST_ROLL_DEG)
+            q["gripper"] = grip
+            return q
+        key = (round(lift_height_m, 3), round(arm_ext_m, 3), closed)
+        if key not in self._stow_cache:
+            # no reach table (synthetic arm): IK for a level TCP at the rig's gripper point
+            target_robot = (ARM_MOUNT_X_M_RIG + arm_ext_m, 0.0, lift_height_m)
+            target = apply(inverse(self.model), target_robot)
+            res = solve_reach(self.chain, target, q0=dict(self.stow_seed), base=self.base(lift_height_m))
+            self._stow_cache[key] = res.q
+        q = dict(self._stow_cache[key])
+        q["gripper"] = grip
+        return q
+
+
+ARM_MOUNT_X_M_RIG = 0.12
+"""= contracts.common.ARM_MOUNT_X_M (the rig's gripper point is ARM_MOUNT_X_M + arm extension ahead of the base)."""
+SYNTH_UPPER_ARM_M = 0.116
+SYNTH_FOREARM_M = 0.135
+SYNTH_GRIPPER_M = 0.10
+SYNTH_PAN_BASE_M = 0.06
+SYNTH_LIMITS_DEG: dict[str, tuple[float, float]] = {
+    "shoulder_pan": (-110.0, 110.0),
+    "shoulder_lift": (-100.0, 100.0),
+    "elbow_flex": (-100.0, 90.0),
+    "wrist_flex": (-95.0, 95.0),
+    "wrist_roll": (-160.0, 160.0),
+    "gripper": (-10.0, 100.0),
+}
+"""LeIsaac's SO-101 USD joint limits (degrees), reused for the synthetic arm."""
+
+
+def synthetic_kinematics() -> ArmKinematics:
+    """An SO-101-sized arm for primitive rovers, the sketch / null backends and tests (NOT the rover USD's joint
+    conventions). Zero pose: upper arm vertical, forearm + gripper forward (+x); pan about z, the three flex joints
+    about y (positive = forward / down), roll about x. The shoulder-lift joint sits at the lift height, the pan axis at
+    ``ARM_MOUNT_X_M + ARM_PAN_FORWARD_M``."""
+    lo, up = SYNTH_UPPER_ARM_M, SYNTH_FOREARM_M
+    rest = {
+        "shoulder": translation(0.0, 0.0, -SYNTH_PAN_BASE_M),
+        "upper_arm": IDENTITY,
+        "lower_arm": translation(0.0, 0.0, lo),
+        "wrist": translation(up, 0.0, lo),
+        "gripper": translation(up, 0.0, lo),
+        "jaw": translation(up + 0.02, -0.01, lo),
+    }
+
+    def j(name: str, parent: str, child: str, axis: str) -> ArmJoint:
+        lo_deg, hi_deg = SYNTH_LIMITS_DEG[name]
+        return ArmJoint(name=name, parent=parent, child=child, axis=axis, lower_deg=lo_deg, upper_deg=hi_deg)
+
+    chain = ArmChain(
+        root="shoulder",
+        rest=rest,
+        joints=[
+            j("shoulder_lift", "shoulder", "upper_arm", "Y"),
+            j("elbow_flex", "upper_arm", "lower_arm", "Y"),
+            j("wrist_flex", "lower_arm", "wrist", "Y"),
+            j("wrist_roll", "wrist", "gripper", "X"),
+            j("gripper", "gripper", "jaw", "Z"),
+        ],
+        root_joint=j("shoulder_pan", "shoulder", "shoulder", "Z"),
+        tcp_link="gripper",
+        tcp=(SYNTH_GRIPPER_M, 0.0, 0.0),
+    )
+    return ArmKinematics(
+        chain=chain,
+        model=IDENTITY,
+        dx=ARM_MOUNT_X_M_RIG + ARM_PAN_FORWARD_M,
+        lift_mode="absolute",
+        stow_seed={"shoulder_lift": math.radians(-20.0), "elbow_flex": math.radians(60.0)},
+    )

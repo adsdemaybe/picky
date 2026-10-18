@@ -22,6 +22,10 @@ Wire semantics implemented here (contracts/sim.py is the spec):
   (looks down into the basket), '<store>.ceiling-<n>'. Scan frames list EVERY non-basket unit of the slot (bbox None
   when off-image); captures list the visible units; stream frames carry no instances. Frames are RAW
   (``blurred=False``): perception blurs faces in the gateway.
+- Joint-level arm control (contracts 0.2.2 ``ArmJointsCmd``, capability 'arm_joints'): learned policies drive the 6
+  SO-101 joints row by row (``arms.sim.arm_joints``: policy side / wrist cameras + the honest "sticky grasp" physics
+  substitute; kinematics from the rover USD via ``backend.arm_kinematics`` or ``rover_puppet.synthetic_kinematics``).
+  Any other motion command takes the arm back to the scripted rig first.
 - Optional visuals (app.py wires them on the GPU host): ``assets`` (``arms.sim.assets.SkuAssets``, per-item grocery
   models: unit dims + render mode per SKU, also on restock) and ``rover_usd`` (LeKiwi + SO-101 visual puppet). Neither
   changes ids, counts or any wire message.
@@ -35,6 +39,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from arms.sim import arm_joints as aj
 from arms.sim.assets import SkuAssets
 from arms.sim.geometry import (
     ARM_FULL_EXT_M,
@@ -49,6 +54,15 @@ from arms.sim.geometry import (
     robot_camera_pose,
 )
 from arms.sim.navigation import PurePursuit
+from arms.sim.rover_puppet import (
+    ArmKinematics,
+    apply,
+    inverse,
+    q_deg,
+    q_rad,
+    solve_reach,
+    synthetic_kinematics,
+)
 from arms.sim.scene_spec import (
     BASKET_OFFSET_M,
     PrimSpec,
@@ -88,10 +102,16 @@ from contracts.common import (
 )
 from contracts.planogram import Planogram, RobotSpec, Slot, StoreCameraSpec
 from contracts.sim import (
+    ARM_IK_CAPABILITY,
+    ARM_JOINTS_CAPABILITY,
+    IK_TOLERANCE_M,
+    ArmJointState,
     CameraFrame,
     CommandResult,
+    IkSolution,
     InstanceInfo,
     ItemInstance,
+    PolicyFrame,
     RobotState,
     RobotStatus,
     SimErrorCode,
@@ -135,7 +155,19 @@ CAPABILITIES = [
     "camera:wrist",
     "camera:basket",
     "camera:ceiling",
+    ARM_JOINTS_CAPABILITY,
+    ARM_IK_CAPABILITY,
+    "camera:policy_side",
+    "camera:policy_wrist",
 ]
+IK_SEEDS_DEG: tuple[tuple[float, float, float, float], ...] = (
+    (0.0, -20.0, 60.0, -40.0),
+    (0.0, 20.0, 20.0, -40.0),
+    (0.0, 50.0, -20.0, -30.0),
+    (0.0, -60.0, 80.0, 0.0),
+)
+"""Fallback IK seeds (shoulder_pan, shoulder_lift, elbow_flex, wrist_flex) after the current joints / the scripted
+reach for the target's extension: damped least squares can stall on a joint limit from a single seed."""
 
 # 1x1 grey baseline JPEG: last-resort placeholder when Pillow is missing.
 PLACEHOLDER_JPEG = base64.b64decode(
@@ -165,6 +197,9 @@ class SimBackend(Protocol):
     def set_robot_pose(self, robot_id: str, pose: Pose2D, lift_height_m: float, arm_ext_m: float) -> None: ...
 
     # optional: ``set_robot_gripper(robot_id, closed)`` (visual jaws; called before each set_robot_pose)
+    # optional (joint mode, contracts 0.2.2): ``arm_kinematics(robot_id) -> ArmKinematics | None`` (the rover model's
+    # SO-101; None = primitive arm) and ``set_robot_joints(robot_id, pose, lift_height_m, q_deg) -> bool`` (pose the
+    # arm from 6 joint degrees; False = not handled, the core then poses the primitive rig from the TCP reach)
 
     def add_instance(self, prim: PrimSpec) -> None: ...
 
@@ -209,6 +244,7 @@ class NullBackend:
         self.yaws: dict[tuple[str, str], float] = {}
         self.renders: list[tuple[str, str]] = []
         self.grippers: dict[str, bool] = {}
+        self.joints: dict[str, list[float]] = {}
 
     def build_store(self, spec: SceneSpec, offset: Vec3) -> None:
         sid = spec.store_id
@@ -237,6 +273,11 @@ class NullBackend:
 
     def set_robot_gripper(self, robot_id: str, closed: bool) -> None:
         self.grippers[robot_id] = closed
+
+    def set_robot_joints(self, robot_id: str, pose: Pose2D, lift_height_m: float, q_deg: list[float]) -> bool:
+        """Records the joint pose; False = no puppet here (the core also poses the primitive rig)."""
+        self.joints[robot_id] = list(q_deg)
+        return False
 
     def add_instance(self, prim: PrimSpec) -> None:
         key = (prim.store_id or "", prim.instance_id or "")
@@ -289,6 +330,17 @@ class StoreScene:
         return self.spec.item_dims.get(iid, (0.08, 0.08, 0.15))
 
 
+@dataclass
+class _Sticky:
+    """Sticky-grasp attachment: the unit's center + yaw in the gripper link frame, and where it was grasped."""
+
+    iid: str
+    local: Vec3
+    yaw_off: float
+    origin: Point3
+    origin_yaw: float
+
+
 class Rover:
     """Live state of one hosted robot."""
 
@@ -307,6 +359,10 @@ class Rover:
         self.blocked_s = 0.0
         self.last_key: tuple[Any, ...] | None = None
         self.last_t = -1e9
+        self.arm_q: list[float] | None = None
+        """Joint mode (ArmJointsCmd): the 6 SO-101 joint angles, USD degrees; None = the scripted rig owns the arm."""
+        self.sticky: _Sticky | None = None
+        """The unit the sticky grasp holds in joint mode (rigidly attached to the gripper link)."""
 
     @property
     def robot_id(self) -> str:
@@ -550,12 +606,82 @@ class _Unload(_Action):
         return self.core.result(self.cmd, ok=True, rover=r, instances=out)
 
 
+class _ArmJoints(_Action):
+    """Joint-level SO-101 control (contracts 0.2.2 ``ArmJointsCmd``): move the lift if asked (scripted pose held),
+    enter joint mode, apply the rows at ``hz`` (sticky grasp checked after EVERY row, even when a slow tick applies
+    several), render the policy cameras after the last row (or after every row), leave joint mode on ``end``."""
+
+    status = RobotStatus.PICKING
+
+    def __init__(self, core: "WorkerCore", rover: Rover, cmd: Any) -> None:
+        super().__init__(core, rover, cmd)
+        core.scene_of(rover)
+        if cmd.targets and rover.battery < BATTERY_MOTION_MIN_PCT:
+            raise _Fail("battery_low", f"battery {rover.battery:.1f}%: send it to its dock")
+        self.lift_target = clamp_lift(cmd.lift_height_m) if cmd.lift_height_m is not None else rover.lift
+        self.rows: list[list[float]] = [list(r) for r in cmd.targets]
+        self.capture: list[str] = list(dict.fromkeys(cmd.capture))
+        self.i = 0
+        self.t = 0.0
+        self.started = False
+        self.events: list[str] = []
+        self.frames: list[PolicyFrame] = []
+
+    def step(self, dt: float) -> CommandResult | None:
+        self.elapsed += dt
+        r, core, cmd = self.rover, self.core, self.cmd
+        if abs(r.lift - self.lift_target) > 1e-6:
+            self._approach_lift(self.lift_target, dt)
+            core.sync_carried(r)
+            return None
+        if not self.started:
+            self.started = True
+            if r.arm_q is None:
+                core.enter_joint_mode(r)
+            if cmd.capture_each_step and self.capture:
+                self.frames += core.render_policy(r, self.capture, step=0)
+        if self.rows:
+            self.t += dt
+            due = min(len(self.rows), int(self.t * cmd.hz + 1e-9) + 1)
+            if cmd.capture_each_step:
+                due = min(due, self.i + 1)  # one row per tick: a frame after each (dataset recording)
+            every = 0 if cmd.capture_each_step else int(getattr(cmd, "capture_every", 0) or 0)
+            mid_frame = False
+            while self.i < due:
+                core.apply_joint_row(r, self.rows[self.i], self.events)
+                self.i += 1
+                if cmd.capture_each_step and self.capture:
+                    self.frames += core.render_policy(r, self.capture, step=self.i)
+                elif every and self.i % every == 0 and self.i < len(self.rows):
+                    mid_frame = True
+            core.sync_carried(r)
+            if mid_frame and self.capture:  # live feed while the arm moves (one render per tick at most)
+                fresh = core.render_policy(r, self.capture, step=self.i)
+                self.frames += fresh
+                core.stream_policy_frames(r, fresh)
+            if self.i < len(self.rows) or self.t + 1e-9 < len(self.rows) / cmd.hz:
+                return None
+        if not cmd.capture_each_step and self.capture:
+            self.frames += core.render_policy(r, self.capture, step=self.i)
+        if cmd.end:
+            core.leave_joint_mode(r)
+        return core.result(
+            cmd,
+            ok=True,
+            rover=r,
+            arm=core.arm_state(r, self.i, self.events),
+            policy_frames=self.frames,
+            instance_id=r.holding,
+        )
+
+
 _ACTIONS: dict[str, type[_Action]] = {
     "navigate": _Navigate,
     "scan": _Scan,
     "pick": _Pick,
     "place_in_basket": _Place,
     "unload_basket": _Unload,
+    "arm_joints": _ArmJoints,
 }
 
 SceneLoader = Callable[[str], tuple[Planogram, list[Product]]]
@@ -612,6 +738,7 @@ class WorkerCore:
         """camera_id -> next due time (monotonic clock)."""
         self.stream_fps = DEFAULT_STREAM_FPS
         self._frame_n = 0
+        self._synthetic_kin: ArmKinematics | None = None
 
     # ---- hosting ---------------------------------------------------------------------------------------------------
     def load_store(
@@ -730,6 +857,7 @@ class WorkerCore:
             del self.rovers[rover.robot_id]
             return self._spawn(robot)
         rover.basket, rover.holding, rover.error = [], None, None
+        rover.arm_q, rover.sticky = None, None
         rover.battery = rover.robot.battery_pct
         rover.lift, rover.arm_ext = LIFT_REST_M, ARM_STOW_EXT_M
         self.set_pose(rover, rover.robot.dock)
@@ -821,7 +949,8 @@ class WorkerCore:
     # ---- robot + instances -----------------------------------------------------------------------------------------
     def set_pose(self, rover: Rover, pose: Pose2D) -> None:
         rover.pose = pose
-        self.backend.set_robot_pose(rover.robot_id, pose, rover.lift, rover.arm_ext)
+        if rover.arm_q is None:
+            self.backend.set_robot_pose(rover.robot_id, pose, rover.lift, rover.arm_ext)
         self.sync_carried(rover)
 
     def move_instance(self, scene: StoreScene, iid: str, position: Point3, yaw: float | None = None) -> None:
@@ -833,11 +962,26 @@ class WorkerCore:
         scene = self.stores.get(rover.store_id)
         if scene is None:
             return
+        yaw = rover.pose.theta + math.pi / 2
+        if rover.arm_q is not None:
+            self._pose_joints(rover)
+            if rover.holding is not None and rover.sticky is not None and rover.holding in scene.instances:
+                g = aj.gripper_store_matrix(self.kinematics(rover), rover.pose, rover.lift, q_rad(rover.arm_q))
+                c = apply(g, rover.sticky.local)
+                self.move_instance(
+                    scene,
+                    rover.holding,
+                    Point3(x=c[0], y=c[1], z=c[2]),
+                    math.atan2(g[1][0], g[0][0]) + rover.sticky.yaw_off,
+                )
+            for k, iid in enumerate(rover.basket):
+                if iid in scene.instances:
+                    self.move_instance(scene, iid, basket_drop_position(rover.pose, k, scene.item_dims(iid)), yaw)
+            return
         gripper = getattr(self.backend, "set_robot_gripper", None)
         if gripper is not None:  # jaws open while reaching for a unit, closed when holding or stowed
             gripper(rover.robot_id, rover.holding is not None or rover.arm_ext <= ARM_STOW_EXT_M + 1e-6)
         self.backend.set_robot_pose(rover.robot_id, rover.pose, rover.lift, rover.arm_ext)
-        yaw = rover.pose.theta + math.pi / 2
         if rover.holding is not None and rover.holding in scene.instances:
             dims = scene.item_dims(rover.holding)
             # held: label (item -y) toward the robot, as it faced the robot on the shelf, so the wrist camera reads it
@@ -847,6 +991,276 @@ class WorkerCore:
         for k, iid in enumerate(rover.basket):
             if iid in scene.instances:
                 self.move_instance(scene, iid, basket_drop_position(rover.pose, k, scene.item_dims(iid)), yaw)
+
+    # ---- joint mode (contracts 0.2.2 ArmJointsCmd) ------------------------------------------------------------------
+    def kinematics(self, rover: Rover) -> ArmKinematics:
+        """The rover's SO-101: the backend's (rover USD) when it has one, else the synthetic SO-101-sized arm."""
+        get = getattr(self.backend, "arm_kinematics", None)
+        kin = get(rover.robot_id) if get is not None else None
+        if kin is None:
+            if self._synthetic_kin is None:
+                self._synthetic_kin = synthetic_kinematics()
+            kin = self._synthetic_kin
+        return kin
+
+    def _scripted_q(self, rover: Rover) -> dict[str, float]:
+        closed = rover.holding is not None or rover.arm_ext <= ARM_STOW_EXT_M + 1e-6
+        return self.kinematics(rover).scripted_q(rover.lift, rover.arm_ext, closed)
+
+    def enter_joint_mode(self, rover: Rover) -> None:
+        """Joint mode starts from the scripted rig's current pose (no jump); a unit already held rides along."""
+        if rover.arm_q is not None:
+            return
+        kin = self.kinematics(rover)
+        rover.arm_q = kin.clamp_deg(q_deg(self._scripted_q(rover)))
+        scene = self.stores.get(rover.store_id)
+        if rover.holding is not None and scene is not None and rover.holding in scene.instances:
+            self._stick(rover, scene, scene.instances[rover.holding], self._gripper_matrix(rover))
+        self.emit(
+            SimLog(
+                level="info",
+                robot_id=rover.robot_id,
+                message=f"joint mode on at lift {rover.lift:.2f} m (q = {[round(v, 1) for v in rover.arm_q]} deg)",
+            )
+        )
+        self.sync_carried(rover)
+
+    def leave_joint_mode(self, rover: Rover) -> None:
+        """The scripted rig takes the arm back (stowed); a held unit stays held (the magic grasp's held pose)."""
+        if rover.arm_q is None:
+            return
+        rover.arm_q, rover.sticky = None, None
+        rover.arm_ext = ARM_STOW_EXT_M
+        self.sync_carried(rover)
+
+    def _gripper_matrix(self, rover: Rover) -> Any:
+        assert rover.arm_q is not None
+        return aj.gripper_store_matrix(self.kinematics(rover), rover.pose, rover.lift, q_rad(rover.arm_q))
+
+    def _pose_joints(self, rover: Rover) -> None:
+        assert rover.arm_q is not None
+        setj = getattr(self.backend, "set_robot_joints", None)
+        if setj is not None and setj(rover.robot_id, rover.pose, rover.lift, list(rover.arm_q)):
+            return
+        # primitive rig: the box arm follows the TCP's horizontal reach, the jaws the gripper joint
+        tcp = self.kinematics(rover).tcp(rover.lift, q_rad(rover.arm_q))
+        ext = max(ARM_STOW_EXT_M * 0.5, min(ARM_FULL_EXT_M, math.hypot(tcp[0] - ARM_MOUNT_X_M, tcp[1])))
+        gripper = getattr(self.backend, "set_robot_gripper", None)
+        if gripper is not None:
+            gripper(rover.robot_id, rover.arm_q[5] < aj.GRIPPER_CLOSE_DEG)
+        self.backend.set_robot_pose(rover.robot_id, rover.pose, rover.lift, ext)
+
+    def apply_joint_row(self, rover: Rover, row: list[float], events: list[str]) -> None:
+        """One joint target: clamp, pose, then the sticky grasp (attach on closing, release on opening)."""
+        kin = self.kinematics(rover)
+        prev = rover.arm_q[5] if rover.arm_q is not None else float(row[5])
+        rover.arm_q = kin.clamp_deg(row)
+        now = rover.arm_q[5]
+        if rover.holding is None and aj.crossed_closed(prev, now):
+            if not self._attach(rover, events):
+                events.append("close_empty")
+        elif rover.holding is not None and rover.sticky is not None and aj.crossed_open(prev, now):
+            self._release(rover, events)
+        elif rover.sticky is not None:
+            self.sync_carried(rover)
+
+    def _stick(self, rover: Rover, scene: StoreScene, inst: ItemInstance, g: Any) -> None:
+        p = inst.position
+        local = apply(inverse(g), (p.x, p.y, p.z))
+        yaw = self._yaw(scene, inst)
+        rover.sticky = _Sticky(
+            iid=inst.instance_id, local=local, yaw_off=yaw - math.atan2(g[1][0], g[0][0]), origin=p, origin_yaw=yaw
+        )
+        rover.holding = inst.instance_id
+
+    def _attach(self, rover: Rover, events: list[str]) -> bool:
+        """Sticky grasp: the free unit whose box is nearest the jaw center, if within STICKY_RADIUS_M."""
+        scene = self.scene_of(rover)
+        g = self._gripper_matrix(rover)
+        tcp = apply(g, self.kinematics(rover).chain.tcp)
+        held = self.held_ids(scene.store_id)
+        best: tuple[float, ItemInstance] | None = None
+        for inst in scene.instances.values():
+            if inst.in_basket or inst.instance_id in held:
+                continue
+            p = inst.position
+            if abs(p.x - tcp[0]) > 0.4 or abs(p.y - tcp[1]) > 0.4 or abs(p.z - tcp[2]) > 0.4:
+                continue
+            d = aj.point_box_distance(tcp, (p.x, p.y, p.z), scene.item_dims(inst.instance_id), self._yaw(scene, inst))
+            if d <= aj.STICKY_RADIUS_M and (best is None or d < best[0]):
+                best = (d, inst)
+        if best is None:
+            return False
+        dist, inst = best
+        self._stick(rover, scene, inst, g)
+        events.append(f"sticky_grasp:{inst.instance_id}")
+        self.emit(
+            SimLog(
+                level="info",
+                robot_id=rover.robot_id,
+                message=f"sticky grasp (physics substitute): jaws closed {dist * 100:.1f} cm from {inst.instance_id} "
+                f"({inst.sku}) -> attached",
+            )
+        )
+        self.emit(
+            InstanceInfo(store_id=scene.store_id, robot_id=rover.robot_id, slot_id=inst.slot_id, instances=[inst])
+        )
+        return True
+
+    def _release(self, rover: Rover, events: list[str]) -> None:
+        """Jaws opened while holding: basket (over it, room left) / back to its spot (near it) / floor."""
+        st = rover.sticky
+        assert st is not None
+        scene = self.scene_of(rover)
+        self.sync_carried(rover)
+        inst = scene.instances.get(st.iid)
+        rover.holding, rover.sticky = None, None
+        if inst is None:
+            return
+        pos = inst.position
+        if aj.over_basket(rover.pose, pos) and len(rover.basket) < rover.robot.basket_capacity:
+            scene.instances[st.iid] = inst.model_copy(update={"in_basket": True})
+            rover.basket.append(st.iid)
+            kind = "release_basket"
+        elif math.dist((pos.x, pos.y, pos.z), (st.origin.x, st.origin.y, st.origin.z)) <= aj.PUT_BACK_RADIUS_M:
+            self.move_instance(scene, st.iid, st.origin, st.origin_yaw)
+            kind = "put_back"
+        else:
+            dims = scene.item_dims(st.iid)
+            self.move_instance(scene, st.iid, Point3(x=pos.x, y=pos.y, z=dims[2] / 2), st.origin_yaw)
+            kind = "drop"
+        events.append(f"{kind}:{st.iid}")
+        self.sync_carried(rover)
+        now = scene.instances[st.iid]
+        self.emit(SimLog(level="info", robot_id=rover.robot_id, message=f"jaws opened: {kind} {st.iid}"))
+        self.emit(InstanceInfo(store_id=scene.store_id, robot_id=rover.robot_id, slot_id=now.slot_id, instances=[now]))
+
+    def render_policy(self, rover: Rover, kinds: list[str], step: int) -> list[PolicyFrame]:
+        """Render the policy cameras ('side' / 'wrist') of one rover now (RAW JPEGs)."""
+        kin = self.kinematics(rover)
+        q = q_rad(rover.arm_q) if rover.arm_q is not None else self._scripted_q(rover)
+        jobs: list[tuple[str, str, CameraPose, str]] = []
+        for kind in kinds:
+            if kind == "side":
+                cam = aj.side_camera_pose(kin, rover.pose, rover.lift)
+            elif kind == "wrist":
+                cam = aj.wrist_camera_pose(kin, rover.pose, rover.lift, q)
+            else:
+                raise _Fail("internal", f"unknown policy camera {kind!r}")
+            jobs.append((aj.policy_camera_id(rover.robot_id, kind), rover.store_id, cam, kind))
+        prepare = getattr(self.backend, "prepare", None)
+        if prepare is not None and len(jobs) > 1:
+            prepare([(cid, sid, cam) for cid, sid, cam, _ in jobs])
+        out: list[PolicyFrame] = []
+        for cid, sid, cam, kind in jobs:
+            rendered = self.backend.render(cid, sid, cam)
+            if rendered is None:
+                raise _Fail("not_ready", f"renderer has no {kind} frame yet")
+            jpeg, w, h = rendered
+            out.append(
+                PolicyFrame(
+                    camera=kind,  # type: ignore[arg-type]
+                    step=step,
+                    jpeg_b64=base64.b64encode(jpeg).decode("ascii"),
+                    w=w,
+                    h=h,
+                    camera_pose=cam.sized(w, h).to_mount(),
+                    roll=round(cam.roll, 5),
+                )
+            )
+        return out
+
+    def solve_ik(self, rover: Rover, cmd: Any) -> list[IkSolution]:
+        """``ArmIkCmd``: each TCP target (store frame) -> joint degrees on the rover's SO-101 model; never moves.
+        Seeds: the previous solution (first: ``seed_deg`` / the current joints), then the scripted reach for the
+        target's extension, then ``IK_SEEDS_DEG``; the first solution within IK_TOLERANCE_M wins, else the closest."""
+        kin = self.kinematics(rover)
+        lift = clamp_lift(cmd.lift_height_m) if cmd.lift_height_m is not None else rover.lift
+        if cmd.seed_deg is not None:
+            prev = q_rad(kin.clamp_deg(cmd.seed_deg))
+        elif rover.arm_q is not None:
+            prev = q_rad(rover.arm_q)
+        else:
+            prev = dict(self._scripted_q(rover))
+        to_robot = inverse(aj.store_matrix(rover.pose))
+        base = kin.base(lift)
+        out: list[IkSolution] = []
+        for tgt in cmd.targets:
+            p = tgt.point
+            robot_pt = apply(to_robot, (p.x, p.y, p.z))
+            target = apply(inverse(kin.model), robot_pt)
+            fixed = dict(prev)
+            if tgt.gripper_deg is not None:
+                fixed["gripper"] = math.radians(tgt.gripper_deg)
+            if tgt.wrist_roll_deg is not None:
+                fixed["wrist_roll"] = math.radians(tgt.wrist_roll_deg)
+            ext = max(0.0, min(ARM_FULL_EXT_M, robot_pt[0] - ARM_MOUNT_X_M))
+            seeds = [fixed]
+            try:
+                scripted = kin.scripted_q(lift, ext, closed=False)
+                seeds.append({**fixed, **{k: v for k, v in scripted.items() if k not in ("gripper", "wrist_roll")}})
+            except Exception:  # noqa: BLE001 - a missing reach table only removes one seed
+                pass
+            names = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex")
+            seeds += [{**fixed, **{n: math.radians(v) for n, v in zip(names, sd, strict=True)}} for sd in IK_SEEDS_DEG]
+            best = None
+            for seed in seeds:
+                res = solve_reach(
+                    kin.chain, target, q0=seed, base=base, level_weight=0.5 if tgt.level else 0.0, iters=60
+                )
+                if best is None or res.error_m < best.error_m:
+                    best = res
+                if res.error_m <= IK_TOLERANCE_M:
+                    break
+            assert best is not None
+            q = kin.clamp_deg(q_deg(best.q))
+            tcp = aj.tcp_store(kin, rover.pose, lift, q_rad(q))
+            out.append(
+                IkSolution(
+                    q_deg=[round(v, 3) for v in q],
+                    error_m=round(best.error_m, 5),
+                    ok=best.error_m <= IK_TOLERANCE_M,
+                    tcp=Point3(x=round(tcp.x, 4), y=round(tcp.y, 4), z=round(tcp.z, 4)),
+                )
+            )
+            prev = q_rad(q)
+        return out
+
+    def stream_policy_frames(self, rover: Rover, frames: list[PolicyFrame]) -> None:
+        """Mid-chunk policy pictures go out at once as unsolicited RAW ``CameraFrame``s (camera_id
+        '<robot>.policy_side' / '.policy_wrist'), so the backend's live view moves with the arm instead of getting the
+        whole chunk's pictures in the result at its end. They stay in the result too (the policy's record)."""
+        for f in frames:
+            self._frame_n += 1
+            self.emit(
+                CameraFrame(
+                    frame_id=f"{rover.robot_id}-policy-{f.camera}-f{self._frame_n:06d}",
+                    camera="front" if f.camera == "side" else "wrist",
+                    camera_id=aj.policy_camera_id(rover.robot_id, f.camera),
+                    robot_id=rover.robot_id,
+                    store_id=rover.store_id,
+                    jpeg_b64=f.jpeg_b64,
+                    w=f.w,
+                    h=f.h,
+                    pose=rover.pose,
+                    camera_pose=f.camera_pose,
+                )
+            )
+
+    def arm_state(self, rover: Rover, steps: int = 0, events: list[str] | None = None) -> ArmJointState:
+        kin = self.kinematics(rover)
+        q = list(rover.arm_q) if rover.arm_q is not None else kin.clamp_deg(q_deg(self._scripted_q(rover)))
+        tcp = aj.tcp_store(kin, rover.pose, rover.lift, q_rad(q))
+        return ArmJointState(
+            q_deg=[round(v, 3) for v in q],
+            joint_mode=rover.arm_q is not None,
+            lift_height_m=round(rover.lift, 4),
+            tcp=Point3(x=round(tcp.x, 4), y=round(tcp.y, 4), z=round(tcp.z, 4)),
+            gripper_closed=q[5] < aj.GRIPPER_CLOSE_DEG,
+            attached=rover.holding,
+            steps_applied=steps,
+            events=list(events or []),
+        )
 
     def state(self, rover: Rover) -> RobotState:
         scene = self.stores.get(rover.store_id)
@@ -1040,6 +1454,8 @@ class WorkerCore:
                 self._set_slot_stock(cmd)
             elif kind == "capture":
                 self._capture(cmd, rover)
+            elif kind == "arm_ik":
+                self._reply(cmd, rover, ik=self.solve_ik(self.rover(cmd.robot_id), cmd))
             elif kind == "reset":
                 self._reset(cmd)
             elif kind in _ACTIONS:
@@ -1048,6 +1464,8 @@ class WorkerCore:
                     raise _Fail(
                         "busy", f"{rover.active.cmd.type} {rover.active.cmd.cmd_id} is running on {rover.robot_id}"
                     )
+                if kind != "arm_joints":
+                    self.leave_joint_mode(rover)  # the scripted rig owns the arm for every other motion
                 action = _ACTIONS[kind](self, rover, cmd)
                 rover.active = action
                 rover.active_started = self.clock()
