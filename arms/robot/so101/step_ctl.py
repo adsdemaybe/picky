@@ -43,6 +43,23 @@ def servo_errors(robot) -> dict[str, int]:
     return bad
 
 
+def settle(robot, target: dict[str, float], gripper: float, tol: float = 0.8, rounds: int = 4) -> float:
+    """Software integral action: the servos' low P gain leaves a few degrees of steady-state error, so re-command
+    each joint past its target by the remaining error (capped) until within `tol`. Returns the final max error."""
+    err = 0.0
+    for _ in range(rounds):
+        pose, _ = read_pose(robot)
+        errs = {j: target[j] - pose[j] for j in ARM_JOINTS}
+        err = max(abs(e) for e in errs.values())
+        if err < tol:
+            break
+        cmd = {f"{j}.pos": target[j] + max(-6.0, min(6.0, errs[j])) for j in ARM_JOINTS}
+        cmd["gripper.pos"] = gripper
+        robot.send_action(cmd)
+        time.sleep(0.5)
+    return err
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--dir", default="/tmp/picky_ctl")
@@ -134,6 +151,8 @@ def main() -> None:
                     else:
                         g = float(cmd["gripper"]) if "gripper" in cmd else grip
                         move(robot, target, g, seconds=max(1.5, jump / 15.0), steps=60)
+                        residual = settle(robot, target, g)
+                        note = f"settled to {residual:.1f} deg"
                 except ValueError as e:
                     note = f"IK failed: {e}"
             else:
