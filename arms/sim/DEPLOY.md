@@ -242,3 +242,16 @@ occlusion (top-down camera sees 2 of 11 units) and a passing re-verify did not c
 stayed `basket_audit_pending`); Perceptron called a held cheese bag / meat tray "gripper empty" and overrode the sim's
 grasp state (redo loops, one item skipped); a silent evidence capture tripped the stall detector; Mk1.5 re-closed the
 gripper where it had just missed.
+
+Open at 03:40 PT:
+- **Run 5** (02:36, with most of the fixes above) had picked 4 items when vhagar went offline at about 02:47. Its
+  outcome is unknown.
+- Commit 095f604 (Mk1.5 re-aims after a missed close) is pushed but not deployed.
+
+When the host is back:
+1. Read run 5: `python3 /data/$USER/picky/pvla-tools/timeline.py /data/$USER/picky/pvla-runs/run5` and its
+   `summary.json`.
+2. Render it with `render.py`.
+3. Rsync the branch to `repo-pvla`, re-seed the catalog, and restart `picky-pvla-gw` on `-L picky-pvla`.
+4. Run the spread-out list (dish soap, sports drink, coffee, olive oil, rice, muffins, frozen peas, ground turkey:
+   8 fixtures, shelf levels 0–2) and the same request with `PICKY_VLA_T1=smolvla`.

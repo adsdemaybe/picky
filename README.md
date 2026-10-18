@@ -249,6 +249,8 @@ verifier panel real camera thumbnails instead of the fakes' flat frames. The web
 `arms/frontend/.env.local`.
 `make setup` removes extras, so re-run `uv sync --extra <arm>` after it.
 
+**Perceptron VLA (learned grasp tier).** `PICKY_VLA_T1=perceptron` makes the Isaac rover's grasps a policy that runs joint by joint, with Perceptron Mk1.5 as the stand-in. `perceptron_vla` uses Perceptron's robotics VLA, trained on our sim dataset, and needs the team key `PERCEPTRON_ROBOTICS_API_KEY` from Perceptron staff. The runbook (key, one-command pipeline, in-sim test) is [`docs/vla-loop/perceptron-vla.md`](docs/vla-loop/perceptron-vla.md); the dataset is described in [`docs/vla-loop/dataset.md`](docs/vla-loop/dataset.md), and the vhagar test stack and its measured runs are in [`arms/sim/DEPLOY.md`](arms/sim/DEPLOY.md) §8–9.
+
 ## API at a glance (for the web app)
 
 The gateway is the only backend the web app talks to. Full reference: [`contracts/api.md`](contracts/api.md), which

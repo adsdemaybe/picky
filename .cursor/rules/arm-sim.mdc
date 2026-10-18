@@ -68,6 +68,7 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 | `labels.py` | EAN-13 modules + label PNG (Pillow) |
 | `app.py` | `GatewayLink` (WS thread), `IsaacBackend` (pxr/replicator), `run()` main loop, CLI |
 | `DEPLOY.md` | exact vhagar steps |
+| `director.py` | dev-only chase camera + frame tee for demo videos (`PICKY_SIM_DIRECTOR`, off by default); `tools/director/record.py` records a run through the gateway, `tools/director/render.py` composites the video |
 | `tests/` | scene spec (multi-store, rovers), pure pursuit + cameras + labels, worker protocol (two stores, three robots), WS round-trip, sketch frames, asset mapping / fallbacks / rover puppet (`test_assets.py`) |
 
 ## How to run
@@ -92,6 +93,8 @@ store out).
 modified by the Picky team. Robot model: LeIsaac LeKiwi + SO-101 (LightwheelAI, Apache-2.0; LeKiwi by SIGRobotics-UIUC,
 SO-101 by TheRobotStudio), with a lift overlay by the Picky team. Sources, license links and the per-model list:
 `ASSETS.md`.
+
+**Perceptron VLA test (feat/perceptron-vla):** T1 grasps driven joint by joint on Isaac (`PICKY_VLA_T1`, `DEPLOY.md` §8), the whole loop on vhagar's test stack with the catalog on Postgres plus the director video (`DEPLOY.md` §9), the sim LeRobot dataset for Perceptron's robotics VLA (`docs/vla-loop/dataset.md`), and the key + one-command runbook (`docs/vla-loop/perceptron-vla.md`).
 
 **In the pipeline:** start the gateway with `robot` real (`PICKY_REAL_ARMS=robot`), then start the worker. Stores whose hash
 matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop the worker and they continue on the 2D fake.
