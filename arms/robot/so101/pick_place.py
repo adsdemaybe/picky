@@ -22,12 +22,21 @@ from .kinematics import SO101Kinematics
 
 
 def connect_robot(cfg: RigConfig):
+    """Connect with every Goal_Position preset to the present position *before* torque comes on.
+
+    LeRobot's connect() -> configure() re-enables torque on all motors without syncing goals; a servo whose goal
+    register still holds a stale value (seen: wrist_flex goal=0 after a power cycle) would swing to it at full speed.
+    """
     try:
         from lerobot.robots.so101_follower import SO101Follower, SO101FollowerConfig
-    except ImportError:  # newer LeRobot merged so100/so101 into so_follower
+    except ImportError:  # LeRobot >= 0.6 merged so100/so101 into so_follower
         from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
     robot = SO101Follower(SO101FollowerConfig(port=cfg.port, id=cfg.robot_id, use_degrees=True))
-    robot.connect()
+    robot.bus.connect()
+    robot.bus.disable_torque()
+    present = robot.bus.sync_read("Present_Position", normalize=False, num_retry=3)
+    robot.bus.sync_write("Goal_Position", present, normalize=False)
+    robot.configure()  # writes PID/limits with torque off, then enables torque: holds the current pose
     return robot
 
 
