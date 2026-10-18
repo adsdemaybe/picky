@@ -5,6 +5,7 @@ so these tests only depend on the gateway + the planning arms' fakes (agent, cat
 messaging)."""
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -300,6 +301,50 @@ async def test_web_checkout_requires_matching_cart_hash() -> None:
         assert await reg.approvals.resolve(good)
         await until(lambda: orch.peek(trip.trip_id).state in (TripState.FOLLOWUP, TripState.DONE), 10)
         assert (await orch.get_trip(trip.trip_id)).receipt.status == "succeeded"
+    finally:
+        shopper.cancel()
+        await orch.stop()
+
+
+class _ProvisionalRunner:
+    """Loop runner stub: the goal's plan still has a provisional line the basket audit has not confirmed."""
+
+    def __init__(self, services) -> None:  # noqa: ANN001
+        self.provisional_open = True
+        self.goals: list[str] = []
+
+    async def current_plan(self, goal_id: str) -> SimpleNamespace:
+        self.goals.append(goal_id)
+        return SimpleNamespace(plan_id=f"plan-{goal_id}")
+
+    async def run_state(self, plan_id: str) -> SimpleNamespace:
+        return SimpleNamespace(plan_id=plan_id, provisional_open=self.provisional_open)
+
+
+@needs_data
+async def test_checkout_waits_for_the_basket_audit() -> None:
+    """api.md 'Who writes what': checkout starts only when PlanRunState.provisional_open is false."""
+    reg = build_registry(
+        real_arms=set(),
+        fake_opts=FAST_FAKES,
+        overrides={**STUBS, "runner": _ProvisionalRunner},
+        orchestrator_config=OrchestratorConfig(approval_channels=("web",), checkout_batch=False, auto_checkout=False),
+    )
+    orch = reg.orchestrator
+    runner = reg.services.runner
+    await orch.start()
+    shopper = asyncio.create_task(web_shopper(reg, skip_checkout=True))
+    try:
+        trip = await orch.create_trip(CreateTripRequest(user_id="maya", text=TACOS, auto_execute=True))
+        await until(lambda: reg.services.fleet.executed and not orch.is_executing(trip.trip_id))
+        blocked = await orch.start_checkout(trip.trip_id)
+        assert blocked.approval is None and orch.peek(trip.trip_id).state == TripState.EXECUTING
+        assert runner.goals == [orch.peek(trip.trip_id).goal_id]
+        errors = [e for e in reg.bus.recent(trip_id=trip.trip_id) if e.type == "error"]
+        assert errors and errors[-1].code == "basket_audit_pending"
+        runner.provisional_open = False  # the audit passed
+        status = await orch.start_checkout(trip.trip_id)
+        assert status.approval is not None and status.approval.kind == ApprovalKind.CHECKOUT
     finally:
         shopper.cancel()
         await orch.stop()

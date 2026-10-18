@@ -63,6 +63,8 @@ arms meet.
   (GET / POST / DELETE), `/api/dev/faults/scenario`, `/api/dev/plans`
 - [x] **P0** Loop events on `/ws` with the same filters (`plan_envelope`); live-only `camera.overlay` on `/ws/frames`,
   `/ws/cameras/{id}` and `/ws/cameras`; the runner's mirrored `brain.step` in the brain log
+- [x] **P0** Checkout guard: `start_checkout` waits while the goal's `PlanRunState.provisional_open` is true (the
+  loop's basket audit has not confirmed a provisional line; `error` code `basket_audit_pending`)
 - [x] **P0** `make demo` beat: plan mode + `drop_on_first_grasp`; the summary prints the injected fault, the
   verifier's catch (reason + who verified) and the successful retry; fails if the catch or the retry is missing
 - [x] **P1** `/debug`: plan panel (steps grouped per item, state, tries, tier, check), VLA progress bar, verifier
@@ -129,7 +131,10 @@ Several workers may connect at once; `GET /api/sim/status` shows which stores / 
 - Trips, approvals and the event ring (last 1000 events) live in memory.
 - Loop: evidence annotations are an in-memory index of the last 500 frames. `/api/verifier/providers` uses the
   verifier's `providers()` extra (else one row from `capabilities`). The fake evidence frames are synthetic (flat
-  thumbnails); real frames come with `PICKY_REAL_ARMS=perception`. `vla.status` is throttled by the runner (its
+  thumbnails); `PICKY_REAL_ARMS=evidence` (no key) serves the 2D fake's real camera images, `perception` too.
+  `camera.overlay` is forwarded on the live sockets, but the runner does not emit it yet (P1). Checkout is held
+  (`error` code `basket_audit_pending`, trip stays executing) while the goal's `PlanRunState.provisional_open` is
+  true; nothing re-runs the audit after that, so a shopper who declined the audit retry needs staff. `vla.status` is throttled by the runner (its
   producer), not by the gateway. With fakes the fault scenario is loaded by the demo; on `make dev` set
   `PICKY_FAULTS` or use the presenter panel (`PICKY_DEV=1`).
 - `make demo` fails on any `error` event, failed stop, non-completed goal, skipped pipeline state, a trip paid over
