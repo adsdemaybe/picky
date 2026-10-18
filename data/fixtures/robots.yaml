@@ -1,0 +1,70 @@
+# Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
+# Fleet robots per store + store ceiling cameras (contracts.planogram.RobotsFile).
+# Robot = small rover (radius 0.3 m) + vertical lift (0.2-1.2 m) + SO-101 arm (reach 0.35 m) + basket.
+# Each robot streams '<robot_id>.front' (pan-tilt mast), '.wrist' (SO-101 gripper) and '.basket' cameras
+# (mounts: contracts.cameras.DEFAULT_ROBOT_CAMERA_MOUNTS). Docks are spawn poses on reset and the target of
+# return_to_dock; docks in one store are >= 0.7 m apart and >= 0.3 m from every approach pose.
+# Ceiling camera mounts are in the store frame (meters; yaw CCW from +x, pitch < 0 looks down).
+schema_version: 1
+robots:
+- robot_id: rover-ave-1
+  name: Pico
+  kind: rover_so101
+  store_id: store_ave
+  dock: {x: 2.6, y: 1.6, theta: 1.571}
+  battery_pct: 95.0
+  basket_capacity: 12
+  max_speed_mps: 0.8
+  cameras: [front, wrist, basket]
+  color: '#2563eb'
+  notes: Demo robot for Maya's taco trips. Dock = the planogram robot_home (front left, by the entrance).
+- robot_id: rover-ave-2
+  name: Rhea
+  kind: rover_so101
+  store_id: store_ave
+  dock: {x: 3.6, y: 1.6, theta: 1.571}
+  battery_pct: 81.0
+  basket_capacity: 12
+  max_speed_mps: 0.8
+  cameras: [front, wrist, basket]
+  color: '#db2777'
+  notes: 'Second Ave rover: batched shoppers, staff shelf scans (aisle 2 snacks).'
+- robot_id: rover-hill-1
+  name: Hazel
+  kind: rover_so101
+  store_id: store_hill
+  dock: {x: 3.0, y: 1.0, theta: 1.571}
+  battery_pct: 88.0
+  basket_capacity: 10
+  max_speed_mps: 0.8
+  cameras: [front, wrist, basket]
+  color: '#16a34a'
+  notes: Capitol Hill rover. 'Hazel, go charge' -> return_to_dock; 'scan dairy at Hill' -> shelf_scan.
+- robot_id: rover-tmo-1
+  name: Magenta
+  kind: rover_so101
+  store_id: store_tmobile
+  dock: {x: 2.2, y: 1.0, theta: 1.571}
+  battery_pct: 92.0
+  basket_capacity: 8
+  max_speed_mps: 0.8
+  cameras: [front, wrist, basket]
+  color: '#e20074'
+  notes: T-Mobile store rover (T-Mobile side track). Dock = the planogram robot_home, by the entrance.
+store_cameras:
+- camera_id: store_ave.ceiling-1
+  store_id: store_ave
+  name: Ave ceiling 1 · produce & entrance
+  mount: {frame: world, x: 1.0, y: 2.5, z: 3.4, yaw: 0.785, pitch: -0.55, hfov_deg: 100.0, width: 640, height: 480}
+- camera_id: store_ave.ceiling-2
+  store_id: store_ave
+  name: Ave ceiling 2 · aisles & back wall
+  mount: {frame: world, x: 13.0, y: 20.6, z: 3.4, yaw: -2.36, pitch: -0.5, hfov_deg: 100.0, width: 640, height: 480}
+- camera_id: store_hill.ceiling-1
+  store_id: store_hill
+  name: Hill ceiling 1 · whole store
+  mount: {frame: world, x: 0.8, y: 1.8, z: 3.2, yaw: 0.9, pitch: -0.5, hfov_deg: 100.0, width: 640, height: 480}
+- camera_id: store_tmobile.ceiling-1
+  store_id: store_tmobile
+  name: T-Mobile ceiling 1 · whole floor
+  mount: {frame: world, x: 5.0, y: 0.5, z: 3.2, yaw: 1.571, pitch: -0.6, hfov_deg: 100.0, width: 640, height: 480}

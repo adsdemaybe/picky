@@ -1,0 +1,148 @@
+# Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
+# Fictional demo users. Phones are 555 placeholders for Photon handle mapping.
+schema_version: 1
+users:
+- user_id: maya
+  profile:
+    user_id: maya
+    display_name: Maya
+    phone: '+15555550101'
+    email: maya@example.com
+    home_store_id: store_ave
+    household_size: 2
+    prefs: {spicy: 0.8, vegetarian: 0.6, mexican: 0.5, fresh: 0.4, organic: 0.2, plant_based: 0.4, deals: 0.3}
+    dislikes: []
+    disliked_skus: []
+    favorite_skus: [HOTSAUCE-RED, TORT-CORN, BEANS-BLACK, AVOCADO, SALSA-MILD]
+    dietary: []
+    allergies: []
+    default_budget_cents: 4000
+    version: 1
+    updated_at: '2026-10-10T18:00:00Z'
+  mandate:
+    mandate_id: im_maya_001
+    user_id: maya
+    cap_cents: 6000
+    per_item_cap_cents: 2500
+    ask_above_cents: 1500
+    allowed_categories: []
+    blocked_categories: [alcohol]
+    allowed_merchants: []
+    allow_online: true
+    require_checkout_approval: true
+    expires_at: '2026-12-31T23:59:59Z'
+    created_at: '2026-10-01T17:00:00Z'
+    revoked: false
+  purchases:
+  - {purchase_id: pur_maya_001, user_id: maya, sku: SALSA-MILD, qty: 1, unit_price_cents: 349, store_id: store_ave, trip_id: trip_maya_0926,
+    ts: '2026-09-26T19:10:00Z', rating: 3}
+  - {purchase_id: pur_maya_002, user_id: maya, sku: TORT-CORN, qty: 1, unit_price_cents: 279, store_id: store_ave, trip_id: trip_maya_0926,
+    ts: '2026-09-26T19:10:00Z', rating: 5}
+  - {purchase_id: pur_maya_003, user_id: maya, sku: BEANS-BLACK, qty: 2, unit_price_cents: 129, store_id: store_ave, trip_id: trip_maya_0926,
+    ts: '2026-09-26T19:10:00Z', rating: 4}
+  - {purchase_id: pur_maya_004, user_id: maya, sku: AVOCADO, qty: 3, unit_price_cents: 129, store_id: store_ave, trip_id: trip_maya_0926,
+    ts: '2026-09-26T19:10:00Z', rating: 4}
+  - {purchase_id: pur_maya_005, user_id: maya, sku: HOTSAUCE-RED, qty: 1, unit_price_cents: 299, store_id: store_ave, trip_id: trip_maya_0926,
+    ts: '2026-09-26T19:10:00Z', rating: 5}
+  - {purchase_id: pur_maya_006, user_id: maya, sku: OAT-MILK, qty: 1, unit_price_cents: 479, store_id: store_ave, trip_id: trip_maya_1008,
+    ts: '2026-10-08T18:30:00Z'}
+  - {purchase_id: pur_maya_007, user_id: maya, sku: SOYRIZO, qty: 1, unit_price_cents: 449, store_id: store_ave, trip_id: trip_maya_1008,
+    ts: '2026-10-08T18:30:00Z', rating: 4}
+  - {purchase_id: pur_maya_008, user_id: maya, sku: CHIPS-SPICY-LIME, qty: 1, unit_price_cents: 449, store_id: store_ave,
+    trip_id: trip_maya_1008, ts: '2026-10-08T18:30:00Z', rating: 5}
+  - {purchase_id: pur_maya_009, user_id: maya, sku: LIMES, qty: 4, unit_price_cents: 45, store_id: store_ave, trip_id: trip_maya_1008,
+    ts: '2026-10-08T18:30:00Z'}
+  feedback: []
+- user_id: jordan
+  profile:
+    user_id: jordan
+    display_name: Jordan
+    phone: '+15555550102'
+    email: jordan@example.com
+    home_store_id: store_hill
+    household_size: 4
+    prefs: {deals: 0.9, budget: 0.8, kid_friendly: 0.6, party: 0.3, spicy: -0.3, organic: -0.2}
+    dislikes: [extra_hot]
+    disliked_skus: [HOTSAUCE-GHOST]
+    favorite_skus: [TORT-FLOUR, BEANS-REFRIED, CHIPS-TORTILLA, COLA]
+    dietary: []
+    allergies: []
+    default_budget_cents: 6000
+    version: 1
+    updated_at: '2026-10-12T20:00:00Z'
+  mandate:
+    mandate_id: im_jordan_001
+    user_id: jordan
+    cap_cents: 9000
+    ask_above_cents: 2000
+    allowed_categories: []
+    blocked_categories: []
+    allowed_merchants: []
+    allow_online: true
+    require_checkout_approval: true
+    expires_at: '2026-12-31T23:59:59Z'
+    created_at: '2026-10-02T17:00:00Z'
+    revoked: false
+  purchases:
+  - {purchase_id: pur_jordan_001, user_id: jordan, sku: TORT-FLOUR, qty: 2, unit_price_cents: 349, store_id: store_hill, trip_id: trip_jordan_1004,
+    ts: '2026-10-04T16:00:00Z', rating: 4}
+  - {purchase_id: pur_jordan_002, user_id: jordan, sku: BEANS-REFRIED, qty: 2, unit_price_cents: 189, store_id: store_hill,
+    trip_id: trip_jordan_1004, ts: '2026-10-04T16:00:00Z', rating: 4}
+  - {purchase_id: pur_jordan_003, user_id: jordan, sku: CHIPS-TORTILLA, qty: 1, unit_price_cents: 349, store_id: store_hill,
+    trip_id: trip_jordan_1004, ts: '2026-10-04T16:00:00Z', rating: 5}
+  - {purchase_id: pur_jordan_004, user_id: jordan, sku: COLA, qty: 2, unit_price_cents: 279, store_id: store_hill, trip_id: trip_jordan_1004,
+    ts: '2026-10-04T16:00:00Z'}
+  - {purchase_id: pur_jordan_005, user_id: jordan, sku: CEREAL-OATS, qty: 1, unit_price_cents: 459, store_id: store_hill,
+    trip_id: trip_jordan_1011, ts: '2026-10-11T10:20:00Z', rating: 4}
+  - {purchase_id: pur_jordan_006, user_id: jordan, sku: PAPER-TOWELS, qty: 1, unit_price_cents: 849, store_id: online, trip_id: trip_jordan_1011,
+    ts: '2026-10-11T10:20:00Z'}
+  feedback:
+  - feedback_id: fb_jordan_001
+    user_id: jordan
+    sku: CHIPS-TORTILLA
+    trip_id: trip_jordan_1004
+    rating: 5
+    text: Kids loved these, great price
+    channel: photon
+    tags: [kid_friendly, good_value]
+    ts: '2026-10-05T12:00:00Z'
+- user_id: sam
+  profile:
+    user_id: sam
+    display_name: Sam
+    phone: '+15555550103'
+    email: sam@example.com
+    home_store_id: store_ave
+    household_size: 1
+    prefs: {healthy: 0.7, gluten_free: 0.8, breakfast: 0.5, organic: 0.4, sweet: -0.4}
+    dislikes: []
+    disliked_skus: []
+    favorite_skus: [GRANOLA, YOGURT-GREEK, BANANAS, COFFEE]
+    dietary: [gluten_free]
+    allergies: [peanuts]
+    default_budget_cents: 3000
+    version: 1
+    updated_at: '2026-10-14T08:00:00Z'
+  mandate:
+    mandate_id: im_sam_001
+    user_id: sam
+    cap_cents: 5000
+    ask_above_cents: 1200
+    allowed_categories: []
+    blocked_categories: [alcohol]
+    allowed_merchants: []
+    allow_online: true
+    require_checkout_approval: true
+    expires_at: '2026-12-31T23:59:59Z'
+    created_at: '2026-10-03T17:00:00Z'
+    revoked: false
+  purchases:
+  - {purchase_id: pur_sam_001, user_id: sam, sku: GRANOLA, qty: 1, unit_price_cents: 549, store_id: store_ave, trip_id: trip_sam_1009,
+    ts: '2026-10-09T08:15:00Z', rating: 5}
+  - {purchase_id: pur_sam_002, user_id: sam, sku: YOGURT-GREEK, qty: 1, unit_price_cents: 599, store_id: store_ave, trip_id: trip_sam_1009,
+    ts: '2026-10-09T08:15:00Z', rating: 4}
+  - {purchase_id: pur_sam_003, user_id: sam, sku: BANANAS, qty: 1, unit_price_cents: 179, store_id: store_ave, trip_id: trip_sam_1009,
+    ts: '2026-10-09T08:15:00Z'}
+  - {purchase_id: pur_sam_004, user_id: sam, sku: COFFEE, qty: 1, unit_price_cents: 999, store_id: store_ave, trip_id: trip_sam_1009,
+    ts: '2026-10-09T08:15:00Z', rating: 4}
+  feedback: []

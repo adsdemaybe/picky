@@ -1,0 +1,11 @@
+{
+ "scene": "supermarket_06",
+ "robot": "Pico",
+ "spawn": [3.55, 3.35, -90.0],
+ "floor_z": 0.0,
+ "checkout": {"lo": [0.9, 4.0, 0.0], "hi": [2.9, 4.5, 0.76]},
+ "checkout_slot": [2.55, 3.59, 180.0],
+ "place": {"lateral": 0.58, "xs": [0.25, 0.15, 0.05, -0.05, -0.15, -0.25], "shift": 0.65},
+ "open_sides": {"S1": ["south"], "S2": ["south"], "S3": ["south"]},
+ "items": []
+}

@@ -1,0 +1,262 @@
+{
+  "$defs": {
+    "ApprovalResponse": {
+      "additionalProperties": false,
+      "properties": {
+        "approval_id": {
+          "title": "Approval Id",
+          "type": "string"
+        },
+        "approved": {
+          "readOnly": true,
+          "title": "Approved",
+          "type": "boolean"
+        },
+        "cart_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Checkout approvals: the approved cart hash. Web answers MUST echo it; for photon/voice answers the ApprovalBroker copies it from the pending request before resolving.",
+          "title": "Cart Hash"
+        },
+        "channel": {
+          "default": "web",
+          "enum": [
+            "web",
+            "voice",
+            "photon",
+            "system"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "choice": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "option_id when decision='choice' (single select).",
+          "title": "Choice"
+        },
+        "choices": {
+          "description": "option_ids when decision='choice' and multi=True.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Choices",
+          "type": "array"
+        },
+        "decision": {
+          "enum": [
+            "approve",
+            "reject",
+            "timeout",
+            "choice"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        },
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Id"
+        }
+      },
+      "required": [
+        "approval_id",
+        "decision",
+        "choice",
+        "choices",
+        "channel",
+        "user_id",
+        "cart_hash",
+        "note",
+        "ts",
+        "approved"
+      ],
+      "title": "ApprovalResponse",
+      "type": "object"
+    },
+    "WsApproval": {
+      "additionalProperties": false,
+      "description": "Answer any approval, incl. pick_choice (decision='choice', choice=<option_id = instance_id>).",
+      "properties": {
+        "response": {
+          "$ref": "#/$defs/ApprovalResponse"
+        },
+        "type": {
+          "const": "approval",
+          "default": "approval",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "response"
+      ],
+      "title": "WsApproval",
+      "type": "object"
+    },
+    "WsChat": {
+      "additionalProperties": false,
+      "description": "Chat text to the shopper agent of a trip (= POST /api/trips/{id}/messages); also the Web Speech fallback for\nvoice (browser STT, channel='voice'). ``trip_id`` None = the socket's single trip_id filter (error if not exactly\none). New natural-language requests go to POST /api/requests, not here.",
+      "properties": {
+        "channel": {
+          "default": "web",
+          "enum": [
+            "web",
+            "voice",
+            "photon"
+          ],
+          "title": "Channel",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "trip_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trip Id"
+        },
+        "type": {
+          "const": "chat",
+          "default": "chat",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "text",
+        "channel",
+        "trip_id"
+      ],
+      "title": "WsChat",
+      "type": "object"
+    },
+    "WsPing": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ping",
+          "default": "ping",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "title": "WsPing",
+      "type": "object"
+    },
+    "WsRobotChat": {
+      "additionalProperties": false,
+      "description": "Talk to a robot's brain over the socket (= POST /api/fleet/robots/{id}/messages); replies arrive as brain.step\nevents (kind='message').",
+      "properties": {
+        "robot_id": {
+          "title": "Robot Id",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "robot_chat",
+          "default": "robot_chat",
+          "title": "Type",
+          "type": "string"
+        },
+        "user_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "User Id"
+        }
+      },
+      "required": [
+        "type",
+        "robot_id",
+        "text",
+        "user_id"
+      ],
+      "title": "WsRobotChat",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "approval": "#/$defs/WsApproval",
+      "chat": "#/$defs/WsChat",
+      "ping": "#/$defs/WsPing",
+      "robot_chat": "#/$defs/WsRobotChat"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/WsChat"
+    },
+    {
+      "$ref": "#/$defs/WsApproval"
+    },
+    {
+      "$ref": "#/$defs/WsRobotChat"
+    },
+    {
+      "$ref": "#/$defs/WsPing"
+    }
+  ]
+}

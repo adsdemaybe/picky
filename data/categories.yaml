@@ -1,0 +1,185 @@
+# Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
+# Category taxonomy (contracts.planogram.CategoriesFile): top-level ids = Product.category
+# (contracts.catalog.STANDARD_CATEGORY_IDS), children = Product.subcategory. Max depth 2. `sort` orders the
+# web app's category list (store walk order). Where a category sits in each store is NOT stored here: it is
+# derived from the planogram aisles (Aisle.categories) and served as CategoryInfo.aisle_labels:
+#   store_ave : produce=Produce tables; household/personal_care/beverages/alcohol=Aisle 1;
+#               snacks + breakfast pantry=Aisle 2; international + Mexican + canned=Aisle 3;
+#               pasta/baking pantry + bakery=Aisle 4; chips/soda/juice + frozen=Aisle 5;
+#               meat/deli/dairy=Back wall; deals on the front endcaps.
+#   store_hill: produce=Produce table; pantry/international/Mexican=Aisle 1; snacks/breakfast=Aisle 2;
+#               household/personal_care/beverages + meat/deli/dairy wall=Aisle 3.
+schema_version: 1
+categories:
+- category_id: produce
+  name: Produce
+  description: Fresh fruit, vegetables and herbs. Picked from the produce tables with a freshness top-3.
+  icon: carrot
+  color: '#22c55e'
+  aliases: [fruit, vegetables, veggies, fresh produce]
+  sort: 10
+- {category_id: herbs, name: Fresh Herbs, parent_id: produce, sort: 1}
+- {category_id: fruit, name: Fruit, parent_id: produce, sort: 2}
+- {category_id: greens, name: Salad Greens, parent_id: produce, sort: 3}
+- {category_id: vegetables, name: Vegetables, parent_id: produce, sort: 4}
+- category_id: dairy
+  name: Dairy & Eggs
+  description: Milk, cheese, yogurt, butter and eggs (refrigerated).
+  icon: milk
+  color: '#60a5fa'
+  aliases: [dairy aisle, milk, cheese, eggs]
+  sort: 20
+- {category_id: butter, name: Butter, parent_id: dairy, sort: 1}
+- {category_id: cheese, name: Cheese, parent_id: dairy, sort: 2}
+- {category_id: eggs, name: Eggs, parent_id: dairy, sort: 3}
+- {category_id: milk, name: Milk & Cream, parent_id: dairy, sort: 4}
+- {category_id: plant_milk, name: Plant-Based Milk, parent_id: dairy, sort: 5}
+- {category_id: cheese_dip, name: Queso & Cheese Dips, parent_id: dairy, sort: 6}
+- {category_id: cultured, name: Sour Cream & Cultured, parent_id: dairy, sort: 7}
+- {category_id: yogurt, name: Yogurt, parent_id: dairy, sort: 8}
+- category_id: meat
+  name: Meat & Seafood
+  description: Fresh beef, poultry, pork and fish (refrigerated).
+  icon: beef
+  color: '#ef4444'
+  aliases: [meat, seafood, butcher, fish, chicken]
+  sort: 30
+- {category_id: beef, name: Beef, parent_id: meat, sort: 1}
+- {category_id: seafood, name: Fish & Seafood, parent_id: meat, sort: 2}
+- {category_id: pork, name: Pork & Bacon, parent_id: meat, sort: 3}
+- {category_id: poultry, name: Poultry, parent_id: meat, sort: 4}
+- category_id: deli
+  name: Deli & Prepared
+  description: Deli meats, fresh dips, guacamole, plant proteins.
+  icon: sandwich
+  color: '#f97316'
+  aliases: [deli, prepared foods, dips]
+  sort: 40
+- {category_id: dips, name: Dips & Spreads, parent_id: deli, sort: 1}
+- {category_id: fresh_salsa, name: Fresh Salsa & Pico, parent_id: deli, sort: 2}
+- {category_id: plant_protein, name: Plant Protein, parent_id: deli, sort: 3}
+- {category_id: deli_meat, name: Sliced Deli Meats, parent_id: deli, sort: 4}
+- category_id: bakery
+  name: Bakery & Tortillas
+  description: Bread, bagels, buns, pastries and fresh tortillas.
+  icon: croissant
+  color: '#d97706'
+  aliases: [bread, bakery, tortillas]
+  sort: 50
+- {category_id: bread, name: Bread & Bagels, parent_id: bakery, sort: 1}
+- {category_id: pastry, name: Muffins & Pastries, parent_id: bakery, sort: 2}
+- {category_id: tortillas, name: Tortillas, parent_id: bakery, sort: 3}
+- category_id: pantry
+  name: Pantry
+  description: Canned goods, pasta, grains, baking, breakfast, sauces, salsa and spices.
+  icon: package
+  color: '#a16207'
+  aliases: [pantry, dry goods, canned goods, baking]
+  sort: 60
+- {category_id: baking, name: Baking, parent_id: pantry, sort: 1}
+- {category_id: soup, name: Broth & Soup, parent_id: pantry, sort: 2}
+- {category_id: canned, name: Canned Goods, parent_id: pantry, sort: 3}
+- {category_id: cereal, name: Cereal & Oatmeal, parent_id: pantry, sort: 4}
+- {category_id: coffee, name: Coffee & Tea, parent_id: pantry, sort: 5}
+- {category_id: sauces, name: Cooking Sauces, parent_id: pantry, sort: 6}
+- {category_id: hot_sauce, name: Hot Sauce, parent_id: pantry, sort: 7}
+- {category_id: spreads, name: Nut Butters & Honey, parent_id: pantry, sort: 8}
+- {category_id: oils, name: Oils & Vinegar, parent_id: pantry, sort: 9}
+- {category_id: pasta, name: Pasta & Boxed Meals, parent_id: pantry, sort: 10}
+- {category_id: grains, name: Rice & Grains, parent_id: pantry, sort: 11}
+- {category_id: salsa, name: Salsa, parent_id: pantry, sort: 12}
+- {category_id: spices, name: Spices & Seasonings, parent_id: pantry, sort: 13}
+- {category_id: taco_shells, name: Taco Shells, parent_id: pantry, sort: 14}
+- category_id: international
+  name: International & Mexican
+  description: Masa, Asian staples and imported specialties (salsas and hot sauces live under Pantry).
+  icon: globe
+  color: '#e11d48'
+  aliases: [international, mexican, asian, ethnic aisle, world foods]
+  sort: 70
+- {category_id: asian, name: Asian, parent_id: international, sort: 1}
+- {category_id: mexican, name: Mexican, parent_id: international, sort: 2}
+- category_id: snacks
+  name: Snacks
+  description: Chips, pretzels, crackers, cookies, nuts, bars and candy.
+  icon: cookie
+  color: '#f59e0b'
+  aliases: [snacks, chips, candy, crackers]
+  sort: 80
+- {category_id: chips, name: Chips, parent_id: snacks, sort: 1}
+- {category_id: candy, name: Chocolate & Candy, parent_id: snacks, sort: 2}
+- {category_id: cookies, name: Cookies, parent_id: snacks, sort: 3}
+- {category_id: crackers, name: Crackers, parent_id: snacks, sort: 4}
+- {category_id: nuts, name: Nuts & Trail Mix, parent_id: snacks, sort: 5}
+- {category_id: popcorn, name: Popcorn, parent_id: snacks, sort: 6}
+- {category_id: pretzels, name: Pretzels, parent_id: snacks, sort: 7}
+- {category_id: bars, name: Snack Bars, parent_id: snacks, sort: 8}
+- category_id: beverages
+  name: Beverages
+  description: Soda, sparkling and still water, juice, sports drinks.
+  icon: cup-soda
+  color: '#06b6d4'
+  aliases: [drinks, soda, juice, water]
+  sort: 90
+- {category_id: drinks, name: Aguas Frescas & Specialty, parent_id: beverages, sort: 1}
+- {category_id: juice, name: Juice, parent_id: beverages, sort: 2}
+- {category_id: soda, name: Soda, parent_id: beverages, sort: 3}
+- {category_id: sports, name: Sports Drinks, parent_id: beverages, sort: 4}
+- {category_id: water, name: Water & Sparkling, parent_id: beverages, sort: 5}
+- category_id: frozen
+  name: Frozen
+  description: Frozen meals, vegetables, seafood and desserts.
+  icon: snowflake
+  color: '#38bdf8'
+  aliases: [frozen foods, freezer, ice cream]
+  sort: 100
+- {category_id: meals, name: Frozen Meals & Pizza, parent_id: frozen, sort: 1}
+- {category_id: frozen_seafood, name: Frozen Seafood, parent_id: frozen, sort: 2}
+- {category_id: frozen_vegetables, name: Frozen Vegetables, parent_id: frozen, sort: 3}
+- {category_id: dessert, name: Ice Cream & Desserts, parent_id: frozen, sort: 4}
+- category_id: household
+  name: Household
+  description: Paper goods, cleaning, laundry, trash bags and kitchen supplies.
+  icon: spray-can
+  color: '#8b5cf6'
+  aliases: [household, cleaning, paper goods]
+  sort: 110
+- {category_id: cleaning, name: Cleaning, parent_id: household, sort: 1}
+- {category_id: kitchen, name: Kitchen Supplies, parent_id: household, sort: 2}
+- {category_id: laundry, name: Laundry, parent_id: household, sort: 3}
+- {category_id: paper, name: Paper Goods, parent_id: household, sort: 4}
+- {category_id: bags, name: Trash & Storage Bags, parent_id: household, sort: 5}
+- category_id: personal_care
+  name: Personal Care
+  description: Oral care, hair care, bath & body.
+  icon: sparkles
+  color: '#ec4899'
+  aliases: [personal care, toiletries, health & beauty]
+  sort: 120
+- {category_id: bath_body, name: Bath & Body, parent_id: personal_care, sort: 1}
+- {category_id: hair_care, name: Hair Care, parent_id: personal_care, sort: 2}
+- {category_id: oral_care, name: Oral Care, parent_id: personal_care, sort: 3}
+- category_id: alcohol
+  name: Beer & Wine
+  description: Beer and wine. 21+; blocked by most demo mandates.
+  icon: wine
+  color: '#7c3aed'
+  aliases: [alcohol, beer, wine, 21+]
+  sort: 130
+- {category_id: beer, name: Beer, parent_id: alcohol, sort: 1}
+- {category_id: wine, name: Wine, parent_id: alcohol, sort: 2}
+- category_id: wireless
+  name: Phones & Wireless
+  description: Phones, cases, screen protection, chargers, audio, wearables, tablets and home internet (wireless store).
+  icon: smartphone
+  color: '#e20074'
+  aliases: [phones, wireless, cell phones, phone accessories, electronics]
+  sort: 140
+- {category_id: phones, name: Phones, parent_id: wireless, sort: 1}
+- {category_id: cases, name: Cases, parent_id: wireless, sort: 2}
+- {category_id: screen_protectors, name: Screen Protectors, parent_id: wireless, sort: 3}
+- {category_id: chargers, name: Chargers & Power, parent_id: wireless, sort: 4}
+- {category_id: audio, name: Audio, parent_id: wireless, sort: 5}
+- {category_id: wearables, name: Wearables, parent_id: wireless, sort: 6}
+- {category_id: tablets, name: Tablets, parent_id: wireless, sort: 7}
+- {category_id: home_internet, name: Home Internet, parent_id: wireless, sort: 8}

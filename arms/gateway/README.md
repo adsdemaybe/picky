@@ -1,0 +1,173 @@
+# gateway
+
+**Purpose.** FastAPI backend in the middle of the pipeline (CLAUDE.md §2): the composition root that wires every
+service (real or fake), runs the trip state machine (planning + checkout + follow-up; the in-store part is a fleet
+shop goal run by a robot brain), publishes trip-flow events + `robot.state`, and serves REST + WebSockets to **the web
+app** (shopper, store-staff and fleet views), the Isaac sim workers and the messaging channel. It is the only place
+arms meet.
+
+## Scope (CLAUDE.md §3)
+
+- [x] **P0** Registry over `SERVICE_FACTORIES`: every arm's primary service + perception's `cameras` + agent's `brain`;
+  `PICKY_REAL_ARMS` takes arm names or service fields (`brain` = real robot brain, fake shopper agent); a real factory
+  that fails falls back to its fake (`/health` says so); `overrides=` for tests; `fleet.start()` at boot
+- [x] **P0** Trip flow: `intent → list_ready → recs_ready → route_planned → [awaiting_login →] executing ⇄
+  awaiting_approval → checkout → paid → followup → done` (+ `failed`). Fleet trips (`auto_execute`) skip login; a
+  pre-split `shopping_list` skips `expand_intent`; routes start at the assigned robot's pose
+- [x] **P0** EXECUTING = `fleet.execute_trip(trip_id, robot_id)`: completed → checkout batch → checkout; failed →
+  checkout if the cart has lines (+ `error`) else FAILED; cancelled → FAILED (old per-stop loop removed)
+- [x] **P0** TripController for the brain: `assign_robot`, `set_stop_status` (→ `stop.updated`), `check_line`
+  (full-line mandate pre-check), `ask` (fills ids / channels / expiry, flags over-budget detours, AWAITING_APPROVAL,
+  transparency outcome, declined detours excluded next trip), `update_list` mid-trip (sources + appends pending
+  stops), `replan` (from the robot's pose, includes new list items)
+- [x] **P0** Events: trip events built with `trip_envelope(trip)`; approvals carry the trip / goal envelope incl.
+  `request_id`; `robot.state` for EVERY robot (≤ 2 Hz/robot on `/ws`, full rate on `/ws/frames`)
+- [x] **P0** `/ws` filters `trip_id` / `store_id` / `robot_id` / `user_id` / `request_id` (repeatable, `event_matches`),
+  `after_seq` replay, trip/request sockets replay the ring, `trip.snapshot` per trip_id; client `chat` (+ `trip_id`),
+  `approval`, `robot_chat`, `ping`, extension `login`
+- [x] **P0** Every endpoint in `contracts/api.md`: NL requests, fleet robots / brain / steps / messages / goals / stop
+  (holds the robot) / resume,
+  goals CRUD + steps + cancel, categories, stock (levels / alerts / restock / adjust (422 for non-staff reasons) /
+  history), cameras (list / `snapshot.jpg` no-store / `stream.mjpg` / observe), sim status, + every v0.1 endpoint;
+  `X-Event-Seq` on every GET; KeyError 404 · ValueError 409 · validation 422 · RobotError 409 (404 unknown_robot)
+- [x] **P0** Cameras: MJPEG `multipart/x-mixed-replace; boundary=frame` (works in `<img>`, `fps` ≤ 15, `w`), JPEG
+  snapshot, `/ws/cameras/{id}`, multiplexed `/ws/cameras?camera_id=|store_id=|robot_id=` (≤ 5 fps per camera),
+  `/ws/frames?robot_id=|trip_id=` (camera.frame for every camera of the robot; legacy `frame` with `?legacy=1`).
+  Only `blurred=True` frames ever leave the gateway (snapshot → 503 otherwise)
+- [x] **P0** ApprovalBroker: web / ws / Photon answers, first wins, timeouts, `pending()` filters (trip / goal / robot
+  / store / user), `cancel()` (decision timeout, channel system, note), `note` on answers, checkout approval bound
+  to `cart_hash` (409 on mismatch). A text reply finds ITS approval even when the user has several live trips (split
+  request): `msg.trip_id` > `in_reply_to` (outbound message_id → approval map) > the user's oldest pending texted
+  approval
+- [x] **P0** `/ws/sim` multiplexed `SimLink`: several workers, routed by robot_id / store_id / camera_id (stop-all and
+  set_streams fan out, each worker gets only its cameras), `SimHello` + `SimHosted` to subscribers, `status()`; a
+  worker's disconnect fails only its in-flight commands and fans out a `SimHosted` with what is still hosted, so the
+  robot arm moves the lost stores onto the 2D fake at once
+- [x] **P0** Headless demo `make demo`: maya's request (fleet → Pico's brain → checkout → follow-up) + concurrent staff
+  shelf scan on Rhea → stock alerts, a second staff scan on Hazel at store_hill at the same time (3 robots, 2 stores)
+  → maya's second request picks the hot salsa and different recs (~8 s, fakes)
+- [x] **P1** `/debug` no-build page: NL request box (shopper / staff), fleet panel (robots per store, goals, cancel),
+  brain-step log + talk-to-robot, store map with route + every robot, camera grid (snapshot polling + up to 3 live
+  MJPEG tiles), stock alerts with restock, approvals, cart, recs, events
+- [x] **P1** `export_schemas` → OpenAPI + events (incl. fleet / brain / stock / camera events) + client messages
+- [x] **P0** Planner -> VLA -> verifier loop (contracts 0.2.1): the registry builds `LOOP_SERVICE_FACTORIES` too
+  (`planner` / `runner` agent, `vla` / `truth` / `faults` robot, `verifier` / `evidence` perception; real when the
+  field or its arm is in `PICKY_REAL_ARMS`, a raising real factory falls back to its fake, an arm without the factory
+  = "not wired"; `loop=False` for none). `PICKY_EXEC_MODE` blank = plan once the VLA + verifier are wired,
+  `direct` = kill switch; `/health` `details.exec_mode` (+ `fault_scenario`)
+- [x] **P0** Loop REST (`contracts/api.md`): `GET /api/goals/{id}/plan`, `/api/plans/{id}` (+ `/run`, `/attempts`),
+  `POST /api/plans/{id}/cancel` (goal plans via `fleet.cancel_goal`, dev plans via the runner),
+  `GET /api/evidence/{frame_id}.jpg` (blurred only, `w`) + `/annotations` (index fed by `step.verified` /
+  `target.grounded` / `camera.overlay`), `GET /api/fleet/robots/{id}/vla`, `/api/vla/execs/{id}` (+ cancel),
+  `/api/verifier` (+ `PUT /mode`, `/providers`), `POST /api/verify`; dev only (`PICKY_DEV=1`): `/api/dev/faults`
+  (GET / POST / DELETE), `/api/dev/faults/scenario`, `/api/dev/plans`
+- [x] **P0** Loop events on `/ws` with the same filters (`plan_envelope`); live-only `camera.overlay` on `/ws/frames`,
+  `/ws/cameras/{id}` and `/ws/cameras`; the runner's mirrored `brain.step` in the brain log
+- [x] **P0** Checkout guard: `start_checkout` waits while the goal's `PlanRunState.provisional_open` is true (the
+  loop's basket audit has not confirmed a provisional line; `error` code `basket_audit_pending`)
+- [x] **P0** `make demo` beat: plan mode + `drop_on_first_grasp`; the summary prints the injected fault, the
+  verifier's catch (reason + who verified) and the successful retry; fails if the catch or the retry is missing
+- [x] **P1** `/debug`: plan panel (steps grouped per item, state, tries, tier, check), VLA progress bar, verifier
+  panel (badge, mode switch, "check basket", verdicts with evidence thumbnail + reason + "verified by Perceptron /
+  sim ground truth / robot state", the "Verifier caught it" card), presenter fault controls (dev only)
+- [ ] **P1** `/api/trips/{id}/voice` Deepgram STT → agent → TTS (implemented over httpx, untested without a key)
+- [ ] **P2** Trip / approval persistence (in memory; a restart forgets them)
+
+## Contract
+
+| | |
+|---|---|
+| Implements | `TripController` (`TripOrchestrator`), `ApprovalBroker` (`GatewayApprovalBroker`), `EventPublisher` (`GatewayPublisher` over `utils.events.EventBus`), `SimLink` (`SimLinkHub`, multi-worker) — `contracts/services.py`, `contracts/sim.py` |
+| Serves | every endpoint + WebSocket in `contracts/api.md` (incl. the 0.2.1 loop routes, `loop_api.py`); client→server `/ws` = `api.ClientMessage` **plus** `{"type":"login","user_id":...,"robot_id"?}` |
+| Emits | trip flow (`trip.*`, `intent.received`, `list.ready`, `sourcing.split`, `recs.ready`, `route.planned`, `stop.updated`, `cart.updated`, `approval.*`, `mandate.decision`, `checkout.completed`, `followup.sent`, `feedback.received`, `profile.updated`), `robot.state`, live `camera.frame` / legacy `frame`, `error` |
+| Calls | loop: `runner.current_plan/get_plan/run_state/attempts/cancel/run_plan` · `planner.plan` · `vla.capabilities/get_exec/cancel` · `verifier.*` (+ `providers()` extra) · `evidence.get_frame` · `faults.*` (+ `scenario` / `rules` extras) · `fleet.start/shutdown/submit_request/execute_trip/...` · `brain.status/recent_steps` · `cameras.*` · `agent.expand_intent/source_list/respond/interpret_reply/compose_followup` · `catalog.*` (incl. categories + stock) · `recommender.*` · `routing.plan_route/grid_spec` · `robot.state/states/list_robots` · `trust.evaluate/checkout/record_transparency/ledger` · `messaging.*` |
+
+Stop ids: mandatory `item:<sku>` (mid-trip duplicates `item:<sku>:<item_id>`), optional `rec:<rec_id>`.
+
+## How to run
+
+```bash
+make demo                                   # all fakes, ~12 s, plan mode + one injected bad grasp; non-zero on failure
+make demo ARGS="--faults wrong_salsa"       # or slow_vla | verifier_down | foggy_basket | flaky_t1 | none
+make demo ARGS="--exec-mode direct"         # the v0.2 brain path (kill switch), no step plans
+PICKY_DEV=1 make dev                        # + presenter routes /api/dev/faults*, /api/dev/plans (fault panel on /debug)
+uv run python -m arms.gateway.demo --no-staff --quiet
+PICKY_REAL_ARMS=brain make demo             # real robot brain (needs GEMINI_API_KEY), everything else fake
+make dev                                    # API on :8000 → open http://localhost:8000/debug
+uv run python -m arms.gateway.export_schemas   # or: make gen-types
+uv run pytest arms/gateway
+# browser e2e of /debug (opt-in; the e2e group is not installed by `make setup` / CI):
+uv sync --group e2e && uv run --group e2e playwright install chromium
+PICKY_E2E=1 uv run --group e2e pytest tests/e2e -s   # screenshots in tests/e2e/artifacts/ (git-ignored)
+```
+`POST /api/requests` from `user_id: "staff"` without a `role` is treated as `role: "staff"`.
+
+**Approvals on the dev server wait for a person.** `make dev` / `uvicorn arms.gateway.app:app` builds the fake
+messaging with `reply_mode="off"`: texted approvals (incl. the checkout payment) stay pending until someone answers in
+the web app (`POST /api/approvals/{id}`, `/debug` buttons) or by a real text, and no scripted follow-up rewrites maya's
+profile. `PICKY_SCRIPTED_SHOPPER=1` turns the scripted shopper back on (unattended rehearsals only). `make demo`
+(`arms/gateway/demo.py`) always uses the scripted shopper.
+
+Sim worker (vhagar): connect to `ws://<gateway>:8000/ws/sim`, send `SimHello(token=PICKY_SIM_TOKEN,
+contracts_version="0.2.x", stores=[...], robots=[...], cameras=[...])`, then run with `PICKY_REAL_ARMS=robot`.
+Several workers may connect at once; `GET /api/sim/status` shows which stores / robots run on Isaac vs the 2D fake.
+
+## Demo-ready checklist (CLAUDE.md §6)
+
+- [x] Implements its Protocols fully; no `NotImplementedError` on demo paths
+- [x] `make demo` completes both requests + the staff scan with all fakes (< 30 s)
+- [ ] `make demo` with every arm real that has keys/extras (`PICKY_REAL_ARMS=all`) — run once all arms land
+- [x] Predictable failures degrade + emit `error` (no fleet, goal failed / cancelled, payment decline, approval
+  timeout, sim worker loss, unblurred frames dropped)
+- [x] Switch any service back to its fake by env flag alone
+- [x] Tests pass with base deps (gateway tests use stub fleet / brain / cameras in `tests/stubs.py`)
+- [x] `/debug` checked in headless Chromium (Playwright, `tests/e2e/test_debug_page.py`): fleet (3 robots, 2 stores),
+  goals, brain log, robots moving on the map, live MJPEG + snapshot grid decoding, stock alerts, no page errors
+- [ ] Frontend consumes `/ws` + schemas (frontend arm)
+- [x] README up to date
+
+## Judges' demo (contracts 0.2.4)
+
+- REST: `GET /api/users/{id}/purchases`, `GET /api/verifications`, `POST /api/verifications/{id}`,
+  `GET /api/trips/{id}/payment` (see `contracts/api.md`, "Judges' demo"); `JudgesIndex` keeps the verification
+  cards and payment timelines from the event stream and feeds the photos into the purchase rows.
+- Checkout runs through `arms.trust.run_payment_agent` (`payment.agent_step` events) when `PICKY_PAYMENT_AGENT` is on.
+- `make demo` prints the unload lines, the photo cards and the payment timeline, and fails when a completed plan did
+  not unload at the counter.
+
+## Known limitations
+
+- Trips, approvals and the event ring (last 1000 events) live in memory.
+- Loop: evidence annotations are an in-memory index of the last 500 frames. `/api/verifier/providers` uses the
+  verifier's `providers()` extra (else one row from `capabilities`). The fake evidence frames are synthetic (flat
+  thumbnails); `PICKY_REAL_ARMS=evidence` (no key) serves the 2D fake's real camera images, `perception` too.
+  `camera.overlay` is forwarded on the live sockets, but the runner does not emit it yet (P1). Checkout is held
+  (`error` code `basket_audit_pending`, trip stays executing) while the goal's `PlanRunState.provisional_open` is
+  true; nothing re-runs the audit after that, so a shopper who declined the audit retry needs staff. `vla.status` is throttled by the runner (its
+  producer), not by the gateway. With fakes the fault scenario is loaded by the demo; on `make dev` set
+  `PICKY_FAULTS` or use the presenter panel (`PICKY_DEV=1`).
+- `make demo` fails on any `error` event, failed stop, non-completed goal, skipped pipeline state, a trip paid over
+  budget without an approved over-budget ask, no stock alert after the staff scan, a request 2 that keeps the same
+  salsa / recs, or (plan mode) a shop trip without a completed step plan / a grasp fault that was not caught and
+  retried successfully. For a real arm expected to degrade use `make demo ARGS=--allow-errors`.
+- Checkout-batch picks are added as in-store lines at the checkout counter (the robot does not drive back for them).
+- Approvals go to the trip owner only (batched trips).
+- `assign_robot` publishes no event of its own (the fleet's `goal.assigned` carries the trip envelope).
+- The MJPEG endpoint is checked by a unit test of the part generator plus a live browser run (Starlette's
+  TestClient can't read an endless stream).
+- Contract workarounds: `ApprovalRequest` has no `request_id`, so the broker asks the orchestrator for the trip / goal
+  envelope (`envelope_hook`); broadcast sim commands (stop-all, set_streams) get per-worker cmd ids `<id>.<n>` and one
+  merged result.
+
+## Contributing to this arm
+
+1. Branch: `feat/gateway-<slug>` / `fix/gateway-<slug>` off `main` (CLAUDE.md §5).
+2. Stay in `arms/gateway/`. The gateway imports other arms only through their `__init__.py` factories, only from
+   `registry.py`.
+3. New endpoint or event? It must exist in `contracts/api.md` / `contracts/events.py` first (`contracts/<slug>` PR).
+4. Every new trip step: call services at call time via `self.services`, wrap it so a failure publishes `error` and the
+   trip continues, and add the event to `demo.describe()`.
+5. Before the PR: `uv run ruff check --fix arms/gateway && uv run ruff format arms/gateway && uv run pytest arms/gateway`,
+   then `make demo` and `PICKY_REAL_ARMS=<arm-you-touched> make demo`; run `make rules` after editing this README.
+
+Owner: TBD · Branch: `arm/gateway`

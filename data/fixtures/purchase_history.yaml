@@ -1,0 +1,44 @@
+# Picky demo data (DubHacks 2026): months of purchase history that SEEDS the purchase-history database
+# (arms/recommender/purchases.py, PICKY_PURCHASES_DB) for the judges' demo suggestion cards
+# (GET /api/users/{user_id}/suggestions) and GET /api/users/{user_id}/purchases. Fictional users (CLAUDE.md section 8).
+#
+# Generated deterministically RELATIVE to "now" (re-seeded when the seed is older than 6 h), so a card always reads
+# "You bought this 12 days ago — you usually buy it every 10 days". Per SKU: bought every `every` days, the last time
+# `last` days ago, going back `months` months (default 4); `qty` per purchase; `with` = also bought on the anchor
+# SKU's trips (every `with_every`-th anchor trip, skipping the newest `with_skip` of them) -> "frequently bought
+# together". Purchases on the same day share one trip. Prices = the store's shelf price; every SKU is a real sim item.
+schema_version: 1
+users:
+  maya:
+    store_id: store_ave
+    months: 4
+    items:
+      SALSA-MILD: {every: 10, last: 12, qty: 1, rating: 4}       # 2 days overdue -> the headline card
+      TORT-CORN: {every: 11, last: 12, qty: 1, rating: 5}        # 1 day overdue
+      LIMES: {every: 7, last: 8, qty: 4}                         # 1 day overdue
+      OAT-MILK: {every: 8, last: 9, qty: 1}                      # 1 day overdue
+      BEANS-BLACK: {every: 15, last: 16, qty: 2, rating: 4}      # 1 day overdue
+      AVOCADO: {every: 6, last: 6, qty: 3, rating: 4}            # due today
+      COFFEE: {every: 21, last: 18, qty: 1}                      # due in 3 days
+      HOTSAUCE-RED: {every: 30, last: 20, qty: 1, rating: 5}     # not due (hidden)
+      CHIPS-TORTILLA: {with: SALSA-MILD, with_every: 2, with_skip: 1, qty: 1}   # bought with salsa: complement + deal
+      CHEESE-MEX: {with: TORT-CORN, with_every: 2, with_skip: 1, qty: 1}       # bought with tortillas
+  sam:
+    store_id: store_ave
+    months: 3
+    items:
+      COFFEE: {every: 21, last: 2, qty: 1, rating: 4}
+      BANANAS: {every: 5, last: 5, qty: 1}
+      YOGURT-GREEK: {every: 7, last: 8, qty: 1, rating: 4}       # also on deal at the Ave
+      GRANOLA: {every: 14, last: 2, qty: 1, rating: 5}
+      OAT-MILK: {every: 9, last: 11, qty: 1}
+      PRETZELS: {every: 10, last: 11, qty: 1}                    # out of stock at the Ave -> a substitute card
+  jordan:
+    store_id: store_hill
+    months: 3
+    items:
+      TORT-FLOUR: {every: 12, last: 14, qty: 2, rating: 4}
+      BEANS-REFRIED: {every: 12, last: 14, qty: 2, rating: 4}
+      CHIPS-TORTILLA: {every: 10, last: 7, qty: 1, rating: 5}
+      COLA: {every: 9, last: 10, qty: 2}
+      CEREAL-OATS: {every: 16, last: 7, qty: 1, rating: 4}

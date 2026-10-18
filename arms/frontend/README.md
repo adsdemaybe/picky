@@ -1,0 +1,277 @@
+# arms/frontend
+
+**Purpose.** The shopper and merchant web UI: live sim view, store map with route + recommendation detours, cart,
+budget, chat, approvals, trust ledger, and the merchant dashboard. It is the screen judges watch. Pipeline position:
+`shopper ─ web ─▶ frontend ─▶ gateway` (PLAN) and `gateway events ─▶ /ws ─▶ frontend` (SHOP / PAY / AFTER / MERCHANT),
+see CLAUDE.md §2. It talks **only** to the gateway (REST + WS), never to another arm.
+
+Owner: TBD · Branch: `arm/frontend`
+
+> Node app is **not scaffolded yet**. The owner runs the setup below on `arm/frontend`. No Python lives here, so this
+> arm has no `__init__.py` / `fake.py` / `service.py` (the gateway's all-fake mode is the frontend's "fake backend").
+
+## Scope (CLAUDE.md §3)
+- [x] **P0** `/debug` fallback page: provided by the gateway (`arms/gateway/static/debug.html`, `GET /debug`); don't rebuild it
+- [x] **P0** `useEventSocket` hook + zustand store fed by `/ws?trip_id=` (snapshot, dedupe by `seq`, resume `after_seq`)
+  (`src/lib/gateway/eventSocket.ts` + `tripSource.ts` feeding the existing `useTrip` store)
+- [x] **P0** Shopper: intent box → `POST /api/requests` (v0.2; request trips auto-execute), Cart, BudgetBar, approval
+  cards (incl. checkout with `cart_hash`, 409 → refetch and re-ask)
+- [x] **P0** StoreMap SVG: fixtures from planogram, route polyline (solid mandatory, **dashed detours**), skipped recs
+  as hollow markers, live robot pose, stop status colors
+- [ ] **P0** Rec cards with reason + signals + "Sponsored" badge when `sponsored=true` (CLAUDE.md §8)
+- [x] **P0** LiveSimView: blurred frames for the trip's robot (`stream.mjpg` for the big view, polled `snapshot.jpg`
+  for thumbnails/insets; manual `/ws/frames` source reads v0.2 `camera.frame`)
+- [x] **P0** PickChoice top-3 produce picker (freshness score + reason + thumbnail)
+- [ ] **P0** ChatPanel with streaming `agent.message` deltas
+- [ ] **P0** Receipt + follow-up/profile-update panel showing trip 2 is smarter (receipt, follow-up 1–5 →
+  `POST /feedback`, "Picky learned" toast work; no side-by-side trip-2 view yet)
+- [ ] **P1** TrustLedger: mandate, live APPROVE / NEEDS_APPROVAL / DENY decisions, transparency log, receipts, audit chain
+- [ ] **P1** Merchant dashboard: OOS table, mispricing table, shelf heatmap (SVG over planogram), KPI tiles (Recharts)
+- [ ] **P1** Push-to-talk voice (`POST /voice`; Web Speech + `WsChat channel="voice"` fallback on 503)
+- [ ] **P1** "List-only route vs route with detours" comparison (`+12 m, 25 s` from `Stop.detour_m/detour_s`)
+- [ ] **P2** Mandate editor (`PUT /mandate`), profile editor (`PUT /profile`), batched-shopper view, map pan/zoom
+  (mandate sliders + learned-pref delete on Permissions read/write the gateway; the rest not started)
+
+## Contract
+- **Implements:** no Python Protocol (Node app). Consumes the gateway API in `contracts/api.md`.
+- **In (server → client):** `contracts.events.Event` on `WS /ws?trip_id=<id>[&after_seq=<n>]` (first message is
+  `trip.snapshot`; `seq` is bus-wide, gaps are normal, dedupe by `seq`; `robot.state` ≤ 2 Hz) and on
+  `WS /ws/frames?trip_id=<id>` (`frame` events, always `blurred=true`, plus full-rate `robot.state`; live-only, `seq=0`).
+  Merchant page uses `WS /ws?store_id=<id>`; `/debug` may use bare `WS /ws` (everything).
+- **Out (client → server):** `api.ClientMessage` on `/ws?trip_id=`: `{"type":"chat","text","channel"}`,
+  `{"type":"approval","response": ApprovalResponse}`, `{"type":"ping"}`; REST bodies `api.CreateTripRequest`,
+  `api.RobotLoginRequest`, `api.PostMessageRequest`, `api.ApprovalDecisionRequest` (echo `cart_hash` for checkout
+  approvals, `choices` for multi-select), `profile.Feedback`, `trust.IntentMandate`, `profile.UserProfile`.
+- **Events emitted:** none (only the gateway/agent publish). **services.\*** called: none (gateway only).
+- **Types:** generated, never hand-written (CLAUDE.md §7). See "Type generation".
+
+### Component → endpoints + events
+
+| Component | REST | WS events consumed (`/ws` unless noted) | Sends |
+|---|---|---|---|
+| `useEventSocket` + `tripStore` (zustand) | `GET /api/trips/{id}` (cold load) | **all**; reduce into `Trip`; `trip.snapshot` replaces state; `trip.state_changed`; `error` → toast | `ping` every 20 s |
+| IntentBox (home) | `POST /api/trips` (`CreateTripRequest`, `user_id="maya"`), `GET /api/trips?user_id=` | `trip.created`, `intent.received`, `list.ready`, `sourcing.split` | – |
+| ShoppingList / SourcingSplit | – | `list.ready`, `sourcing.split` (in-store / online / unresolved badges) | – |
+| RecCards | – | `recs.ready` (`recs` + `checkout_recs`), `stop.updated` (declined/skipped) | – |
+| **StoreMap** (SVG) | `GET /api/stores/{store_id}/planogram` (fixtures, aisles, slots, entrance/checkout), `GET /api/stores/{store_id}/grid` (optional overlay) | `route.planned` (legs → polylines; `kind="optional"` legs dashed amber; `skipped_optional` → hollow markers; `replan=true` replaces), `stop.updated`, `robot.state`, `robot.arrived`, `scan.result` (slot flash) | – |
+| **LiveSimView** | – | `/ws/frames`: `frame` (`<img src="data:image/jpeg;base64,…">`), full-rate `robot.state` | – |
+| RobotLogin | `POST /api/trips/{id}/login` (`RobotLoginRequest`) | `trip.state_changed` → `executing` | – |
+| **Cart** | – | `cart.updated`, `item.picked`, `basket.verified` (✓/✗ per line) | – |
+| **BudgetBar** | – | `cart.updated` (`total_cents`, `budget_cents`, `remaining_cents` < 0 = red), `mandate.decision` (`remaining_cents`) | – |
+| **ChatPanel** | `POST /api/trips/{id}/messages` (fallback), `POST /api/trips/{id}/voice` (P1) | `agent.message` (append `delta` by `message_id`; `done` ends stream; `role="user"` echoes) | `chat` |
+| **ApprovalModal** | `GET /api/approvals?trip_id=` (on reconnect), `POST /api/approvals/{id}` (`ApprovalDecisionRequest`; 409 = cart changed → refetch) | `approval.requested`, `approval.resolved`, `mandate.decision` (show verdict + reasons) | `approval` (WS path) |
+| **PickChoice** (top-3) | `POST /api/approvals/{id}` with `decision="choice", choice=<instance_id>` | `pick.choices` (`choice.candidates` rank/score/reason/thumbnail; `approval_id`) | `approval` |
+| CheckoutPanel / Receipt | `POST /api/trips/{id}/checkout` → `CheckoutStatus` (`cart_hash`, `decision`, `approval`) | `mandate.decision`, `approval.requested` (kind `checkout`), `checkout.completed` (`receipt.status`, `provider` → "Sandbox" label) | – |
+| Follow-up / ProfileDiff | `POST /api/trips/{id}/followup` (demo cue), `POST /api/users/{id}/feedback`, `GET /api/users/{id}/profile` | `followup.sent`, `feedback.received`, `profile.updated` (show `ProfileChange`s) | – |
+| **TrustLedger** | `GET /api/trust/ledger?user_id=&trip_id=`, `GET /api/users/{id}/mandate` | `mandate.decision`, `approval.resolved`, `checkout.completed`, `recs.ready` (refetch) | – |
+| Merchant: **OOS table**, **Mispricing table**, **Shelf heatmap**, KPIs | `GET /api/merchant/{store_id}/dashboard` (`out_of_stock`, `mispricings[].delta_cents`, `heatmap[].rect/value`, `near_expiry`, `kpis`), `GET /api/stores/{store_id}/planogram` (heatmap base), `GET /api/stores/{store_id}/near-expiry` | `/ws?store_id=`: `scan.result` → refetch dashboard (debounced 1 s) | – |
+| Header / StoreSelect | `GET /health` (`real_arms`, `sim_connected` badge), `GET /api/stores` | – | – |
+| **/debug** | `GET /health`, `POST /api/trips`, `GET /api/trips/{id}`, `GET /api/approvals?trip_id=`, `POST /api/approvals/{id}`, `POST /api/trips/{id}/login`, `/checkout`, `/followup`, `POST /api/dev/inbound` | bare `/ws` or `/ws?trip_id=`: every event as raw JSON | `chat`, `approval` |
+
+Map rules: SVG `viewBox` in store meters from `planogram` bounds, content inside `<g transform="scale(1,-1)">`
+(world frame: x right, y up, origin bottom-left, theta CCW from +x); put `<text>` **outside** the flipped group.
+Look up stops by `stop_id` in `route.stops`; progress lives in `Trip.stop_status` / `stop.updated`, not the route.
+Money is integer cents; format only at render (`(c/100).toFixed(2)`).
+
+## Stack (CLAUDE.md §9, docs/research.md §9.10)
+- **Pick:** Next.js 16.4 (App Router, Turbopack) + React 19 + Tailwind 4.3 + shadcn/ui (CLI 4.22) + zustand +
+  Recharts 3.10; hand-written SVG store map; live view = JPEG frames over WS into `<img>`. Node 22 LTS (`.nvmrc`), pnpm.
+- **Types:** openapi-typescript 7.13 (REST) + json-schema-to-typescript (WS events).
+- **Fallback:** Vite + React; recorded `<video autoplay loop>` as the live view; Leaflet `L.CRS.Simple` only if pan/zoom
+  is needed. The `/debug` page is the always-working fallback UI. (Streamlit hurts the UX score.)
+- **Gotchas:** connect the browser **directly** to FastAPI (`NEXT_PUBLIC_GATEWAY_URL`, gateway allows CORS for :3000);
+  do **not** proxy websockets through Next and no Server Actions for robot traffic. All live components are
+  `"use client"` (Recharts too). Discriminated unions come out as `oneOf` + discriminator; narrow on `event.type`.
+  Stale routes: apply a `route.planned` only if its `seq` is higher than the last one applied.
+  Never render an unblurred frame (the contract rejects them; don't add a bypass). **≤ 2 h on map polish before P0 works.**
+
+## Type generation
+```
+contracts/*.py ──make gen-types──▶ uv run python -m arms.gateway.export_schemas
+                                   ├─ arms/frontend/schemas/openapi.json        (FastAPI app.openapi())
+                                   └─ arms/frontend/schemas/events.schema.json  (events.event_json_schema())
+               ──pnpm gen-types──▶ src/lib/gateway/api-types.ts  (openapi-typescript) → components["schemas"]["Trip"] ...
+                                   src/lib/gateway/events.ts     (json-schema-to-typescript) → GatewayEvent union on "type"
+```
+`pnpm gen-types` = `node scripts/gen-types.mjs` (openapi-typescript 7.13 + json-schema-to-typescript 15; per-field
+pydantic `title`s are stripped first so the event types keep their contract names instead of `Sku1`/`TripId2` aliases).
+It reads `schemas/*.json`, or fetches them from a running gateway with `--url http://localhost:8000` (or `--live`, which
+uses `NEXT_PUBLIC_GATEWAY_URL`) and rewrites `schemas/`. Commit `schemas/` and both generated files (ESLint ignores
+them); on merge conflicts regenerate, never hand-merge. Re-run after every `contracts/` change
+(`git fetch && git merge origin/main && make gen-types`).
+
+## Files (planned)
+| Path | What |
+|---|---|
+| `schemas/` | JSON schemas exported by the gateway (`make gen-types`) |
+| `src/lib/api-types.ts`, `src/lib/events.ts` | generated TS types (do not edit) |
+| `src/lib/api.ts` | typed `fetch` wrappers over `NEXT_PUBLIC_GATEWAY_URL` |
+| `src/lib/useEventSocket.ts`, `src/lib/useFrames.ts` | `/ws` (reconnect with `after_seq`, seq dedupe) and `/ws/frames` hooks |
+| `src/store/trip.ts` | zustand store: event reducer → `Trip`, chat buffers, pending approvals, robot pose |
+| `src/app/page.tsx` | shopper view (IntentBox → StoreMap + LiveSimView + Cart/BudgetBar + ChatPanel + modals) |
+| `src/app/merchant/[storeId]/page.tsx` | merchant dashboard |
+| `src/app/debug/page.tsx` | raw fallback UI |
+| `src/components/` | `StoreMap`, `LiveSimView`, `Cart`, `BudgetBar`, `ChatPanel`, `ApprovalModal`, `PickChoice`, `RecCards`, `TrustLedger`, `Receipt`, `ProfileDiff`, `merchant/{OosTable,MispricingTable,ShelfHeatmap}` |
+
+## How to run
+
+### Demo app (works today, no backend)
+UI: shadcn/ui (radix) + Lucide on a custom token set; design direction and rules in [`DESIGN.md`](DESIGN.md).
+The shopper app in `src/` runs entirely on generated demo data plus a client-side trip replay. See
+[`APP_PLAN.md`](APP_PLAN.md) for the screens, data flow and task list.
+```bash
+cd arms/frontend
+npx pnpm@10.18.3 install         # or `pnpm install` if pnpm is on PATH
+npx pnpm@10.18.3 gen-data        # data/*.yaml → src/data/generated/*.json (gitignored; also runs before dev/build)
+npx pnpm@10.18.3 dev             # http://localhost:3000 : Overview, Purchases, New order, Live trip, Permissions
+```
+- **Live feed (`/live`, connecting the real robot):** one connection layer in `src/lib/feed.ts`, three sources picked
+  on the Live page (saved per browser): **Simulated** (in-browser trip, no backend), **Robot gateway**
+  (`WS /ws/frames?trip_id=|robot_id=` → `camera.frame` per camera `front|wrist|basket|ceiling`, only `blurred=true`
+  drawn, plus `robot.state` for pose/status/basket; `GET /health` for the status box; auto-reconnect with backoff), and
+  **Direct streams** (an MJPEG/MP4 URL per camera). Preset with `NEXT_PUBLIC_GATEWAY_URL` / `NEXT_PUBLIC_STREAM_URL`. The
+  gateway must allow CORS from the app origin. The trip page's camera panel uses the same source. A followed gateway
+  trip binds the feed to its robot automatically (below).
+- **Ask Picky (Claude):** `cp .env.example .env.local` and set `ANTHROPIC_API_KEY`. The `/api/chat` route runs Claude
+  (`claude-opus-5-5`, low effort, server-side refusal fallback) over deterministic tools in `src/lib/assistant/tools.ts`;
+  with no key or on any API error it answers offline from the same tools. Stand-in until the agent arm is reachable
+  through the gateway.
+- **Guided voice trips (`/voice`, default "Plan a trip" mode):** say "Voice, let's do a weekly restock".
+  Finished speech prepares a proposal automatically (typed commands work too): approve the list → select optional
+  add-ons (none preselected) → review the total and fulfillment → explicitly confirm dispatch. Replies such as "yes",
+  "add the yogurt", "both", "no extras", "back" and "cancel" drive the same state machine as the buttons. Browser
+  speech synthesis reads questions aloud (toggle available); starting the microphone cancels playback. Ask Picky
+  has the same guided flow and a microphone button, with deterministic chat handling that needs no LLM credentials.
+  Final confirmation opens `/trip`. It cannot skip the list/add-on gates, duplicate dispatch, override a hard mandate
+  denial, or silently replace an active trip. Auto-answer is disabled on dispatch; checkout still requires its own
+  approval. This runs through the existing **browser demo**, not the gateway robot. Run `pnpm check:trip-guide` for
+  the full confirmation flow, add-on selection, cancellation, guards and a pickup run that pauses at checkout.
+- **Voice & memory (`/voice`):** browser Web Speech recognition (standard or `webkitSpeechRecognition`), live
+  editable transcript, explicit save in "Remember information" mode, and typing fallback. Saves preferences, shopping requests and free-form notes
+  through `GET/POST/PATCH/DELETE /api/memory`. Edit/delete controls change the stored record; shopping requests open
+  `/order?intent=...`. Ask Picky can recall the latest notes offline, and its LLM tools can read them for context.
+  Only reviewed text is stored; Picky never records audio. The browser's speech provider may process microphone
+  audio remotely (disclosed beside the form). Permission denial, unsupported browsers, no speech and network errors
+  keep the typing path available; recording stops after 60 seconds and on unmount.
+  Persistence is an atomic JSON file at `arms/frontend/.data/shopper-memory.json` when started from this directory
+  (gitignored, local demo server, shared fictional Maya profile). It survives app restarts on the same disk. This is
+  not authenticated multi-user storage and is not synced to the gateway profile/mandate. Saved notes never authorize
+  spending. Deployments need persistent writable storage; stateless/serverless hosts need a database adapter.
+  Run `pnpm check:memory` for validation, concurrent saves, restart persistence, edits/deletes, recall and transcript
+  merging. Actual microphone capture requires a supported browser on HTTPS or localhost.
+- **Grocery trip types:** `/order` offers taco night, weekly restock, breakfast, fresh produce and pantry refill.
+  Each has its own catalog-backed basket and route thumbnail. Food lists are grouped by department with subtotals
+  and aisle locations. The larger route preview compares the list-only path with selected extras and shows numbered
+  picking order; it uses the same `buildTripPlan` as playback. Direct links: `/order?preset=breakfast`,
+  `/order?preset=produce`, `/order?preset=pantry`, `/order?preset=tacos`, `/order?preset=basics`.
+  These remain **frontend demo scenarios**, not gateway-backed trips. Run `pnpm check:grocery` to verify distinct
+  paths, shelf avoidance, online-item exclusion, preview/playback agreement and all five demo checkouts.
+- **Stores:** grocery (`store_ave`, generated from `data/`) and a demo T-Mobile store (`src/data/stores/tmobile.ts`,
+  frontend-only fixture until the catalog arm adds a planogram for it).
+- **Not wired yet:** merchant dashboard, staff/fleet views, trip chat (`agent.message`), voice.
+
+### Gateway mode (the real backend)
+Set `NEXT_PUBLIC_GATEWAY_URL` (e.g. `http://localhost:8000`, `make dev` at the repo root) in `.env.local`. **Gateway
+mode = that URL is set AND `GET /health` answers** (2.5 s timeout, re-checked every 15 s and on focus); otherwise every
+screen keeps running on the demo data + replay exactly as above. The TopBar chip says which: **Live** (tooltip: contracts
+version, sim vs 2D fake, real arms), **Demo data**, or **Reconnecting** while a followed trip's socket is down.
+- **Robot page, grocery store:** "Plan it" stays the instant local preview; **Send the robot** posts the text to
+  `POST /api/requests` (the fleet picks the robot, request trips start by themselves) and opens
+  `/trip?trip=<id>&request=<id>`. Gateway unreachable → toast + the demo trip. T-Mobile always stays demo.
+- **Trip page** (`src/lib/gateway/tripSource.ts`): `GET /api/trips/{id}` then `WS /ws?trip_id=` (first message
+  `trip.snapshot`, ring replay for the event log, live events; reconnect with `after_seq`), mapped onto the same
+  `useTrip` store (`source: "gateway"`). Cards are answered with `POST /api/approvals/{id}` (409 → refetch + re-ask,
+  404 → closed elsewhere); no auto-answer, pause or speed for a real robot. Adds a "What <robot> is thinking" log
+  (`GET /api/goals/{id}/steps` + `brain.step`), a Stop-robot button, delivery fee row, follow-up 1–5 → feedback.
+  `/trip?trip=<id>` (reload, shared link) follows that trip again.
+- **Cameras:** big view = `GET /api/cameras/<robot>.front/stream.mjpg` (one MJPEG per page), thumbnails and the
+  wrist/basket insets = `snapshot.jpg` polling. The gateway blurs every frame it serves.
+- **Judges' demo (Home → `/watch`):** Home's **Running low** card reads `GET /api/users/maya/suggestions` (image from
+  `GET /api/products/{sku}/image.jpg`, "You bought this 12 days ago", price; falls back to the same rows computed from
+  the demo history when the endpoint or gateway is missing, or with `NEXT_PUBLIC_SUGGESTIONS_MOCK=1`). Tap to pick, then
+  **Order these (N) — $X** posts `{user_id, store_id, items:[{sku, qty, note}], text}` to `POST /api/requests` (exact
+  SKUs; a pre-0.2.3 gateway that rejects `items` gets the same order as text) and opens `/watch?trip=<id>`, the
+  projector view (1080p and 1440×900): big panel = `<robot>.director/stream.mjpg?fps=10` (Isaac chase camera), second
+  panel = `<robot>.front.perceived/stream.mjpg` (Perceptron Mk1.5 boxes; "ground-truth boxes" unless the real cameras
+  arm is on) with a `<robot>.wrist.perceived` snapshot inset, plus plan, approvals (checkout tap), basket and budget,
+  route map, thinking log. Each camera walks a ladder (MJPEG → snapshots → ceiling / raw front camera → the in-browser
+  replay), re-probes the better sources every 15 s, and its badge names the source (`CameraInfo.source`: Isaac Sim or
+  2D sim). With no gateway the same button runs the replay of that order on `/watch`. `/trip` ⇄ `/watch` links both ways.
+  Suggestion cards also show the "why" (an `AI:` prefix when `ranked_by="llm"`), the signal chips, and the 0.2.3 kinds
+  (substitute "Instead of …", complement "Goes with …", deal text).
+- **Checkout handoff (basket → counter):** at checkout the projector and trip pages show **Unloading at the counter**
+  (Basket | Gripper | Counter, tiles fly across, "Unloading 2/7" on the plan's last stop, `SO-101 arm · <tier>` badge).
+  Gateway (0.2.4): `checkout.unload` drives it unit by unit (`started` = basket → gripper, `placed` / `verified` =
+  counter, `done` = basket empty) and its `text` is the card's line ("Unloading 3/9: Mild Chunky Salsa → counter ✓");
+  the loop's `grasp` (`source: basket`) / `place` (`destination: counter`) steps open the card, and a `handoff` step
+  alone (worker without `basket_unload`) moves the whole basket; units also leave the basket with
+  `robot.state.basket_skus`. A multi-option "Want any of these before checkout?" card has a **No thanks** answer. Replay: the arm carries each unit out of the basket onto the counter in the simulated
+  front and wrist cameras before the payment agent runs.
+- **Photo review cards:** produce review (`pick_choice`; `multi` + `payload.qty` = choose N units, `payload.photos` /
+  `thumbnail_b64` = photos) and per-item purchase checks (`verify_item` approvals and `item.verification` events:
+  photo, ✓ / ✗ answered as `choice` `correct` / `wrong`, countdown to the gateway's own auto-accept). Without gateway
+  checks, each pick gets a client-side check with a wrist-camera frame (`NEXT_PUBLIC_JUDGES_MOCK=0` turns that off).
+- **Visa payment agent:** checkout is a timeline (mandate check → token → your approval with a passkey-style button →
+  authorized → receipt), labelled "Sandbox / simulated". `payment.agent_step` events (`contracts.trust.PaymentAgentStep`
+  names: `cart_mandate`, `token_issued`, `passkey_requested|verified`, `authorized`, `captured`, `receipt_signed`, …)
+  drive the rows and their narration; without them the rows are derived from the trip (mandate decision, checkout
+  card, receipt).
+- **Purchase history:** Spending reads `GET /api/users/maya/purchases` (badge "From the purchase-history database",
+  unit photos from `photo_urls`), else the demo history (`NEXT_PUBLIC_PURCHASES_MOCK=1` forces it).
+- **Also live:** Permissions (mandate + learned prefs GET/PUT), Spending ratings → `POST /api/users/maya/feedback`,
+  the trip's receipt in Spending/Home. Find, price history, advice and Ask stay on demo data (no endpoints yet).
+- Types: `pnpm gen-types` (see "Type generation").
+
+### Full stack (planned)
+```bash
+# one-time scaffold (owner, on arm/frontend)
+nvm use 22 && corepack enable
+pnpm create next-app@latest arms/frontend --ts --tailwind --app --turbopack --use-pnpm   # keep this README
+cd arms/frontend && pnpm dlx shadcn@latest init && pnpm dlx shadcn@latest add button card dialog badge progress table sonner
+pnpm add zustand recharts && pnpm add -D openapi-typescript@7.13.0 json-schema-to-typescript
+echo "NEXT_PUBLIC_GATEWAY_URL=http://localhost:8000" > .env.local
+
+# every time (repo root)
+make dev            # gateway on :8000, all arms fake (= the frontend's fake backend)
+make gen-types      # after any contracts change
+make web            # pnpm dev on :3000 → http://localhost:3000, /debug, /merchant/store_ave
+PICKY_REAL_ARMS=robot,routing make dev   # same UI against real arms
+cd arms/frontend && pnpm tsc --noEmit && pnpm lint   # "tests" for this arm (CI: Node 22 + pnpm)
+```
+Demo cue without a phone: `POST /api/dev/inbound` from `/debug` simulates maya's text.
+
+## How to contribute to this arm
+Follow CLAUDE.md §5 exactly; frontend specifics:
+1. Claim the draft PR: `gh pr list --label arm:frontend` → `gh pr edit <n> --add-assignee @me`.
+2. `git fetch && git switch arm/frontend && git merge origin/main`, then `make gen-types`.
+3. Work only in `arms/frontend/`. Never hand-edit generated types; if a field is missing, propose a `contracts/<slug>` PR.
+4. Before pushing: `pnpm tsc --noEmit && pnpm lint`, `make check`, and a full fake trip in the browser (`make dev` + `make web`).
+5. After editing this README run `make rules` and commit `.cursor/rules/`.
+6. Ready = demo-ready checklist below ticked + a screenshot/GIF of the taco trip in the PR, then `gh pr ready <n>`.
+   Later changes: `feat/frontend-<slug>` / `fix/frontend-<slug>` branches, one PR each.
+
+## Demo-ready checklist (CLAUDE.md §6)
+- [ ] `/debug` drives maya's whole taco trip against all-fake gateway (create → login → approvals → checkout → follow-up)
+- [ ] Shopper page shows the full P0 flow with no manual refresh: list + split sourcing → 3 rec cards with reasons →
+  route with dashed detours → robot moving on map + live view → top-3 produce pick → cart/budget update → mandate
+  verdict → checkout approval (cart-hash echoed) → receipt labelled "Sandbox / test mode" → follow-up → profile diff
+- [ ] Trip 2 visibly smarter (different salsa first / spicier recs) on the same screen
+- [ ] Survives gateway restart / WS drop: reconnect with `after_seq`, snapshot resync, no duplicate cart lines
+- [ ] Predictable failures degrade: `error` events → toast; `/voice` 503 → Web Speech; no frames → map-only + "sim offline";
+  409 on checkout approval → refetch and re-ask
+- [ ] Works with any mix of `PICKY_REAL_ARMS` (frontend has no flag of its own; all-fake gateway is its fallback)
+- [ ] Merchant page shows OOS, mispricing and heatmap for `store_ave` updating from `scan.result`
+- [ ] Sponsored badge rendered when set; every rec shows its reason; only blurred frames rendered
+- [ ] `pnpm tsc --noEmit` + lint green; generated types up to date; no secrets in the client bundle (only `NEXT_PUBLIC_GATEWAY_URL`)
+- [ ] Projector check: readable at 1080p, works on a 1440×900 laptop
+
+## Known limitations
+- Gateway mode: the order page's list, recs, advice and rules are a local preview (no dry-run endpoint); the robot
+  re-plans from live stock and asks before every extra, so the trip can differ from the preview. Rec keep/skip
+  toggles aren't sent (the robot asks instead).
+- Gateway mode: this branch's `data/` is older than the gateway's; unknown SKUs get a placeholder tile until
+  `GET /api/products/{sku}` answers, unknown stores load their map from `GET /api/stores/{id}/planogram`.
+- Gateway mode: after a cold reload only the basket checks still in the gateway's 1000-event ring show as "Checked"
+  (cart lines carry no verified state).
+- No auth: `user_id` is picked from the demo users (fictional, `data/fixtures/users.yaml`).
+- Map is static SVG (no pan/zoom) sized for `store_ave` (~14 m × 22 m) and `store_hill`; `online` has no map.

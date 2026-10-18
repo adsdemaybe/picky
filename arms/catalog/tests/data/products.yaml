@@ -1,0 +1,16 @@
+# Test fixture for arms/catalog tests only (same schema as data/products.yaml; NOT the demo catalog).
+schema_version: 1
+products:
+  - {sku: tortillas_corn, name: Corn Tortillas 30ct, brand: La Prueba, category: bakery, tags: [taco, mexican], dietary: [vegetarian, vegan, gluten_free], price_cents: 349, unit: pack, barcode: "0850000000018"}
+  - {sku: ground_beef, name: Ground Beef 80/20 1 lb, category: meat, tags: [taco, protein], price_cents: 699, unit: pack, size: 1 lb, barcode: "0850000000025", perishable: true, shelf_life_days: 5}
+  - {sku: black_beans, name: Black Beans 15 oz, category: pantry, subcategory: canned, tags: [taco, mexican, protein], dietary: [vegetarian, vegan], price_cents: 129, barcode: "0850000000032", asset: {shape: cylinder, dims_m: [0.075, 0.075, 0.11], label_color: "#222222"}}
+  - {sku: cheese_mexican, name: Mexican Blend Shredded Cheese, category: dairy, tags: [taco, cheese], dietary: [vegetarian], allergens: [milk], price_cents: 449, barcode: "0850000000049", perishable: true}
+  - {sku: salsa_mild, name: Mild Salsa Roja, category: pantry, subcategory: salsa, tags: [salsa, mild, taco], dietary: [vegetarian, vegan], spice_level: 1, price_cents: 399, barcode: "0850000000056"}
+  - {sku: salsa_hot, name: Habanero Salsa, category: pantry, subcategory: salsa, tags: [salsa, spicy, hot, taco], dietary: [vegetarian, vegan], spice_level: 4, price_cents: 449, barcode: "0850000000063"}
+  - {sku: hot_sauce, name: Chipotle Hot Sauce, category: pantry, subcategory: condiments, tags: [spicy, hot_sauce], dietary: [vegan], spice_level: 3, price_cents: 399, barcode: "0850000000070"}
+  - {sku: avocado, name: Hass Avocado, category: produce, tags: [taco, guacamole], dietary: [vegan], price_cents: 129, barcode: "0850000000087", perishable: true, shelf_life_days: 5, asset: {shape: sphere, dims_m: [0.08, 0.08, 0.1], label_color: "#2e5e1e"}}
+  - {sku: lime, name: Limes, category: produce, tags: [citrus], dietary: [vegan], price_cents: 39, barcode: "0850000000094", perishable: true}
+  - {sku: guac_kit, name: Guacamole Kit, category: deli, tags: [guacamole, dip], dietary: [vegetarian], price_cents: 599, barcode: "0850000000100", perishable: true, shelf_life_days: 7}
+  - {sku: cotija, name: Cotija Cheese, category: dairy, tags: [cheese, mexican], dietary: [vegetarian], price_cents: 549, barcode: "0850000000117", online_only: true}
+  - {sku: sour_cream, name: Sour Cream 16 oz, category: dairy, tags: [taco, dairy], dietary: [vegetarian], price_cents: 279, barcode: "0850000000124", perishable: true}
+  - {sku: cilantro, name: Cilantro Bunch, category: produce, tags: [herb, taco], dietary: [vegan], price_cents: 99, unit: bunch, barcode: "0850000000131", perishable: true}
