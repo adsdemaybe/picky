@@ -140,10 +140,15 @@ def test_committed_map_covers_every_product():
 
     path = REPO / "data" / SKU_ASSETS_FILE
     sa = SkuAssets.load(path, "/assets", exists=lambda p: True)
-    products_ = load_products(str(REPO / "data"))
+    all_products = load_products(str(REPO / "data"))
+    # The map covers the stores it was generated from (sku_assets.yaml -> generated_from.planograms); SKUs that only
+    # live in other stores (e.g. store_tmobile) are unmapped on purpose and render as today's primitive + label.
+    mapped_stores = _mapped_store_ids(path)
+    products_ = {s: p for s, p in all_products.items() if s in sa.entries or _stocked_in(s, mapped_stores)}
     assert set(sa.entries) == set(products_)
     renders = [e["render"] for e in sa.entries.values()]
     assert renders.count("asset") + renders.count("parts") + renders.count("primitive") == len(products_)
+    assert all(sa.resolve(s) is None for s in set(all_products) - set(sa.entries))  # unmapped -> primitive fallback
     resolved = {s: sa.resolve(s) for s in products_}
     gaps = {s for s, e in sa.entries.items() if e.get("match") == "gap"}
     by_design = {s for s, e in sa.entries.items() if e["render"] == "primitive"}
@@ -155,6 +160,22 @@ def test_committed_map_covers_every_product():
         assert min(ua.dims) > 0 and all(f.startswith("/assets/") for f in ua.files()), sku
         assert ua.render == "parts" or ua.usd.endswith("/item.usda"), sku
         assert all(b.color is None or b.color.startswith("#") for b in ua.boxes), sku
+
+
+def _mapped_store_ids(map_path) -> set[str]:
+    """Store ids named in sku_assets.yaml's generated_from.planograms ("data/planograms/store_ave.yaml, store_hill.yaml")."""
+    import re
+
+    import yaml
+
+    planos = yaml.safe_load(open(map_path))["generated_from"]["planograms"]
+    return set(re.findall(r"(store_[a-z0-9_]+)\.yaml", planos))
+
+
+def _stocked_in(sku: str, store_ids: set[str]) -> bool:
+    from utils.data import load_planogram
+
+    return any(slot.sku == sku for sid in store_ids for slot in load_planogram(sid, str(REPO / "data")).slots)
 
 
 # ---- scene: unit counts, ids, dims ---------------------------------------------------------------------------------
@@ -183,11 +204,14 @@ def test_real_stores_keep_every_unit_with_models():
     sa = SkuAssets.load(REPO / "data" / SKU_ASSETS_FILE, "/assets", exists=lambda p: True)
     plain = load_world_spec(data_root=str(REPO / "data"))
     modeled = load_world_spec(data_root=str(REPO / "data"), assets=sa)
+    mapped_stores = _mapped_store_ids(REPO / "data" / SKU_ASSETS_FILE)
     for sid, spec in plain.stores.items():
         ids = [i.instance_id for i in spec.instances]
         assert ids == [i.instance_id for i in modeled.stores[sid].instances], sid
         per_slot = {s: len(spec.instances_in_slot(s)) for s in spec.slot_layouts}
         assert per_slot == {s: len(modeled.stores[sid].instances_in_slot(s)) for s in spec.slot_layouts}
+        if sid not in mapped_stores:  # stores the map wasn't generated for keep every unit on the primitive path
+            continue
         on_models = [p for p in modeled.stores[sid].product_prims() if p.render != "primitive"]
         assert len(on_models) > 0.8 * len(spec.instances), sid
 
