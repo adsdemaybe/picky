@@ -55,12 +55,21 @@ def connect_robot(cfg: RigConfig):
     return robot
 
 
+class Interrupted(Exception):
+    """A move was cut short because ABORT_CHECK returned True (e.g. the run was labelled mid-way)."""
+
+
+ABORT_CHECK = None  # optional () -> bool, polled between interpolation steps; True stops the move
+
+
 def move(robot, joints: dict[str, float], gripper: float, seconds: float = 1.5, steps: int = 30) -> None:
     """Linear joint-space interpolation from the current pose (the bus has no trajectory controller)."""
     obs = robot.get_observation()
     start = {k: float(obs[f"{k}.pos"]) for k in [*joints, "gripper"]}
     goal = {**joints, "gripper": gripper}
     for s in range(1, steps + 1):
+        if ABORT_CHECK is not None and ABORT_CHECK():
+            raise Interrupted
         a = s / steps
         robot.send_action({f"{k}.pos": start[k] + a * (goal[k] - start[k]) for k in goal})
         time.sleep(seconds / steps)

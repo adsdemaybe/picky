@@ -30,11 +30,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from . import pick_place
 from .calibrate_camera import set_limits_from_calibration
 from .camera import grab_frame
 from .config import RigConfig
 from .kinematics import SO101Kinematics
-from .pick_place import connect_robot, read_pose
+from .pick_place import Interrupted, connect_robot, read_pose
 from .pick_routine import GRIP_OPEN, describe, execute, go_home, plan, save_recipe
 from .scene import CameraModel
 
@@ -178,10 +179,23 @@ def main() -> None:
                 continue
             cv2.imwrite(str(ep / "scene.jpg"), frame)
             label: str | None = None
-            print("running... type s or f + Enter any time", flush=True)
+            quit_after = False
+
+            def labelled() -> bool:  # polled during every move: s / f / q stops the run right away
+                nonlocal label, quit_after
+                while not keys.empty():
+                    kk = keys.get()
+                    if kk in ("s", "f"):
+                        label = kk
+                    elif kk == "q":
+                        quit_after = True
+                return label is not None or quit_after
+
+            print("running... type s or f + Enter any time to label it, stop and reset", flush=True)
             t0 = time.time()
             grip_after_close = None
             traj: list[dict] = []
+            pick_place.ABORT_CHECK = labelled
             try:
                 for w in p.waypoints:
                     if rec:
@@ -191,13 +205,18 @@ def main() -> None:
                     )
                     if w.name == "close":
                         grip_after_close = read_pose(robot)[1]
-                    while not keys.empty():
-                        kk = keys.get()
-                        if kk in ("s", "f"):
-                            label = kk
-                        elif kk == "q":
-                            raise KeyboardInterrupt
+                    if labelled():
+                        raise Interrupted
+            except Interrupted:
+                if label:
+                    print(
+                        f"\n>>> marked as {'SUCCESS' if label == 's' else 'FAILURE'} - stopping and resetting",
+                        flush=True,
+                    )
+                else:
+                    print("\n>>> stopping", flush=True)
             finally:
+                pick_place.ABORT_CHECK = None
                 if rec:
                     rec.caption = "returning home"
                 go_home(robot, rest, GRIP_OPEN)  # reset pose
@@ -209,6 +228,8 @@ def main() -> None:
                 rec.caption = "done"
                 time.sleep(1.5)  # hold the final shot
                 print(f"video: {rec.stop()}  ({rec.frames} frames)", flush=True)
+            if quit_after and label is None:
+                label = "f"  # quit mid-run without a label: log it as a failure, then exit
             while label is None:
                 print("success or failure? (s/f + Enter)", flush=True)
                 kk = keys.get()
@@ -244,6 +265,8 @@ def main() -> None:
                 f"({rate:.0%}) | {policy.summary()}",
                 flush=True,
             )
+            if quit_after:
+                break
     except KeyboardInterrupt:
         print("\nstopping")
     finally:
