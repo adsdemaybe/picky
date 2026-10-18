@@ -409,6 +409,19 @@ async def test_other_api_errors_propagate():
         await llm.GeminiMessages(FakeGenai([ClientError(400)])).messages.create(model="m", messages=[])
 
 
+async def test_overloaded_model_falls_back_to_next_gemini_model():
+    raw = FakeGenai([ClientError(503, "high demand"), ClientError(404, "not found"), g_resp(g_text("ok"))])
+    resp = await llm.GeminiMessages(raw).messages.create(model="gemini-3.8-flash", messages=[])
+    assert [c["model"] for c in raw.calls] == ["gemini-3.8-flash", *llm.GEMINI_FALLBACK_MODELS[:2]]
+    assert resp.content  # the third model's answer came back
+
+
+async def test_fallback_gives_up_after_the_last_model():
+    errors = [ClientError(503, "busy") for _ in range(1 + len(llm.GEMINI_FALLBACK_MODELS))]
+    with pytest.raises(ClientError):
+        await llm.GeminiMessages(FakeGenai(errors)).messages.create(model="gemini-3.8-flash", messages=[])
+
+
 async def test_run_tool_loop_echoes_ids_and_signatures():
     raw = FakeGenai(
         [

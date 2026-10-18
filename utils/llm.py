@@ -715,10 +715,25 @@ def _is_bad_request(exc: Exception) -> bool:
     return getattr(exc, "code", None) == 400 or getattr(exc, "status_code", None) == 400
 
 
+# Tried in order when the requested Gemini model is overloaded (503) or unknown/retired (404). Quota errors (429)
+# still propagate: another model on the same key rarely helps and callers already fall back to their fakes.
+GEMINI_FALLBACK_MODELS: tuple[str, ...] = ("gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest")
+_GEMINI_FALLBACK_CODES = frozenset({404, 500, 503})
+
+
+def _status_code(exc: Exception) -> int | None:
+    for attr in ("code", "status_code"):
+        value = getattr(exc, attr, None)
+        if isinstance(value, int):
+            return value
+    return None
+
+
 class GeminiMessages:
     """Anthropic-Messages-shaped facade over a ``google.genai.Client``: ``await c.messages.create(**kwargs)``
     returns an :class:`LLMResponse`. Translation: :func:`to_gemini_request` / :func:`from_gemini_response`.
-    A 400 from the API is re-raised as :class:`BadRequestError` (original as ``__cause__``)."""
+    A 400 from the API is re-raised as :class:`BadRequestError` (original as ``__cause__``); a 503/404/500 on the
+    requested model retries the call on :data:`GEMINI_FALLBACK_MODELS` before raising."""
 
     provider: Provider = "gemini"
 
@@ -731,13 +746,19 @@ class GeminiMessages:
 
     async def create(self, **kwargs: Any) -> LLMResponse:
         request = to_gemini_request(**kwargs)
-        try:
-            raw = await self.genai.aio.models.generate_content(**request)
-        except Exception as e:
-            if _is_bad_request(e):
-                raise BadRequestError(f"gemini rejected the request: {e}") from e
-            raise
-        return from_gemini_response(raw, model=request["model"])
+        models = [request["model"], *(m for m in GEMINI_FALLBACK_MODELS if m != request["model"])]
+        for i, model_id in enumerate(models):
+            try:
+                raw = await self.genai.aio.models.generate_content(**{**request, "model": model_id})
+            except Exception as e:
+                if _is_bad_request(e):
+                    raise BadRequestError(f"gemini rejected the request: {e}") from e
+                if _status_code(e) in _GEMINI_FALLBACK_CODES and i + 1 < len(models):
+                    log.warning("gemini %s unavailable (%s); retrying on %s", model_id, _status_code(e), models[i + 1])
+                    continue
+                raise
+            return from_gemini_response(raw, model=model_id)
+        raise AssertionError("unreachable")  # the last model either returns or raises
 
 
 # --- complete_json -----------------------------------------------------------------------------------------------
