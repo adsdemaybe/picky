@@ -128,6 +128,7 @@ DONE_ITEM_OK = ("in_basket", "online", "substituted", "declined", "skipped")
 DEFAULT_BASKET_CAPACITY = 12
 MAX_DROPOFFS = 3
 """Basket drop-offs per run (a full basket before a grasp: checkout, unload, back), as in the v0.2 brain."""
+_SET_ASIDE = "set_aside"  # photo check: wrong unit, no put-back -> basket for staff (uncounted) + grab another
 
 
 def _basket_capacity(robot_id: str) -> int:
@@ -222,6 +223,7 @@ class _Run:
         self.unload_gate = False
         self.unload_numbers: dict[str, int] = {}  # 'unload:<n>' group -> unit number after the gate's re-layout
         self.rejections: Counter[tuple[str | None, int | None]] = Counter()  # (item_id, unit) -> 'wrong' answers
+        self.set_aside: set[str] = set()  # basket place steps carrying a unit the shopper marked wrong: never counted
 
 
 class PlanLoop:
@@ -637,6 +639,8 @@ class PlanLoop:
         # 3b. 0.2.4: the shopper checks a photo of the unit in the gripper (correct / wrong; auto-accept on silence)
         if isinstance(step, GraspStep) and from_shelf and run.mode == "plan" and self._verify_on():
             answer = await self._verify_item(run, step, att)
+            if answer == _SET_ASIDE and self._set_aside(run, i):
+                return await self._succeed(run, step, att, note="wrong unit set aside for staff; grabbing another")
             if answer == VERIFY_WRONG:
                 f = StepFailure(
                     plan_id=plan.plan_id,
@@ -774,6 +778,8 @@ class PlanLoop:
         if kind == "goal_item_progress":
             if item is None:
                 return {}
+            if step.step_id in run.set_aside:  # the shopper marked this unit wrong: in the basket for staff, never paid
+                return {"picked_qty": item.picked_qty, "qty": item.qty, "set_aside": True}
             if item.picked_qty >= item.qty:  # defence in depth: an extra unit never inflates the item / cart line
                 return {"picked_qty": item.picked_qty, "qty": item.qty, "extra_unit": True}
             item.picked_qty += 1
@@ -1944,7 +1950,8 @@ class PlanLoop:
         """Send the shopper the wrist photo of the unit just grasped ('Is this the right Mild Chunky Salsa?') and wait
         for correct / wrong; no answer within PICKY_VERIFY_AUTO_ACCEPT_S -> 'auto-accepted' (labelled). Beyond
         PICKY_VERIFY_MAX_REJECTIONS 'wrong' answers for one unit, or on a backend without a put-back primitive, a
-        'wrong' is noted and the unit kept (staff swap it at the counter). Returns VERIFY_CORRECT / VERIFY_WRONG."""
+        'wrong' is noted and the unit kept (staff swap it at the counter). Returns VERIFY_CORRECT / VERIFY_WRONG, or
+        _SET_ASIDE (no put-back: the unit goes in the basket uncounted, never charged, and another one is grabbed)."""
         plan = run.plan
         item = plan.item(step.item_id)
         name = (item.name if item is not None else None) or step.target.description or step.target.sku
@@ -2011,12 +2018,60 @@ class PlanLoop:
             caps = await self._caps(run)
             t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
             limit = int(setting("picky_verify_max_rejections", 1) or 1)
+            if t0 is not None and not t0.place_back and run.rejections[key] <= limit:
+                # no put-back (Isaac): the wrong unit rides in the basket uncounted (never charged), another is grabbed
+                await self._mirror(run, step, "marked wrong: keeping it for staff to swap at the counter")
+                return _SET_ASIDE
             if run.rejections[key] > limit or (t0 is not None and not t0.place_back):
                 await self._mirror(run, step, "marked wrong: keeping it for staff to swap at the counter")
                 return VERIFY_CORRECT
         else:
             await self._mirror(run, step, f"photo check {status.replace('_', '-')}")
         return answer
+
+    def _set_aside(self, run: _Run, i: int) -> bool:
+        """The shopper marked the held unit wrong and it cannot go back on the shelf: its basket place step is flagged
+        (record_pick only: no item progress, no cart line) and a fresh unit (ground + grasp + place) follows it.
+        False = no plan place step for this unit (the caller keeps the old behaviour)."""
+        plan, grasp = run.plan, run.plan.steps[i]
+        j = next(
+            (
+                k
+                for k in range(i + 1, len(plan.steps))
+                if isinstance(plan.steps[k], PlaceStep)
+                and plan.steps[k].item_id == grasp.item_id
+                and plan.steps[k].unit == grasp.unit
+                and plan.steps[k].destination == "basket"  # type: ignore[union-attr]
+                and plan.steps[k].status == StepStatus.PENDING
+            ),
+            None,
+        )
+        if j is None:
+            return False
+        place = plan.steps[j]
+        failure = StepFailure(
+            plan_id=plan.plan_id,
+            step_id=grasp.step_id,
+            step_kind=grasp.kind,
+            attempt=grasp.attempts,
+            kind="postcondition",
+            code="wrong_item_grasped",
+            message="the shopper says it is the wrong item (photo check): set aside for staff",
+            item_id=grasp.item_id,
+        )
+        redo = self._inserts(run, i, "redo_unit", failure)
+        again = place.model_copy(
+            update={
+                "step_id": recovery_step_id(grasp.step_id, run.recoveries[grasp.step_id], len(redo) + 1),
+                "origin": "recovery",
+                "inserted_by": grasp.step_id,
+                "status": StepStatus.PENDING,
+                "attempts": 0,
+            }
+        )
+        run.set_aside.add(place.step_id)
+        plan.steps[j + 1 : j + 1] = [*redo, again]
+        return True
 
     async def _counter_card(self, run: _Run, step: PlanStep, att: StepAttempt) -> None:
         """Unload: the photo of the unit on the counter as a verification card (non-blocking: it is bought already;
