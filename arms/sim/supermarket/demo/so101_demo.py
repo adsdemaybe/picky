@@ -44,6 +44,7 @@ CTRL = BASE + ARM + ["gripper"]
 NAME = "Pico"
 MAX_W = 0.068  # widest product (across the jaws) we try: the SO-101 jaw opens ~8.6 cm at 1.2 rad
 MIN_W = 0.022
+MAX_H, MAX_DEPTH = 0.28, 0.12  # deeper products tilt over the basket rim and can't be taken out at checkout
 PITCHES = [0, 5, 10, 15, 20, -5, -10]  # tool pitch (deg, + = pointing down) tried for a shelf grasp
 GRIP_IN = 0.035  # deep products are gripped this far behind their front face (the jaw pads are ~4 cm long)
 CAT_NAME = {
@@ -235,7 +236,7 @@ class Catalog:
         n = np.array(SIDE_N[side])
         width = float(abs(size[:2] @ np.array([-n[1], n[0]])))  # across the jaws (along the shelf)
         depth_len = float(abs(size[:2] @ n))
-        if not (MIN_W <= width <= MAX_W) or not (0.05 <= size[2] <= 0.30) or depth_len > 0.24:
+        if not (MIN_W <= width <= MAX_W) or not (0.05 <= size[2] <= MAX_H) or depth_len > MAX_DEPTH:
             return None
         if p.depth > 0.24:
             return None
@@ -1531,8 +1532,8 @@ class Mission:
         cb = np.array([self.to_base(c) for c in cw])
         c_b = cb.mean(axis=0)
         best = None
-        for k in range(36):
-            psi = -math.pi + 2 * math.pi * k / 36
+        for k in range(72):
+            psi = -math.pi + 2 * math.pi * k / 72
             R = self.down_R(psi)
             width = float(np.ptp(cb @ R[:, 0]))
             if width > MAX_W + 0.004:
@@ -2005,17 +2006,23 @@ def product_closeups(app, stage, items, out: Path, hide=(), look_at=None):
         n = np.array([*SIDE_N[it["side"]], 0.0])
         eye = it["center"] + n * 0.42 + np.array([0, 0, 0.06])
         look_at(stage, cam, eye, it["center"], focal=40.0)
-        d = None
-        for k in range(90):  # a new render product needs a few dozen updates before its annotator has data
+        for _ in range(8):
             app.update()
+        a, h = None, None
+        for _ in range(4):  # before play the annotators only fill on an explicit orchestrator step (as in topdown)
+            try:
+                rep.orchestrator.step(rt_subframes=8, pause_timeline=False)
+            except Exception as e:  # noqa: BLE001
+                print(f"[so101-demo] close-up orchestrator.step: {e}", flush=True)
+                app.update()
             d = ann.get_data()
-            if k >= 11 and d is not None and getattr(d, "size", 0) > 0:
+            if d is None or getattr(d, "size", 0) == 0:
+                continue
+            a = np.asarray(d)[..., :3].copy()
+            h = hashlib.md5(a[::8, ::8].tobytes()).hexdigest()
+            if h != last and a.mean() > 8:
                 break
-        if d is None or getattr(d, "size", 0) == 0:
-            continue
-        a = np.asarray(d)[..., :3].copy()
-        h = hashlib.md5(a[::8, ::8].tobytes()).hexdigest()
-        if h == last:  # stale annotator (same pixels as the previous item): no close-up rather than a wrong one
+        if a is None or h == last:  # stale annotator (same pixels as the last item): no close-up, not a wrong one
             continue
         last = h
         f = out / "items" / f"{iid}.jpg"
@@ -2027,6 +2034,47 @@ def product_closeups(app, stage, items, out: Path, hide=(), look_at=None):
     for im in vis:
         im.MakeVisible()
     return shots
+
+
+def flatten_product_xforms(ents) -> int:
+    """Genie Sim products are <parent Xform (translate + orient)>/entity (rigid body, local orient). When a kinematic
+    product turns dynamic mid-run, Isaac 6.0's PhysX writes its world pose into the entity's local xform ops, so the
+    parent transform is applied twice and the grasped product jumps metres away (runs t5/probe1). Before play, give
+    every product parent an identity transform and bake the full world transform into the entity (and any sibling):
+    visually identical, and local == world for the body from then on."""
+    from pxr import Gf, Usd, UsdGeom  # noqa: PLC0415
+
+    tc = Usd.TimeCode.Default()
+    n = 0
+    for ent in ents:
+        par = ent.GetParent()
+        if not par or not par.IsA(UsdGeom.Xformable):
+            continue
+        pxf = UsdGeom.Xformable(par)
+        if pxf.GetLocalTransformation(tc) == Gf.Matrix4d(1.0):
+            continue
+        kids = [c for c in par.GetChildren() if c.IsA(UsdGeom.Xformable)]
+        world = {c: UsdGeom.Xformable(c).ComputeLocalToWorldTransform(tc) for c in kids}
+        pxf.ClearXformOpOrder()
+        G_inv = pxf.ComputeLocalToWorldTransform(tc).GetInverse()  # parent's parent (identity in these scenes)
+        for c, W in world.items():
+            L = Gf.Transform(W * G_inv)
+            xf = UsdGeom.Xformable(c)
+            xf.ClearXformOpOrder()
+            # the standard op names (PhysX updates these in place); reuse an existing attribute's precision
+            t, q, sc = L.GetTranslation(), L.GetRotation().GetQuat(), L.GetScale()
+            for kind, add, dbl, flt in (
+                ("translate", xf.AddTranslateOp, Gf.Vec3d(t), Gf.Vec3f(t)),
+                ("orient", xf.AddOrientOp, Gf.Quatd(q), Gf.Quatf(q)),
+                ("scale", xf.AddScaleOp, Gf.Vec3d(sc), Gf.Vec3f(sc)),
+            ):
+                a = c.GetAttribute(f"xformOp:{kind}")
+                tn = str(a.GetTypeName()) if a and a.IsValid() else ("double3" if kind == "translate" else "")
+                is_d = tn in ("double3", "quatd")
+                prec = UsdGeom.XformOp.PrecisionDouble if is_d else UsdGeom.XformOp.PrecisionFloat
+                add(prec).Set(dbl if is_d else flt)
+        n += 1
+    return n
 
 
 # --- Isaac Sim entry (teleop_app.py --demo) ---------------------------------------------------------------------------
@@ -2094,7 +2142,8 @@ def run(app, args, tele):
     for ent in ents:
         tele.make_dynamic(ent)
         ent.GetAttribute("physics:kinematicEnabled").Set(True)
-    log(f"[so101-demo] {len(ents)} products set up")
+    n_flat = flatten_product_xforms(ents)
+    log(f"[so101-demo] {len(ents)} products set up ({n_flat} parent transforms baked into the bodies)")
     # dump the boxes so the map + item choice can be rerun offline
     from demo.store_map import scene_boxes  # noqa: PLC0415
 

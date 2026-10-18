@@ -74,6 +74,9 @@ class Planner:
         self.exhausted: set[str] = set()
         self.key = load_key()
         self.models = list(models)
+        fast = os.environ.get("PICKY_MODEL_FAST", "").strip()  # the team's fast-model pick goes first (429 -> next)
+        if fast.startswith("gemini") and fast not in self.models[:1]:
+            self.models = [fast] + [m for m in self.models if m != fast]
         self.log_path = Path(log_path)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.model_used = None
