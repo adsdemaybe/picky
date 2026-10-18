@@ -70,6 +70,10 @@ exclude = ["docs/**"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 
+[tool.ruff.lint.per-file-ignores]
+# the Playwright judges'-flow harness builds long report/check strings
+"scripts/e2e/*.py" = ["E501"]
+
 [tool.pytest.ini_options]
 testpaths = ["contracts", "utils", "arms"]
 addopts = "--import-mode=importlib -q"
