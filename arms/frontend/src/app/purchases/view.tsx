@@ -1,11 +1,14 @@
 "use client";
 import { ChevronDown, Star } from "lucide-react";
 import { useMemo, useState } from "react";
+import { toast } from "sonner";
 import { Money, Panel, ProductTile, SectionTitle } from "@/components/picky";
 import { SpendChart } from "@/components/SpendChart";
 import { Badge } from "@/components/ui/badge";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { MONTHLY_BUDGET_CENTS, fmtDate, mostBought, productBySku, storeName, weeklyByCategory } from "@/lib/data";
+import { MONTHLY_BUDGET_CENTS, fmtDate, maya, mostBought, productBySku, storeName, weeklyByCategory, type Purchase } from "@/lib/data";
+import { gw } from "@/lib/gateway/client";
+import { isLive } from "@/lib/gateway/useGateway";
 import { fmt } from "@/lib/money";
 import { usePurchases } from "@/lib/usePurchases";
 import { cn } from "@/lib/utils";
@@ -102,7 +105,14 @@ export default function SpendingPage() {
                             </span>
                             {off > 0 && <Badge variant="lime">{off}% off</Badge>}
                             <Money cents={l.unit_price_cents} className="w-16 text-right text-[14px]" />
-                            <RateInput name={p.name} value={r} onChange={(n) => setRatings((x) => ({ ...x, [l.purchase_id]: n }))} />
+                            <RateInput
+                              name={p.name}
+                              value={r}
+                              onChange={(n) => {
+                                setRatings((x) => ({ ...x, [l.purchase_id]: n }));
+                                sendRating(l, n);
+                              }}
+                            />
                           </li>
                         );
                       })}
@@ -168,4 +178,17 @@ function RateInput({ name, value, onChange }: { name: string; value: number | nu
       ))}
     </span>
   );
+}
+
+/** Gateway mode: ratings feed the recommender (POST /api/users/{id}/feedback), so trip 2 gets smarter. */
+function sendRating(l: Purchase, rating: number) {
+  if (!isLive()) return;
+  const user = maya.profile.user_id;
+  // only trips from this gateway carry a trip id it knows (see purchasesFromReceipt)
+  const tripId = l.purchase_id.startsWith("pur_gw_") ? l.trip_id.replace(/^trip_maya_1017_/, "") : null;
+  gw.feedback(user, { feedback_id: crypto.randomUUID(), user_id: user, sku: l.sku, trip_id: tripId, rating, text: "", channel: "web", tags: [] })
+    .then(({ data }) => {
+      if (data.changes.length) toast(`Picky learned: ${data.summary || data.changes[0].reason}`);
+    })
+    .catch(() => {});
 }
