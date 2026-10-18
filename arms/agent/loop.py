@@ -1864,12 +1864,21 @@ class PlanLoop:
     async def _replan_route(self, run: _Run) -> None:
         """A declined optional stop leaves the route: re-solve the trip route like the v0.2 executor does after a
         yes/no (``trips.replan`` stores Trip.route + emits route.planned), so the web map stops drawing a detour
-        the robot never drives. Best effort: the map is a view, a routing failure never stops the run."""
+        the robot never drives. The plan keeps its own steps, so the re-solve may keep at most as many optional stops
+        as the plan still drives to (a solver-skipped rec never comes back onto the map). Best effort: the map is a
+        view, a routing failure never stops the run."""
         trips = getattr(self.s, "trips", None)
         if trips is None or not run.plan.trip_id:
             return
+        ahead = sum(
+            1
+            for i in run.plan.items
+            if i.optional
+            and i.status not in DONE_ITEM_OK
+            and any(s.item_id == i.item_id and s.status not in CLOSED_STEP_STATUSES for s in run.plan.steps)
+        )
         try:
-            await trips.replan(run.plan.trip_id)
+            await trips.replan(run.plan.trip_id, include_recommendations=ahead > 0, max_optional_stops=ahead or None)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
