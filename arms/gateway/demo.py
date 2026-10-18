@@ -253,6 +253,12 @@ def describe(ev: Any) -> str | None:
     t = ev.type
     if t in ("robot.state", "fleet.robot_updated", "stock.updated"):
         return None
+    if t == "payment.agent_step":
+        st = ev.step
+        return f"{st.n}. {st.title} [{st.status}] {st.detail} | {st.narration} ({st.label})"
+    if t == "item.verification":
+        v = ev.verification
+        return f"{v.question} [{v.status}{', ' + v.decided_by if v.decided_by else ''}] {v.photo_url or 'no photo'}"
     if t == "request.received":
         return f'"{ev.request.text}" from {ev.request.user_id} ({ev.request.role})'
     if t == "request.planned":
@@ -619,7 +625,7 @@ async def _run_demo(
         fake_opts=FAKE_OPTS,
         real_opts=REAL_OPTS,
         orchestrator_config=OrchestratorConfig(
-            approval_timeout_s=10.0, checkout_timeout_s=10.0, followup_timeout_s=None
+            approval_timeout_s=10.0, checkout_timeout_s=10.0, followup_timeout_s=None, payment_step_pause_s=0.1
         ),
     )
     real = sorted(a for a, m in reg.modes.items() if m == "real")

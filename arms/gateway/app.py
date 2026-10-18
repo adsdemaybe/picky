@@ -21,13 +21,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import Body, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from arms.gateway.loop_api import mount_loop_routes
 from arms.gateway.orchestrator import OrchestratorConfig, TripOrchestrator
@@ -88,7 +88,7 @@ from contracts.fleet import (
 from contracts.messaging import InboundMessage, OutboundMessage, ReplyInterpretation
 from contracts.perception import ScanReport
 from contracts.planogram import Planogram
-from contracts.profile import Feedback, ProfileUpdate, ReplenishSuggestion, UserProfile
+from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, ReplenishSuggestion, UserProfile
 from contracts.routing import GridSpec
 from contracts.sim import (
     RobotError,
@@ -101,13 +101,31 @@ from contracts.sim import (
 )
 from contracts.tools import AgentReply
 from contracts.trip import Trip
-from contracts.trust import ApprovalRequest, ApprovalResponse, IntentMandate, TrustLedger
+from contracts.trust import (
+    VERIFY_CORRECT,
+    VERIFY_WRONG,
+    ApprovalRequest,
+    ApprovalResponse,
+    IntentMandate,
+    ItemVerification,
+    PaymentAgentStep,
+    TrustLedger,
+)
 from utils.config import get_settings
 from utils.events import event_to_dict
 from utils.ids import new_id
 from utils.log import get_logger
 
 log = get_logger(__name__)
+
+
+class VerificationAnswer(BaseModel):
+    """POST /api/verifications/{id} body (0.2.4)."""
+
+    decision: Literal["correct", "wrong"]
+    user_id: str | None = None
+
+
 STATIC_DIR = Path(__file__).parent / "static"
 MJPEG_BOUNDARY = "frame"
 MAX_STREAM_FPS = 15.0
@@ -527,7 +545,8 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
         limit: int = 8,
         include_all: bool = Query(False, alias="all"),
     ) -> list[ReplenishSuggestion]:
-        """'You bought this 12 days ago' cards (0.2.3; recommender extra ``replenish_suggestions``)."""
+        """Suggestion cards (0.2.4): replenish / substitute / complement / deal from the purchase-history database,
+        only items in stock at the store, optionally LLM-ranked with grounded reasons (recommender extra)."""
         fn = getattr(svc("recommender"), "replenish_suggestions", None)
         if fn is None:
             raise HTTPException(501, "this recommender has no replenish suggestions")
@@ -535,6 +554,57 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
             return await fn(user_id, store_id=store_id, limit=max(1, min(limit, 50)), include_all=include_all)
         except KeyError:
             raise HTTPException(404, f"unknown user {user_id}") from None
+
+    @app.get("/api/users/{user_id}/purchases", response_model=list[PurchaseRecord])
+    async def user_purchases(user_id: str, limit: int = 200) -> list[PurchaseRecord]:
+        """Purchase history from the purchase-history database, newest first (0.2.4; recommender extra)."""
+        fn = getattr(svc("recommender"), "purchase_history", None)
+        if fn is None:
+            raise HTTPException(501, "this recommender has no purchase-history database")
+        try:
+            return await fn(user_id, limit=max(1, min(limit, 1000)))
+        except KeyError:
+            raise HTTPException(404, f"unknown user {user_id}") from None
+
+    @app.get("/api/verifications", response_model=list[ItemVerification])
+    async def list_verifications(
+        trip_id: str | None = None, user_id: str | None = None, status: str | None = None
+    ) -> list[ItemVerification]:
+        """Photo verification cards (0.2.4), newest first; ?status=pending for the open ones."""
+        return reg().publisher.judges.query(trip_id=trip_id, user_id=user_id, status=status)
+
+    @app.post("/api/verifications/{verification_id}", response_model=ItemVerification)
+    async def answer_verification(verification_id: str, body: VerificationAnswer) -> ItemVerification:
+        """Answer a card: 'correct' / 'wrong' (a wrong unit is put back and re-picked). 404 unknown, 409 closed."""
+        judges = reg().publisher.judges
+        ver = judges.verifications.get(verification_id)
+        if ver is None:
+            raise HTTPException(404, f"unknown verification {verification_id}")
+        if ver.status != "pending" or not reg().approvals.is_pending(verification_id):
+            raise HTTPException(409, f"verification {verification_id} is {ver.status}")
+        wrong = body.decision == VERIFY_WRONG
+        ok = await reg().approvals.resolve(
+            ApprovalResponse(
+                approval_id=verification_id,
+                decision="choice",
+                choice=VERIFY_WRONG if wrong else VERIFY_CORRECT,
+                channel="web",
+                user_id=body.user_id or ver.user_id,
+            )
+        )
+        if not ok:
+            raise HTTPException(409, f"verification {verification_id} could not be answered")
+        for _ in range(20):  # the run publishes the resolved card right after the broker resolves
+            cur = judges.verifications.get(verification_id)
+            if cur is not None and cur.status != "pending":
+                return cur
+            await asyncio.sleep(0.02)
+        return ver.model_copy(update={"status": "rejected" if wrong else "accepted", "decided_by": "user"})
+
+    @app.get("/api/trips/{trip_id}/payment", response_model=list[PaymentAgentStep])
+    async def trip_payment(trip_id: str) -> list[PaymentAgentStep]:
+        """The Visa payment agent's timeline for a trip (0.2.4; sandbox / simulated, no real money)."""
+        return reg().publisher.judges.timeline(trip_id)
 
     @app.put("/api/users/{user_id}/profile", response_model=UserProfile)
     async def put_profile(user_id: str, profile: UserProfile) -> UserProfile:
