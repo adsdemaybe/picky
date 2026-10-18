@@ -40,7 +40,7 @@ SIDES = {"west": (-1.0, 0.0), "east": (1.0, 0.0), "south": (0.0, -1.0), "north":
 # robot geometry (base frame, x forward): the arm's tool point lines up with the product at (reach, ARM_Y)
 ARM_Y = -0.17
 FRONT_CLEAR = 0.47  # base origin -> shelf face when picking (front wheels end ~0.36 m ahead of the origin)
-ROBOT_RADIUS = 0.28  # grid inflation: half-width 0.22 m + margin (the rover drives aligned with the aisle)
+ROBOT_RADIUS = 0.32  # grid inflation: SO-101 rover v3 PMB2 footprint r 0.269 m + 5 cm (covers the rm2's 0.22 m too)
 
 
 def category(name: str) -> str:
