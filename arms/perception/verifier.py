@@ -17,6 +17,11 @@ state (dual-source atoms) or 'uncertain' (camera-only atoms); the verdict is the
 ``methods_tried=['perceptron', 'ground_truth' | 'state']``. ``VerifierUnavailableError`` only when there is neither
 robot state nor ground truth (or the ``verifier_unavailable`` demo fault fires).
 
+Frame trust (``frame_trust``): vision never judges a frame from another camera / robot / store, a frame reused from
+another step (both treated like stale frames), or a dark frame (lens blocked: ground truth / state decide). A label
+read that resembles nothing sold in the store is 'uncertain', not a wrong item (``judges.judge_label``). The verdict
+reason says which frame was skipped and why ('vision skipped the wrist frame: it is dark (97% black pixels ...)').
+
 Mode: ``VerifyRequest.mode`` > ``set_mode`` / PICKY_VERIFIER_MODE > ``DEFAULT_VERIFIER_MODE[robot backend]`` (shadow on
 2D-fake stores, where Pillow shelves can fool a VLM; decide on Isaac).
 """
@@ -59,6 +64,7 @@ from contracts.verify import (
 )
 from utils.log import get_logger
 
+from .frame_trust import FrameReuse, dark_reason, frame_mismatch
 from .judges import (
     GENERIC_HELD_CLASS,
     ONE_CUE_CONFIDENCE,
@@ -100,6 +106,7 @@ BREAKER_COOLDOWN_S = 30.0
 GRIPPER_OPS = frozenset({"gripper_holding", "gripper_empty"})
 BASKET_OPS = frozenset({"basket_delta", "basket_contains"})
 SHELF_OPS = frozenset({"item_on_shelf", "slot_visible", "item_on_counter"})
+STALE_NOTE = "is stale (captured before the action finished)"
 
 
 async def _bounded(aw: Awaitable[T], end: float, default: T) -> T:
@@ -137,6 +144,8 @@ class PerceptionVerifier(VerifierBase):
         self.stats = ProviderStats()
         self._fails = 0
         self._breaker_until = 0.0
+        self._reuse = FrameReuse()
+        self._catalogs: dict[str, dict[Sku, str]] = {}
 
     # ---- mode / health -------------------------------------------------------------------------------------------
     def resolve_mode(self, requested: VerifierMode | None, backend: str | None) -> VerifierMode:
@@ -269,6 +278,45 @@ class PerceptionVerifier(VerifierBase):
         except KeyError:
             return None
 
+    async def _untrusted_frames(
+        self, req: VerifyRequest, frames: Sequence[FrameRef], stale: set[str], store_id: str | None
+    ) -> dict[str, str]:
+        """{camera id: why} for frames that are not a fresh picture from the camera this request needs: from another
+        camera / robot / store, or the same retained frame already used for another step (or for this step's
+        pre-check). They count as stale: no vision on them and their ground truth is not used either."""
+        out: dict[str, str] = {}
+        store = req.store_id or store_id
+        for ref in frames:
+            if ref.camera_id in stale:
+                continue
+            why = self._reuse.check(ref, req.context, req.phase)
+            if why is None:
+                why = frame_mismatch(ref, await self._frame(ref), req.robot_id, store)
+            if why is not None:
+                out[ref.camera_id] = why
+        return out
+
+    async def _dark_frames(self, frames: Sequence[FrameRef], skip: set[str], end: float) -> dict[str, str]:
+        """{camera id: why} for frames too dark to judge (decoded off the event loop, bounded by the deadline)."""
+        out: dict[str, str] = {}
+        for ref in frames:
+            if ref.camera_id in skip:
+                continue
+            frame = await self._frame(ref)
+            if frame is None:
+                continue
+            why = await _bounded(asyncio.to_thread(dark_reason, frame), end - SAFETY_S, None)
+            if why is not None:
+                out[ref.camera_id] = why
+        return out
+
+    async def _store_catalog(self, store_id: str | None, geom: dict[SlotId, Any]) -> dict[Sku, str]:
+        """SKU -> label words of every product on the store's planogram (cached per store)."""
+        key = store_id or ""
+        if key not in self._catalogs:
+            self._catalogs[key] = {s.sku: await self._label(s.sku) for s in geom.values()}
+        return self._catalogs[key]
+
     # ---- vision --------------------------------------------------------------------------------------------------
     async def _vision(
         self,
@@ -358,6 +406,10 @@ class PerceptionVerifier(VerifierBase):
             setattr(answers[cid], slot, ans)
             calls.append(ans.call)
             self._record(ans.call)
+        if any(answer_ok(ca.label) for ca in answers.values()):
+            catalog = await _bounded(self._store_catalog(store_id, geom), end - SAFETY_S, {})
+            for ca in answers.values():
+                ca.catalog = catalog
         out: dict[str, AtomVerdict] = {}
         for cid, atoms in plan.items():
             ca = answers.get(cid)
@@ -446,6 +498,11 @@ class PerceptionVerifier(VerifierBase):
         frames, stale = await _bounded(
             self._frames(req.robot_id, cams, req.frames, req.not_before, ctxd), end - SAFETY_S, ([], set())
         )
+        frame_notes: dict[str, str] = {c: STALE_NOTE for c in stale}
+        untrusted = await self._untrusted_frames(req, frames, stale, store_id)
+        frame_notes.update(untrusted)
+        blocked = set(stale) | set(untrusted)
+        self._reuse.note([f for f in frames if f.camera_id not in blocked], req.context, req.phase)
         truth = await self._truth_now(req.robot_id, slot_ids)
         if facts is None and truth is None:
             raise VerifierUnavailableError("no robot state and no ground truth to judge from")
@@ -455,7 +512,7 @@ class PerceptionVerifier(VerifierBase):
 
         gt: tuple[str, float, list[AtomVerdict]] | None = None
         if truth is not None:
-            ftruth, _ = await self._frame_truth(truth, frames, stale, cond, req.alternate_cameras)
+            ftruth, _ = await self._frame_truth(truth, frames, blocked, cond, req.alternate_cameras)
             gt = evaluate_on_truth(  # type: ignore[assignment]
                 cond,
                 ftruth,
@@ -478,11 +535,14 @@ class PerceptionVerifier(VerifierBase):
         if mode != "gt_only" and camera_atoms:
             block = self._block_code(effects)
             if block is None:
-                vision, calls = await self._vision(req, frames, stale, facts, store_id, end)
+                dark = await self._dark_frames(frames, blocked, end)
+                frame_notes.update(dark)
+                vision, calls = await self._vision(req, frames, blocked | set(dark), facts, store_id, end)
         if low_conf is not None:
             vision = {p: v.model_copy(update={"confidence": low_conf}) for p, v in vision.items()}
 
         used: set[str] = set()
+        overruled: list[str] = []
 
         def fused(path: str, atom: Atom) -> AtomVerdict:
             sources = ATOM_SOURCES[atom.op]
@@ -507,6 +567,7 @@ class PerceptionVerifier(VerifierBase):
                 # bag and a meat tray "gripper is empty" with both cues (0.9) and its override sent the runner into
                 # redo / re-ground loops while the unit sat in the jaws. The disagreement stays in the reason.
                 used.add("state")
+                overruled.append(path)
                 why = f"{st.reason} (camera disagreed: {vis.reason}; the simulator's grasp state wins)"
                 return st.model_copy(update={"reason": why, "confidence": min(st.confidence, 0.8)})
             if vis is not None:
@@ -547,7 +608,8 @@ class PerceptionVerifier(VerifierBase):
             reason = verdict_reason(outcome, atoms)
             if fell_back:
                 source = "ground truth" if "ground_truth" in used else "robot state"
-                reason = f"{reason} (vision {vision_code or 'had no fresh frame'}; fell back to {source})"
+                why = self._fallback_why(vision_code, frame_notes, cams, bool(overruled))
+                reason = f"{reason} ({why}; fell back to {source})"
             agrees = (outcome == gt[0]) if gt is not None else None
             if gt is not None and "provider" in used:
                 self.stats.record_agreement(outcome == gt[0])
@@ -622,6 +684,20 @@ class PerceptionVerifier(VerifierBase):
             )
         return self._remember(verdict)
 
+    @staticmethod
+    def _fallback_why(code: str | None, notes: dict[str, str], cams: Sequence[str], overruled: bool) -> str:
+        """Why a camera atom was not decided by vision, in words: 'vision timeout' / 'vision skipped the wrist frame:
+        it is dark (...)' / 'camera overruled by the simulator's grasp state' / 'vision had no frame'."""
+        if code:
+            return f"vision {code}"
+        skipped = [(c, notes[c]) for c in cams if c in notes] or list(notes.items())
+        if skipped:
+            cid, note = skipped[0]
+            return f"vision skipped the {cid.rsplit('.', 1)[-1]} frame: it {note}"
+        if overruled:
+            return "camera overruled by the simulator's grasp state"
+        return "vision had no frame"
+
     def _source_call(self, decided_by: str) -> ProviderCall:
         if decided_by == "state":
             return ProviderCall(provider="state", call="robot_state")
@@ -656,6 +732,11 @@ class PerceptionVerifier(VerifierBase):
         budget = min(self.call_timeout_s, end - time.monotonic() - SAFETY_S)
         if block is None and (frame is None or budget < MIN_CALL_BUDGET_S):
             block = "deadline" if frame is not None else "no_frame"
+        if block is None and frame is not None:
+            if frame_mismatch(frame_ref, frame, request.robot_id, None) is not None:
+                block = "wrong_frame"
+            elif await _bounded(asyncio.to_thread(dark_reason, frame), end - SAFETY_S, None) is not None:
+                block = "dark_frame"
         prov: GroundingResult | None = None
         if block is None and frame is not None:
             p = self.provider
