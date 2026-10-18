@@ -19,7 +19,7 @@ import type { Pose } from "@/lib/data";
 import { fmt } from "@/lib/money";
 import { astar } from "@/lib/routing";
 import { speak, stopSpeaking, useCanSpeak, useSpeaking, useSpeechInput } from "@/lib/speech";
-import { useTmoCart } from "@/lib/tmoCart";
+import { hydrateTmoCart, useTmoCart } from "@/lib/tmoCart";
 import { cn } from "@/lib/utils";
 import { applySuggestion, cartTotal, shortName, suggest, unitPrice, type Suggestion } from "@/lib/whisperer";
 import { useWhisper } from "@/lib/whisperStore";
@@ -127,8 +127,7 @@ export default function InStore() {
 
   const cart = useTmoCart((s) => s.cart);
   const budget = useTmoCart((s) => s.budget_cents);
-  const touched = useTmoCart((s) => s.touched);
-  const [fromWeb] = useState(() => (touched === "web" && cart.length ? cart.reduce((n, l) => n + l.qty, 0) : 0));
+  const [fromWeb, setFromWeb] = useState(0);
   const w = useWhisper();
   const walker = useWalker();
   const talking = useSpeaking();
@@ -136,6 +135,10 @@ export default function InStore() {
   const list = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    void hydrateTmoCart().then(() => {
+      const st = useTmoCart.getState();
+      if (st.touched === "web") setFromWeb(st.cart.reduce((n, l) => n + l.qty, 0));
+    });
     fetch("/api/associate")
       .then((r) => r.json())
       .then((j: { brain: "grok" | "offline" }) => setBrain(j.brain))

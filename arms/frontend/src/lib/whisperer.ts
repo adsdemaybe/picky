@@ -264,6 +264,33 @@ export function candidates(ctx: WContext): Suggestion[] {
     }
   }
 
+  // QTY: two different cases (or screen protectors) for the same phone; keep the cheaper one
+  for (const cat of ["case", "screen"]) {
+    const same = ctx.cart.filter((l) => P[l.sku]?.category === cat && P[l.sku].subcategory !== "grip" && (P[l.sku].compatible_with?.length ?? 0) > 0 && fits(l.sku, dev.sku));
+    if (same.length < 2) continue;
+    const [keep, ...extra] = [...same].sort((a, b) => unitPrice(a.sku) - unitPrice(b.sku) || a.sku.localeCompare(b.sku));
+    const drop = extra.at(-1)!;
+    const cut = unitPrice(drop.sku) * drop.qty;
+    const label = cat === "screen" ? "screen protectors" : "cases";
+    out.push(
+      card({
+        kind: "qty_fix",
+        action: "remove",
+        sku: drop.sku,
+        qty: 0,
+        title: `Two ${label} for one ${dev.name}?`,
+        reason: `You have the ${P[keep.sku].name.split(" for ")[0]} (${money(unitPrice(keep.sku))}) and the ${P[drop.sku].name.split(" for ")[0]} (${money(unitPrice(drop.sku))}). Keep one: drop the pricier one and save ${money(cut)}.`,
+        reason_codes: ["QTY_MISMATCH"],
+        signals: { device: dev.name, keep_cents: unitPrice(keep.sku), drop_cents: cut },
+        why: [`${same.length} ${label} in the cart`, `Phones they're for: 1 (${dev.name})`, `Keeping the cheaper one saves ${money(cut)}`],
+        price_delta_cents: -cut,
+        savings_cents: cut,
+        avoided_cents: 0,
+        score: 0.82,
+      }),
+    );
+  }
+
   // COMPLETE: a new phone (or its case) without protection
   if (dev.isNew) {
     const hasCase = has((p) => p.category === "case" && p.subcategory !== "grip" && fits(p.sku, dev.sku) && !!p.compatible_with?.length);

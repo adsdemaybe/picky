@@ -13,7 +13,7 @@ import { mandateCheck, type Draft } from "@/lib/order";
 import { useTrip } from "@/lib/trip";
 import { cn } from "@/lib/utils";
 import { applySuggestion, cartTotal, suggest, targetDevice, unitPrice, type Suggestion, type WLine } from "@/lib/whisperer";
-import { useTmoCart } from "@/lib/tmoCart";
+import { hydrateTmoCart, useTmoCart } from "@/lib/tmoCart";
 import { useWhisper } from "@/lib/whisperStore";
 import { MetricsStrip, niceDate, WhisperList } from "../bits";
 import { usePhrasing } from "../phrasing";
@@ -57,11 +57,11 @@ function expand(text: string): { cart: WLine[]; budget: number; title: string } 
 }
 
 export default function TmoShop() {
-  const { cart, intent, title, budget_cents: budget, touched } = useTmoCart();
+  const { cart, intent, title, budget_cents: budget } = useTmoCart();
   const [text, setText] = useState(intent || PRESETS[0].text);
   const setCart = (f: (c: WLine[]) => WLine[]) => useTmoCart.getState().set({ cart: f(useTmoCart.getState().cart) }, "web");
   const setBudget = (b: number) => useTmoCart.getState().set({ budget_cents: b }, "web");
-  const [fromStore] = useState(() => touched === "store" && cart.length > 0);
+  const [fromStore, setFromStore] = useState(false);
   const [cat, setCat] = useState("case");
   const [q, setQ] = useState("");
   const w = useWhisper();
@@ -95,9 +95,12 @@ export default function TmoShop() {
   };
   // first visit: start from the demo's opening request (a basket from the store or an earlier visit is kept)
   useEffect(() => {
-    // one-time seed of the shared basket store on mount, not derived state
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (useTmoCart.getState().touched === null) run(PRESETS[0].text);
+    void hydrateTmoCart().then(() => {
+      const st = useTmoCart.getState();
+      if (st.touched === null) return run(PRESETS[0].text);
+      setText(st.intent || PRESETS[0].text);
+      setFromStore(st.touched === "store" && st.cart.length > 0);
+    });
   }, []);
   const add = (sku: string) => {
     useTmoCart.getState().add(sku, 1, "web");
@@ -227,7 +230,7 @@ export default function TmoShop() {
           <div>
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-[20px] font-semibold">Cart Whisperer</h2>
-              <span className="text-[11.5px] text-muted-foreground">{source === "claude" ? "Reasons phrased by Claude, checked by code" : "Deterministic reasons"}</span>
+              <span className="text-[11.5px] text-muted-foreground">{source === "template" ? "Deterministic reasons" : `Reasons phrased by ${source === "grok" ? "Grok" : "Claude"}, checked by code`}</span>
             </div>
             <WhisperList cards={cards} onAccept={accept} onDecline={decline} />
           </div>

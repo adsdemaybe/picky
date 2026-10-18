@@ -3,12 +3,12 @@ import { Ban, Check, ChevronDown, Clock, Hourglass, Plus, Repeat, ShieldCheck, S
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ProductTile } from "@/components/picky";
 import { Button } from "@/components/ui/button";
 import { productBySku } from "@/lib/data";
 import { fmt } from "@/lib/money";
-import { useTmoCart } from "@/lib/tmoCart";
+import { hydrateTmoCart, useTmoCart } from "@/lib/tmoCart";
 import { useTrip } from "@/lib/trip";
 import { cn } from "@/lib/utils";
 import type { Metrics, Suggestion } from "@/lib/whisperer";
@@ -26,6 +26,7 @@ export function TmoHeader() {
   const phase = useTrip((s) => s.phase);
   const live = phase === "shopping" || phase === "checkout" || phase === "waiting_login";
   const count = useTmoCart((s) => s.cart.reduce((n, l) => n + l.qty, 0));
+  useEffect(() => void hydrateTmoCart(), []);
   return (
     <header className="sticky top-0 z-30 text-white">
       {/* full-bleed color past the page's max width, without widening the layout */}
