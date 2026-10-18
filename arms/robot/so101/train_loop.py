@@ -31,7 +31,7 @@ from .camera import grab_frame
 from .config import RigConfig
 from .kinematics import SO101Kinematics
 from .pick_place import connect_robot, read_pose
-from .pick_routine import GRIP_OPEN, describe, execute, go_home, plan
+from .pick_routine import GRIP_OPEN, describe, execute, go_home, plan, save_recipe
 from .scene import CameraModel
 
 DATA_DIR = Path.home() / "picky_runs"
@@ -138,9 +138,12 @@ def main() -> None:
             print("running... type s or f + Enter any time", flush=True)
             t0 = time.time()
             grip_after_close = None
+            traj: list[dict] = []
             try:
                 for w in p.waypoints:
-                    execute(robot, kin, type(p)(**{**p.__dict__, "waypoints": [w]}), log=lambda m: print(m, flush=True))
+                    traj += execute(
+                        robot, kin, type(p)(**{**p.__dict__, "waypoints": [w]}), log=lambda m: print(m, flush=True)
+                    )
                     if w.name == "close":
                         grip_after_close = read_pose(robot)[1]
                     while not keys.empty():
@@ -178,8 +181,11 @@ def main() -> None:
                 "gripper_after_close": grip_after_close,  # ~5 = closed on nothing, >8 = holding something
                 "duration_s": round(time.time() - t0, 1),
                 "waypoints": [{"name": w.name, "xyz": w.xyz, "gripper": w.gripper} for w in p.waypoints],
+                "trajectory": traj,  # joint targets actually commanded: replayable (pick_routine --replay)
             }
-            (ep / "episode.json").write_text(json.dumps(record, indent=1))
+            (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
+            if success:  # every success becomes a replayable recipe
+                save_recipe(f"success_{ep.name}", p, traj, rest)
             rate = policy.successes / max(1, policy.episodes)
             print(
                 f"saved {ep.name}: {'SUCCESS' if success else 'failure'} | {policy.successes}/{policy.episodes} "

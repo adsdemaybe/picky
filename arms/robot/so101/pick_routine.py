@@ -11,8 +11,10 @@ settled to <1 deg. Recipe from the first successful pick: hover, straddle the to
 from __future__ import annotations
 
 import argparse
+import json
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -59,6 +61,18 @@ def choose_drop_point(kin, cam, box_px, size, heights, seed, shift=(0.0, 0.0), m
         except ValueError:
             continue
         return pt
+    return None
+
+
+def highest_reachable(kin, x: float, y: float, seed, z_max: float = 0.16, z_min: float = 0.09, step: float = 0.01):
+    """Highest fingertip height (z_max down to z_min) the arm reaches above (x, y), or None."""
+    z = z_max
+    while z >= z_min - 1e-9:
+        try:
+            kin.ik((x, y, z), seed, quick=True)
+            return round(z, 3)
+        except ValueError:
+            z -= step
     return None
 
 
@@ -128,35 +142,45 @@ def plan(
         p.error = f"{target} at ({t[0]:.2f}, {t[1]:.2f}) is out of reach: {e}"
         return p
     p.roll = max(-175.0, min(175.0, best_roll(kin, q_hover, jaw) + st["roll"]))
-    carry_z = h + 0.015  # object bottom clears a plate rim by ~1.5 cm; lower carry poses reach further
     hang = h - 0.02  # the object hangs this far below the fingertip (gripped 2 cm below its top)
-    lower_z = 0.01 + hang + 0.01
+    lower_z = 0.01 + hang + 0.01  # object bottom ~1 cm above the plate when released
+    # Transit must clear a plate/bowl rim with margin for arm error and the object slipping in the jaws:
+    # object bottom >= ~6 cm above the table -> fingertip >= hang + 0.06.
+    clear_z = max(h + 0.04, hang + 0.06)
 
     dd = choose_drop_point(
         kin,
         cam,
         dets[dest].box_px,
         size,
-        (carry_z + 0.01, carry_z, lower_z),
+        (clear_z, lower_z),
         seed,
         shift=(st["drop_dx"], st["drop_dy"]),
     )
     if dd is None:
         p.error = (
-            f"no part of the {dest} is within reach - move it within ~30 cm of the arm's base "
-            "(the arm reaches ~32 cm to the side, ~35 cm straight ahead)"
+            f"no part of the {dest} is within reach at a safe carry height - move it within ~28 cm of the arm's base"
         )
         return p
     p.target_xy, p.dest_xy = (float(t[0]), float(t[1])), (float(dd[0]), float(dd[1]))
+    lift_z = highest_reachable(kin, t[0], t[1], seed, z_min=clear_z)
+    drop_high_z = highest_reachable(kin, dd[0], dd[1], seed, z_min=clear_z)
+    mid = ((t[0] + dd[0]) / 2 * 0.85, (t[1] + dd[1]) / 2)  # a bit closer to the base, where the arm reaches higher
+    mid_z = highest_reachable(kin, mid[0], mid[1], seed, z_min=clear_z)
+    if None in (lift_z, drop_high_z, mid_z):
+        p.error = f"can't carry high enough (>= {clear_z * 100:.0f} cm) between {target} and {dest}; move them closer"
+        return p
     p.waypoints = [
         Waypoint("hover over target", hover, GRIP_OPEN),
         Waypoint("straddle", (t[0], t[1], h - 0.02 + st["grasp_dz"]), GRIP_OPEN),
         Waypoint("close", None, GRIP_CLOSED),
-        Waypoint("lift", (t[0], t[1], carry_z), GRIP_CLOSED),
-        Waypoint("carry over destination", (dd[0], dd[1], carry_z), GRIP_CLOSED),
+        Waypoint("lift straight up", (t[0], t[1], h + 0.03), GRIP_CLOSED),
+        Waypoint("lift high", (t[0], t[1], lift_z), GRIP_CLOSED),
+        Waypoint("transit", (mid[0], mid[1], mid_z), GRIP_CLOSED),
+        Waypoint("over destination", (dd[0], dd[1], drop_high_z), GRIP_CLOSED),
         Waypoint("lower", (dd[0], dd[1], lower_z), GRIP_CLOSED),
         Waypoint("release", None, GRIP_OPEN),
-        Waypoint("retreat", (dd[0], dd[1], carry_z + 0.01), GRIP_OPEN),
+        Waypoint("retreat", (dd[0], dd[1], drop_high_z), GRIP_OPEN),
     ]
     for w in p.waypoints:  # check every waypoint is reachable before moving anything
         if w.xyz:
@@ -175,8 +199,10 @@ def execute(
     step: bool = False,
     log=print,
     cfg: RigConfig | None = None,
-    snap_after: tuple[str, ...] = ("lift", "release"),
-) -> None:
+    snap_after: tuple[str, ...] = ("lift high", "release"),
+) -> list[dict]:
+    """Runs the plan; returns the joint trajectory actually commanded (for recipes / exact replay)."""
+    traj: list[dict] = []
     for w in p.waypoints:
         if step:
             input(f"  next: {w.name} - Enter to run, Ctrl-C to stop ")
@@ -184,6 +210,7 @@ def execute(
         if w.xyz is None:
             move(robot, pose, w.gripper, seconds=1.5)
             log(f"  {w.name}: gripper -> {read_pose(robot)[1]:.0f}")
+            traj.append({"name": w.name, "joints": None, "gripper": w.gripper})
             _snap(cfg, w.name, snap_after, log)
             continue
         q = kin.ik(w.xyz, pose)
@@ -192,7 +219,44 @@ def execute(
         move(robot, q, w.gripper, seconds=max(1.5, jump / 15.0), steps=60)
         err = settle(robot, q, w.gripper)
         log(f"  {w.name}: settled to {err:.1f} deg")
+        traj.append({"name": w.name, "joints": {j: round(float(q[j]), 2) for j in ARM_JOINTS}, "gripper": w.gripper})
         _snap(cfg, w.name, snap_after, log)
+    return traj
+
+
+RECIPES = Path.home() / "picky_runs" / "recipes"
+
+
+def save_recipe(name: str, p: ScenePlan, traj: list[dict], home: dict[str, float]) -> Path:
+    RECIPES.mkdir(parents=True, exist_ok=True)
+    path = RECIPES / f"{name}.json"
+    rec = {
+        "name": name,
+        "target": p.target,
+        "dest": p.dest,
+        "target_xy": p.target_xy,
+        "dest_xy": p.dest_xy,
+        "roll": p.roll,
+        "home": home,
+        "trajectory": traj,
+        "waypoints": [{"name": w.name, "xyz": w.xyz, "gripper": w.gripper} for w in p.waypoints],
+    }
+    path.write_text(json.dumps(rec, indent=1, default=float))
+    return path
+
+
+def replay(robot, name: str, log=print) -> None:
+    """Re-run a saved recipe joint-for-joint: no camera, no planning - identical every time if the objects are
+    placed where they were when it was recorded."""
+    rec = json.loads((RECIPES / f"{name}.json").read_text())
+    log(f"replaying {name}: {rec['target']} at {rec['target_xy']} -> {rec['dest']} at {rec['dest_xy']}")
+    for step in rec["trajectory"]:
+        pose, _ = read_pose(robot)
+        q = step["joints"] or pose
+        jump = max(abs(q[j] - pose[j]) for j in ARM_JOINTS)
+        move(robot, q, step["gripper"], seconds=1.5 if step["joints"] is None else max(1.5, jump / 15.0), steps=60)
+        err = settle(robot, q, step["gripper"]) if step["joints"] else 0.0
+        log(f"  {step['name']}: settled to {err:.1f} deg, gripper {read_pose(robot)[1]:.0f}")
 
 
 def _snap(cfg: RigConfig | None, name: str, which: tuple[str, ...], log) -> None:
@@ -230,10 +294,12 @@ def describe(p: ScenePlan) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("command", help='e.g. "pick up the gum and put it on the plate"')
+    ap.add_argument("command", nargs="?", default="", help='e.g. "pick up the gum and put it on the plate"')
     ap.add_argument("--dry", action="store_true", help="plan only (connects to read the current pose)")
     ap.add_argument("--step", action="store_true", help="wait for Enter before each waypoint")
     ap.add_argument("--height", type=float, default=0.05, help="object height in metres (standing gum pack: 0.05)")
+    ap.add_argument("--save", metavar="NAME", help="after the run, save it as a replayable recipe")
+    ap.add_argument("--replay", metavar="NAME", help="re-run a saved recipe exactly (no camera / planning)")
     args = ap.parse_args()
     cfg = RigConfig()
     kin = SO101Kinematics(cfg)
@@ -243,13 +309,20 @@ def main() -> None:
         set_limits_from_calibration(kin, robot)
         rest = dict(cfg.home_deg)
         go_home(robot, rest, GRIP_OPEN)
+        if args.replay:
+            replay(robot, args.replay)
+            print("done")
+            return
         p = plan(cfg, kin, cam, args.command, rest, args.height)
         print(describe(p))
         print(f"annotated camera frame: {p.frame_path}")
         if p.error or args.dry:
             return
-        execute(robot, kin, p, step=args.step, cfg=cfg)
-        print("done")
+        traj = execute(robot, kin, p, step=args.step, cfg=cfg)
+        last = save_recipe("last_run", p, traj, rest)  # every run is replayable; --save keeps a named copy
+        if args.save:
+            print(f"saved recipe: {save_recipe(args.save, p, traj, rest)}")
+        print(f"done (trajectory: {last})")
     finally:
         go_home(robot, dict(cfg.home_deg), GRIP_OPEN)
         robot.disconnect()
