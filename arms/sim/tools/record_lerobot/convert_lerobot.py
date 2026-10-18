@@ -9,6 +9,7 @@ repo's base env (lerobot is a heavy, arm-local tool dependency). On vhagar:
     $V arms/sim/tools/record_lerobot/convert_lerobot.py validate \
         --root /data/$USER/picky-vla/datasets/picky_shelf_pick_v1
     $V arms/sim/tools/record_lerobot/convert_lerobot.py preview --raw ... --out-dir previews/ --episodes 0 7
+    $V arms/sim/tools/record_lerobot/convert_lerobot.py sheet --root ... --out-dir previews/ --episodes 0 59
 
 Self-contained on purpose (no repo imports): the raw ``episode.json`` already carries LeRobot units.
 
@@ -129,6 +130,8 @@ def convert(args: argparse.Namespace) -> int:
                 "sku": meta["sku"],
                 "slot_id": meta["slot_id"],
                 "n_frames": n,
+                "grasp_frame": meta.get("grasp_frame"),
+                "release_frame": meta.get("release_frame"),
             }
         )
         print(f"episode {k} <- {ep_dir.name} ({n} frames, {meta['sku']})", flush=True)
@@ -339,6 +342,57 @@ def preview(args: argparse.Namespace) -> int:
     return 0
 
 
+def sheet(args: argparse.Namespace) -> int:
+    """Key-frame contact sheets decoded FROM THE LEROBOT DATASET (not the raw JPEGs): proves the AV1 videos decode,
+    line up with the episode boundaries, and show what the policy will see (side | wrist per row, state overlaid)."""
+    import numpy as np
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    from PIL import Image, ImageDraw
+
+    root, out = Path(args.root), Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    ds = LeRobotDataset(args.repo_id, root=root)
+    ep_map_p = root / "meta" / "picky_episodes.json"
+    ep_map = {m["episode_index"]: m for m in json.loads(ep_map_p.read_text())} if ep_map_p.exists() else {}
+    for e in args.episodes:
+        em = ds.meta.episodes[e]
+        a, b = int(em["dataset_from_index"]), int(em["dataset_to_index"])
+        n = b - a
+        m = ep_map.get(e, {})
+        g, r = m.get("grasp_frame"), m.get("release_frame")
+        if (g is None or r is None) and args.raw and m.get("raw"):
+            raw_meta = json.loads((Path(args.raw) / m["raw"] / "episode.json").read_text())
+            g, r = raw_meta.get("grasp_frame"), raw_meta.get("release_frame")
+        keys = [("start", 0)]
+        if g is not None and r is not None:
+            keys += [("pre-grasp", max(0, g - 20)), ("grasp", g), ("lifted", min(n - 1, g + 15)), ("release", r)]
+        else:
+            keys += [(f"{int(f * 100)}%", int(f * (n - 1))) for f in (0.3, 0.5, 0.65, 0.85)]
+        keys.append(("end", n - 1))
+        rows = []
+        for label, t in keys:
+            item = ds[a + t]
+            assert int(item["episode_index"]) == e and int(item["frame_index"]) == t, (e, t)
+            ims = []
+            for cam in CAMERAS:
+                x = item[f"observation.images.{cam}"].permute(1, 2, 0).numpy()
+                ims.append((np.clip(x, 0.0, 1.0) * 255).astype(np.uint8))
+            row = Image.fromarray(np.concatenate(ims, axis=1)).resize((W, H // 2))
+            st = ", ".join(f"{v:.0f}" for v in item["observation.state"].tolist())
+            d = ImageDraw.Draw(row)
+            d.rectangle((0, 0, W, 14), fill=(0, 0, 0))
+            d.text((4, 2), f"ep {e} t={t}/{n - 1} {label}  state=[{st}]", fill=(255, 255, 255))
+            rows.append(row)
+        grid = Image.new("RGB", (W, len(rows) * (H // 2)))
+        for i, row in enumerate(rows):
+            grid.paste(row, (0, i * (H // 2)))
+        split = m.get("split", "?")
+        name = f"ds_ep{e:03d}_{split}_{str(m.get('sku', 'item')).lower()}.jpg"
+        grid.save(out / name, quality=88)
+        print(f"{out / name} ({n} frames, task: {item['task']})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -356,8 +410,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--raw", required=True)
     p.add_argument("--out-dir", required=True)
     p.add_argument("--episodes", type=int, nargs="+", default=[0, 1])
+    k = sub.add_parser("sheet", help="key-frame contact sheets decoded from the LeRobot dataset")
+    k.add_argument("--root", required=True)
+    k.add_argument("--repo-id", default=REPO_ID)
+    k.add_argument("--out-dir", required=True)
+    k.add_argument("--raw", default="", help="raw episodes dir, for grasp/release frames of older conversions")
+    k.add_argument("--episodes", type=int, nargs="+", default=[0])
     args = ap.parse_args(argv)
-    return {"convert": convert, "validate": validate, "preview": preview}[args.cmd](args)
+    return {"convert": convert, "validate": validate, "preview": preview, "sheet": sheet}[args.cmd](args)
 
 
 if __name__ == "__main__":

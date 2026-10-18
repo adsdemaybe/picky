@@ -10,7 +10,7 @@ demonstrations by the LeKiwi + SO-101 rover in the Isaac store (`store_ave`, per
 | 1. Record raw episodes | vhagar, Isaac Python (`/data/$USER/isaacsim/python.sh`) | `record_isaac.py` |
 | 2. Convert to LeRobot | any env with `lerobot[dataset]==0.6.1` | `convert_lerobot.py convert` |
 | 3. Validate (Perceptron checklist) | same env | `convert_lerobot.py validate` |
-| 4. Previews (MP4 / GIF / key frames) | same env | `convert_lerobot.py preview` |
+| 4. Previews (MP4 / GIF / key frames) | same env | `convert_lerobot.py preview` (raw JPEGs), `convert_lerobot.py sheet` (decoded from the LeRobot videos) |
 
 ## What one episode is
 
@@ -25,7 +25,7 @@ damped-least-squares IK from `arms/sim/rover_puppet.py`):
 folded back over the rover, pan ±14–22° so it clears the mast) → `release` (jaws open, the unit drops into the
 basket) → `hold`.
 
-- Episodes are ~7–9 s, or 215–260 frames, with a random speed scale of 0.9–1.2.
+- Episodes are 6.7–8.7 s, or 202–260 frames (mean 7.7 s), with a random speed scale of 0.9–1.2.
 - The task string is `"pick up the <product name> and put it in the basket"`.
 - The targets are front-row, bottom-layer units of graspable size: width ≤ 9.5 cm, depth ≤ 12 cm, height ≤ 31 cm,
   unit center ≥ 0.55 m.
@@ -91,11 +91,21 @@ D=/data/$USER/picky-vla/datasets
 $V $C convert --raw $D/raw_shelf_pick_v1 --out $D/picky_shelf_pick_v1 --overwrite
 $V $C validate --root $D/picky_shelf_pick_v1           # exit 0 = every check passed
 $V $C preview --raw $D/raw_shelf_pick_v1 --out-dir $D/previews --episodes 0 7
+$V $C sheet --root $D/picky_shelf_pick_v1 --raw $D/raw_shelf_pick_v1 --out-dir $D/previews --episodes 0 59
 ```
 
 Timing on vhagar: startup takes ~22 s (store + rover). Rendering runs at ~13–14 frames/s, and each episode takes
 ~20 s with JPEG writes, so 60 episodes take ~20 min. Conversion takes about 1 s per episode. The rendering adds
 ~4 GB of GPU memory.
+
+## Current build (vhagar)
+
+- `/data/$USER/picky-vla/datasets/picky_shelf_pick_v1`: 60 episodes (54 train `0:54`, 6 validation `54:60`),
+  13,885 frames (7.7 s mean), 37 SKUs and 37 slots, 321 MB (AV1 videos). The raw episodes in
+  `raw_shelf_pick_v1` take 1.8 GB.
+- `convert_lerobot.py validate`: every check passes (`meta/picky_validation.json`).
+- Previews are in `/data/$USER/picky-vla/datasets/previews_v1`. `ds_ep*.jpg` sheets are decoded from the LeRobot
+  videos. `ep_*.mp4` / `.gif` are made from the raw frames.
 
 ## Upload to Perceptron (once the team key exists)
 
