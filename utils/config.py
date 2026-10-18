@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     photon_project_id: str = ""
     deepgram_api_key: str = ""
     picky_rec_max_stops: int = 3
+    picky_scripted_shopper: bool = False
+    """Gateway server only: True = the fake messaging's scripted shopper answers every texted approval (and the
+    follow-up) by itself. False (default) = approvals wait for a person (web app click or a real text)."""
 
     # --- helpers -------------------------------------------------------------------------------------------------
     def real_arms(self) -> set[str]:

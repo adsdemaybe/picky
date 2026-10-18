@@ -1,32 +1,68 @@
 """Schemas of the data files under data/ (the planogram is the single source of truth, CLAUDE.md §4 rule 5).
 
-- data/products.yaml            -> ProductsFile
+- data/products.yaml              -> ProductsFile
 - data/planograms/<store_id>.yaml -> Planogram
-- data/online_store.yaml        -> OnlineCatalog
-- data/fixtures/users.yaml      -> FixturesFile (demo users)
+- data/online_store.yaml          -> OnlineCatalog
+- data/fixtures/users.yaml        -> FixturesFile (demo users)
+- data/fixtures/robots.yaml       -> RobotsFile (fleet robots per store + store ceiling cameras)
+- data/categories.yaml            -> CategoriesFile (category taxonomy; Product.category / subcategory ids)
 
 Geometry: world frame, meters. x right, y up, origin (0, 0) at the store's bottom-left corner, theta CCW from +x.
 Fixture footprints are axis-aligned rectangles; a fixture's ``yaw`` is the direction its pick face points (it does
 NOT rotate the rectangle). Load these with utils.data, not by hand.
 
 3D / sim rules (the Isaac scene is generated from these files):
-- Sim world == store frame: USD stage Z-up, metersPerUnit = 1, USD (x, y) = store (x, y), origin at the store's
-  bottom-left corner. Never re-center the scene; z = height above the floor.
+- Stage layout (one Isaac stage, several stores): stage Z-up, metersPerUnit = 1. Each store is a
+  ``/World/Stores/<store_id>`` Xform with a TRANSLATION ONLY (no rotation, no scale), stores spaced at least the
+  largest store size + 20 m apart so cameras and physics never see a neighbor. That Xform's local frame IS the store
+  frame (origin at the store's bottom-left corner, local (x, y) = store (x, y), z = height above the floor); never
+  re-center a store inside it. Every pose / position on the wire (waypoints, RobotState.pose, ItemInstance.position,
+  CameraMount with frame='world', CameraFrame.camera_pose) is STORE-LOCAL, never stage coordinates.
+- Ids: ``slot_id`` is unique across ALL stores (convention: a store prefix, e.g. 'AVE-G1-E1-00' / 'HILL-G1-E1-00'),
+  so sim instance ids (``contracts.sim.instance_id(slot_id, n)``) are globally unique too (``python -m utils.data``
+  checks it). Docks of robots in one store are >= 2 x ROBOT_RADIUS_M + 0.1 m apart and >= ROBOT_RADIUS_M from every
+  slot approach pose.
 - ``Slot.item_position`` = front-center of the front item's BASE on the shelf board: (x, y) on the pick-face edge of
   the fixture rect, z == ``fixture.level_z_m[slot.level]`` when set. Sim ``ItemInstance.position`` = item CENTER.
 - Pick-face direction of a slot = ``slot.approach_pose.theta + pi`` (the robot faces the shelf). This also says which
   side of a ``double_sided`` fixture the slot is on. Items are rotated so their label (-y face) points that way.
-- Every approach pose / entrance / checkout keeps ``contracts.common.ROBOT_RADIUS_M`` clearance from fixtures,
-  obstacles and the store outline (``python -m utils.data`` checks it).
+- Every approach pose / dock / entrance / checkout keeps ``contracts.common.ROBOT_RADIUS_M`` (0.3 m) clearance from
+  fixtures, obstacles and the store outline (``python -m utils.data`` checks it).
+- Reach (SO-101 rover, contracts.common): the horizontal distance approach pose -> ``item_position`` is designed to be
+  0.35-0.40 m (``APPROACH_DIST_MIN_M``..``APPROACH_DIST_MAX_M``) and must be <= ``ARM_MOUNT_X_M + ARM_REACH_M``
+  (0.47 m); ``item_position.z`` must be within ``REACH_Z_MIN_M``..``REACH_Z_MAX_M`` (0.1-1.5 m).
+
+data/fixtures/robots.yaml (``RobotsFile``)::
+
+    schema_version: 1
+    robots:
+      - {robot_id: rover-ave-1, name: Pico, kind: rover_so101, store_id: store_ave,
+         dock: {x: 1.0, y: 2.2, theta: 0.0}, battery_pct: 95, basket_capacity: 12, color: "#2563eb"}
+    store_cameras:
+      - {camera_id: store_ave.ceiling-1, store_id: store_ave, name: Ave ceiling 1,
+         mount: {frame: world, x: 3.5, y: 5.5, z: 3.2, yaw: 0.785, pitch: -0.9, hfov_deg: 100}}
+
+data/categories.yaml (``CategoriesFile``)::
+
+    schema_version: 1
+    categories:
+      - {category_id: dairy, name: Dairy & Eggs, icon: milk, color: "#60a5fa", sort: 2}
+      - {category_id: salsa, name: Salsa, parent_id: international}
 """
 
+import re
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from contracts.cameras import ROBOT_CAMERA_KINDS, CameraMount, RobotCameraKind
 from contracts.catalog import DealTerms, Lot, Product
 from contracts.common import (
+    ROBOT_KIND,
+    ROBOT_MAX_SPEED_MPS,
     AisleId,
+    CameraId,
+    CategoryId,
     Cents,
     FixtureId,
     Model,
@@ -34,6 +70,7 @@ from contracts.common import (
     Pose2D,
     Qty,
     Rect2D,
+    RobotId,
     Sku,
     SlotId,
     StoreId,
@@ -96,6 +133,9 @@ class Slot(Model):
     facings: int = Field(1, ge=1)
     capacity: int = Field(12, ge=0)
     qty: Qty = Field(0, description="Units on the shelf now (0 = out of stock).")
+    low_threshold: int | None = Field(
+        None, ge=0, description="qty <= this -> low stock; None = catalog.default_low_threshold(capacity)."
+    )
     price_cents: Cents | None = Field(None, description="Store price override; None = product base price.")
     shelf_tag_cents: Cents | None = Field(None, description="What the physical tag shows if it differs (mispricing).")
     lots: list[Lot] = Field(default_factory=list, description="Sum of lot qty should equal qty when present.")
@@ -227,3 +267,133 @@ class FixturesFile(Model):
 
     def user(self, user_id: UserId) -> DemoUser | None:
         return next((u for u in self.users if u.user_id == user_id), None)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# Fleet robots + store cameras (data/fixtures/robots.yaml)
+# --------------------------------------------------------------------------------------------------------------------
+RobotKind = Literal["rover_so101"]
+_ROBOT_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+class RobotSpec(Model):
+    """One fleet robot (static config). Live state is ``contracts.sim.RobotState`` / ``contracts.fleet.RobotInfo``."""
+
+    robot_id: RobotId = Field(description="Lowercase + hyphens, e.g. 'rover-ave-1' (no dots: camera ids use '.').")
+    name: str = Field(description="Shopper-facing name, e.g. 'Pico'.")
+    kind: RobotKind = ROBOT_KIND  # type: ignore[assignment]
+    store_id: StoreId = Field(description="Physical store the robot works in.")
+    dock: Pose2D = Field(description="Charging dock pose (spawn pose on reset; return_to_dock goal target).")
+    battery_pct: float = Field(100.0, ge=0, le=100, description="Battery at boot / reset.")
+    basket_capacity: int = Field(12, ge=1, description="Max units in the basket.")
+    max_speed_mps: float = Field(ROBOT_MAX_SPEED_MPS, gt=0)
+    cameras: list[RobotCameraKind] = Field(default_factory=lambda: list(ROBOT_CAMERA_KINDS))
+    color: str | None = Field(None, pattern=r"^#[0-9a-fA-F]{6}$", description="UI accent color.")
+    notes: str = ""
+
+    @field_validator("robot_id")
+    @classmethod
+    def _id_shape(cls, v: str) -> str:
+        if not _ROBOT_ID_RE.match(v):
+            raise ValueError(f"robot_id {v!r} must be lowercase letters/digits/hyphens (no dots)")
+        return v
+
+
+class StoreCameraSpec(Model):
+    """A fixed store camera (ceiling). ``camera_id`` must be '<store_id>.ceiling-<n>'."""
+
+    camera_id: CameraId
+    store_id: StoreId
+    name: str
+    mount: CameraMount = Field(description="frame='world' (store frame, meters; z = height above the floor).")
+
+    @model_validator(mode="after")
+    def _id_matches(self) -> "StoreCameraSpec":
+        if not re.fullmatch(rf"{re.escape(self.store_id)}\.ceiling-[1-9][0-9]*", self.camera_id):
+            raise ValueError(f"store camera id {self.camera_id!r} must be '{self.store_id}.ceiling-<n>'")
+        if self.mount.frame != "world":
+            raise ValueError(f"store camera {self.camera_id}: mount.frame must be 'world'")
+        return self
+
+
+class RobotsFile(Model):
+    """data/fixtures/robots.yaml: every fleet robot in every physical store, plus the stores' ceiling cameras."""
+
+    schema_version: int = 1
+    robots: list[RobotSpec] = Field(default_factory=list)
+    store_cameras: list[StoreCameraSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique(self) -> "RobotsFile":
+        ensure_unique([r.robot_id for r in self.robots], "robot_id")
+        ensure_unique([c.camera_id for c in self.store_cameras], "store camera_id")
+        return self
+
+    def robot(self, robot_id: RobotId) -> RobotSpec | None:
+        return next((r for r in self.robots if r.robot_id == robot_id), None)
+
+    def robots_in(self, store_id: StoreId) -> list[RobotSpec]:
+        return [r for r in self.robots if r.store_id == store_id]
+
+    def cameras_in(self, store_id: StoreId) -> list[StoreCameraSpec]:
+        return [c for c in self.store_cameras if c.store_id == store_id]
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# Category taxonomy (data/categories.yaml)
+# --------------------------------------------------------------------------------------------------------------------
+_CATEGORY_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
+class CategoryDef(Model):
+    """One node of the taxonomy. Top-level nodes (parent_id None) are what ``Product.category`` holds; children are
+    what ``Product.subcategory`` holds. Max depth 2 (category -> subcategory)."""
+
+    category_id: CategoryId
+    name: str
+    parent_id: CategoryId | None = None
+    description: str = ""
+    icon: str | None = Field(None, description="Icon name hint for the web app, e.g. 'carrot'.")
+    color: str | None = Field(None, pattern=r"^#[0-9a-fA-F]{6}$")
+    aliases: list[str] = Field(default_factory=list, description="Words shoppers use ('mexican', 'dairy aisle').")
+    sort: int = 0
+
+    @field_validator("category_id", "parent_id")
+    @classmethod
+    def _id_shape(cls, v: str | None) -> str | None:
+        if v is not None and not _CATEGORY_ID_RE.match(v):
+            raise ValueError(f"category id {v!r} must be lowercase snake_case")
+        return v
+
+    @field_validator("aliases")
+    @classmethod
+    def _lower(cls, v: list[str]) -> list[str]:
+        return [a.strip().lower() for a in v]
+
+
+class CategoriesFile(Model):
+    schema_version: int = 1
+    categories: list[CategoryDef] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _tree(self) -> "CategoriesFile":
+        ensure_unique([c.category_id for c in self.categories], "category_id")
+        by_id = {c.category_id: c for c in self.categories}
+        for c in self.categories:
+            if c.parent_id is None:
+                continue
+            parent = by_id.get(c.parent_id)
+            if parent is None:
+                raise ValueError(f"category {c.category_id}: unknown parent_id {c.parent_id}")
+            if parent.parent_id is not None:
+                raise ValueError(f"category {c.category_id}: max depth is 2 (parent {c.parent_id} has a parent)")
+        return self
+
+    def top_level(self) -> list[CategoryDef]:
+        return sorted((c for c in self.categories if c.parent_id is None), key=lambda c: (c.sort, c.category_id))
+
+    def children(self, category_id: CategoryId) -> list[CategoryDef]:
+        return sorted((c for c in self.categories if c.parent_id == category_id), key=lambda c: (c.sort, c.name))
+
+    def get(self, category_id: CategoryId) -> CategoryDef | None:
+        return next((c for c in self.categories if c.category_id == category_id), None)

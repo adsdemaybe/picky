@@ -1,6 +1,14 @@
 # picky: research and stack decisions (DubHacks 2026)
 
-> **Update 2026-10-17:** the team dropped the T-Mobile track; side tracks are Photon 2.0 and SideShift only.
+> **Update 2026-10-17 (evening):** the T-Mobile track is **back in** (this reverses the earlier same-day note that
+> dropped it). Side tracks: T-Mobile "Cart Whisperer" (design: `docs/cart-whisperer.md`), Photon 2.0, SideShift. Check
+> the sponsor-track limit (§5).
+>
+> **Update 2026-10-17 (night):** reconciled with the teammate's web app (`arm/frontend`, PR #12) and their master plan
+> `docs/team-plan.md` (on that branch until #12 merges): T-Mobile rubric and requirements from the team's copy of the
+> brief (§6.2), a T-Mobile-style wireless store, SKIP / WAIT and zero suggestions in Cart Whisperer, the online
+> "decision" layer (Find & compare, verdicts; §6.1), and the frontend stack as shipped (§9.10, re-checked against the
+> 18:13 PT redesign `6fc1c41`).
 
 Synthesized 2026-10-17 from six research reports (payments/trust, Photon, agent stack, hackathon context,
 Isaac Sim, perception/data, routing) and two adversarial fact-check passes.
@@ -17,16 +25,19 @@ Isaac Sim, perception/data, routing) and two adversarial fact-check passes.
 ## 0. TL;DR: the stack in 10 lines
 
 1. **Python 3.12 + uv**, one project with per-arm optional extras. FastAPI gateway with an in-process event bus and
-   websockets. Next.js 16 + Tailwind 4 + shadcn/ui in `arms/frontend`. Contracts flow Pydantic -> OpenAPI -> TypeScript.
+   websockets. Next.js 16 + Tailwind 4 + zustand in `arms/frontend` (as shipped; §9.10). Contracts flow Pydantic ->
+   OpenAPI -> TypeScript.
 2. **LLM:** `claude-sonnet-5-5` is the agent brain, using a hand-written tool loop on the `anthropic` SDK.
    `claude-haiku-5-5` handles voice turns, vision and classification. Model IDs live in env vars.
 3. **Data:** a planogram YAML is the single source of truth. It generates the USD scene, the Postgres seed and the
    occupancy grid. The database is local Docker `pgvector/pgvector:pg17` (Supabase optional). Embeddings use local
    `bge-small-en-v1.5` (Voyage optional).
-4. **Sim:** Isaac Sim 6.2.0 on a rented RTX GPU (NVIDIA Brev launchable first) runs as a separate sim-worker process.
-   **A mock/2D SimBackend gets built first** so the Macs never wait on the GPU.
-5. **Robot:** Ridgeback-Franka, or a Franka on a kinematic base. Navigation is kinematic set-pose plus pure pursuit.
-   The demo picks with a "magic grasp" (attach/reparent). Real RMPflow/cuMotion is a stretch goal.
+4. **Sim:** Isaac Sim runs as a separate sim-worker process on the GPU host "vhagar" (decided; a preinstalled 6.x
+   build, `CLAUDE.md` §9). The rented-GPU rows in §2 (Brev first) are backups only. **A mock/2D SimBackend gets built
+   first** so the Macs never wait on the GPU.
+5. **Robot:** a small rover + vertical lift + SO-101 arm + basket (`CLAUDE.md` §3, `contracts.common`; this replaced
+   the original Ridgeback-Franka research pick, kept in §9.4 as history). Navigation is kinematic set-pose plus pure
+   pursuit. The demo picks with a "magic grasp" (attach/reparent). Real grasping (VLA on a physical SO-101) is later.
 6. **Routing:** rasterize the planogram into a grid, build the distance matrix with skimage MCP / scipy Dijkstra, then
    solve with OR-Tools `RoutingModel`. List items are mandatory. Recommendations are disjunctions whose drop penalty
    scales with predicted interest.
@@ -54,7 +65,7 @@ Ordered by lead time, longest or unknown first.
 | 1 | Deploy the **NVIDIA Brev Isaac launchable** as a trial | [launchable](https://brev.nvidia.com/launchable/deploy/now?launchableID=env-35JP2ywERLgqtD0b0MIeK1HnF46) | Signup takes minutes. The first build "can take a while" (⚠️ 15-45 min is unverified) | Docs give no Isaac version, GPU type or price. Record `pip show isaacsim`, the GPU and the $/hr once it is up. Stop it when idle. |
 | 2 | **Photon beta**: org, project, API key (`project:read`+`project:write`, shown once), assign a shared iMessage number, then **every teammate and demo phone texts it "ping"** | [photon.co/beta](https://photon.co/beta) -> [app.beta.photon.codes](https://app.beta.photon.codes) | ⚠️ No waitlist is documented, but this is not confirmed | The shared line cannot send the first message. Copy the Project ID (`pho_prj_...`). |
 | 3 | **Visa Developer** account, create a project, click "Request access" on Visa Intelligent Commerce / Visa Token Service | [developer.visa.com](https://developer.visa.com) | Account is instant. VIC approval time is unknown, so assume it **will not land this weekend** | Ask the Visa table for hackathon sandbox credentials. Never on the critical path. |
-| 4 | **Read the rules in a real browser** (the Notion pages are JS-rendered and unreadable to tools): dh26 page, DubHacks Hacker Guide, Photon guidelines. Ask the Visa / SideShift / NVIDIA / Anthropic tables about rules, rubrics and credits | [dh26](https://dh26.dubhacks.co), [Hacker Guide](https://dubhacks.notion.site/), [Photon guidelines](https://somethingreat.notion.site/Hackathon-Guidelines-for-Photon-2-0-3f8e443f36bb81f9893fed0d08a4c01d) | 30 min | Team size, pre-existing-code rule, Devpost URL, track rubrics and the number of tracks you may enter are all unverified. |
+| 4 | **Read the rules in a real browser** (the Notion pages are JS-rendered and unreadable to tools): dh26 page, DubHacks Hacker Guide, Photon guidelines. Ask the Visa / T-Mobile / SideShift / NVIDIA / Anthropic tables about rules, rubrics and credits | [dh26](https://dh26.dubhacks.co), [Hacker Guide](https://dubhacks.notion.site/), [Photon guidelines](https://somethingreat.notion.site/Hackathon-Guidelines-for-Photon-2-0-3f8e443f36bb81f9893fed0d08a4c01d) | 30 min | Team size, pre-existing-code rule, Devpost URL, track rubrics and the number of tracks you may enter are all unverified. |
 | 5 | (Only if AWS is a GPU backup) Service Quotas -> EC2 -> "Running On-Demand G and VT instances" >= 8 vCPU | [quotas](https://console.aws.amazon.com/servicequotas/home/services/ec2/quotas) | Hours to days; can be denied | Third choice. Skip if Brev or RunPod works. |
 | 6 | **Anthropic Console**: org, API key, add funds, set a spend limit, check limits | [platform.claude.com](https://platform.claude.com/) | Minutes | ⚠️ New orgs may start in a lower "Evaluation" tier with undocumented limits. Check `platform.claude.com/usage/limits`. No DubHacks credits are confirmed. |
 | 7 | **Stripe** account (test mode) | [register](https://dashboard.stripe.com/register) | 5 min | `sk_test_` key. This is the critical-path checkout. Test mode needs no business verification. |
@@ -77,7 +88,8 @@ cores. aarch64 works only on DGX Spark. macOS is not listed and the container is
 Isaac Sim** (this is inferred from omission, which is enough to plan on).
 [requirements](https://docs.isaacsim.omniverse.nvidia.com/latest/installation/requirements.html)
 
-**Decision tree. Decide by hour 2.**
+**Decision tree. Decide by hour 2.** Decided: the Isaac worker runs on the GPU host "vhagar" (`CLAUDE.md` §9); rows
+1–3 are backups.
 
 | Order | GPU host | How | Notes |
 |---|---|---|---|
@@ -141,13 +153,15 @@ Isaac Sim** (this is inferred from omission, which is enough to plan on).
 - **Sunday:** breakfast 9-10:30, **SUBMISSIONS DUE 10:30 AM**, **JUDGING 11:30 AM-2:00 PM**, lunch 1-2:30, closing
   2:15-3:05. That leaves about **22-23.5 h of hacking**, not the 24-36 h in the original brief.
 - **Tracks on dh26:** Visa ("Reimagine Shopping"; ⚠️ the name is inferred from an image filename, and the page has no
-  description), Community Kitchen, Chef's Choice, Cook Smarter. **Photon and SideShift tracks are not on the
+  description), Community Kitchen, Chef's Choice, Cook Smarter. **T-Mobile, Photon and SideShift tracks are not on the
   dh26 page** ⚠️. They are known from the team brief and sponsor lists only.
 - **Unverified ⚠️:** submission platform (Devpost assumed) and URL, team-size cap, pre-existing-code rule, judging format
   (expo tables or timed demos), per-track rubrics. Last year's
   [Hacker Guide](https://dubhacks.notion.site/The-DubHacks-24-Hacker-Guide-16da323fc21b4c6c8c0c2fbca1b7755e) said code must
   be uploaded before the deadline and linked on Devpost, and that teams could enter **up to two sponsored tracks plus
-  the title track**. That is a prior-year rule; confirm it, because it may force a choice between Photon and SideShift.
+  the title track**. That is a prior-year rule; confirm it, because we now list three side tracks (T-Mobile, Photon, SideShift) and it
+  may force a choice of two. The cap is an **open team decision**; if a cut is forced, the team plan's default priority
+  is Visa → T-Mobile → Photon → SideShift (it would drop SideShift).
 - **Plan:** code freeze **8:00 AM Sunday**. Submit by 10:00. Rehearse the demo 3 times. Have a 30-second version for
   short judging slots. Contact: hello@dubhacks.co.
 
@@ -159,7 +173,7 @@ Isaac Sim** (this is inferred from omission, which is enough to plan on).
 
 | Criterion | Weight | Demo moments / features | Arms |
 |---|---|---|---|
-| **Innovation** | 25% | A shopper-owned agent that works across stores. An orienteering route: every list item plus interest-weighted optional detours, re-solved after each yes/no. Split sourcing (in-store -> robot, OOS -> online) with one checkout. A second trip that is visibly smarter. | routing, agent, recommender |
+| **Innovation** | 25% | A shopper-owned agent that works across stores. An orienteering route: every list item plus interest-weighted optional detours, re-solved after each yes/no. Split sourcing (in-store -> robot, OOS -> online) with one checkout. A second trip that is visibly smarter. The decision stage online: Find & compare across fictional retailers with Good price / Wait / Skip it verdicts (web app on demo data; optional 15 s demo beat). | routing, agent, recommender, catalog |
 | **UX** | 25% | One-tap or "yes" approval in iMessage. Push-to-talk voice in store. Live SVG map with budget bar and "why this" cards. Top-3 freshest produce picker. Approval modal with itemized total. | frontend, messaging, agent |
 | **Technical Execution** | 20% | Planogram -> USD scene + DB seed + grid. Grid Dijkstra + OR-Tools. Agent tool loop with approval gates. Live sim feed over WS. Barcode/embedding/VLM cascade. Recorded fallback if the sim crashes. | all |
 | **Commerce Impact** | 15% | Merchant dashboard (out-of-stocks, mispricings, shelf heatmap from robot scans). Near-expiry markdowns routed only to likely buyers. Basket lift and accepted-suggestion rate against a seeded baseline (labelled simulated). | catalog, recommender, frontend |
@@ -174,11 +188,15 @@ Trust only scores if it is **visible in the UI**.
 | Track | What we show | Status |
 |---|---|---|
 | **Photon 2.0** | Messaging arm built on Photon and live on iMessage (shared line), with Telegram as a second channel. Pre-trip list by text, mid-trip approval requests, post-purchase follow-up that updates the taste profile ("context persists across time and channels"). | Qualification is "built on Photon 2.0 + live on >= 1 Photon channel" (team brief / Notion). ⚠️ Prizes ($700 iMessage winner, $300 runner-up, $400 Best Voice Agent) and judging (Vision, Craft, Depth, Traction) come from the Notion page and may describe an earlier hackathon; confirm. |
+| **T-Mobile "Cart Whisperer: checkout suggestions that actually help"** (entered) | Cart Whisperer (`docs/cart-whisperer.md`, recommender arm) + the brief's "bring the one that says wait". The brief is about phone shopping, so T-Mobile judging shows a T-Mobile-style wireless store (`store_tmobile`). From commerce, customer (owned items, device age, installments left, household lines) and real-time physical signals it shows ≤3 explained cards per phase (planning, in-trip, before you pay), zero is valid, with explicit SKIP and WAIT. Deterministic score + reason codes; the LLM only phrases. Accepts go through the mandate engine. Show accepted rate, $ saved, avoided spend. Designed, not implemented in the backend (needs contracts v0.3); the web app shows planning SKIP / WAIT on demo data. | ⚠️ Rubric per the team's copy of the brief (`UW_Hackathon_Challenge_Brief.docx`, `docs/team-plan.md` §3.2): Customer value 30%, Use of signals 25%, Explainability & trust 20%, Feasibility & demo 25%. Requirements: name the direction, a phone-shopping store in the demo, ≥1 SKIP or WAIT live, "synthetic data only" on a slide. Re-read the docx; prizes unverified. |
 | **SideShift "Best Startup Idea"** | One business-model slide: free for shoppers. Grocers pay SaaS for shelf intelligence and personalized basket lift. **No pay-to-play placement.** 2x2 landscape (retailer-owned vs shopper-owned, passive scan vs active plan/approve). | ⚠️ Track text unverified. |
 
 ---
 
 ## 7. Demo storyline (two trips, about 3 minutes)
+
+> Historical research draft. The current script is [`docs/demo-script.md`](demo-script.md) (Maya, the taco trip, and
+> the wireless variant for T-Mobile).
 
 1. **Trip 1 (about 90 s).** Alex texts the Photon number "tacos for 6, under $40, one vegetarian". The agent expands it
    into items, quantities and substitutions. One item is out of stock in store, so it goes to the online order. The map
@@ -362,6 +380,10 @@ Sources: [install (pip)](https://docs.isaacsim.omniverse.nvidia.com/latest/insta
 
 ### 9.4 robot
 
+> **Superseded (history).** The team switched to a small rover + vertical lift (0.2–1.2 m) + SO-101 arm + basket
+> (`CLAUDE.md` §3 and §9, `contracts.common`). The Ridgeback-Franka research below is kept for reference only. The
+> navigation, magic-grasp and 6.x-deprecation notes still apply.
+
 | | |
 |---|---|
 | **Pick (asset)** | **Clearpath Ridgeback-Franka** at `Clearpath/RidgebackFranka/ridgeback_franka.usd`, relative to the `Isaac Sim/Robots` asset root (multiphysics variant: `ridgeback_franka.usda` under `Robots_Multiphysics`). It has a holonomic base. Parent a basket (cube-shell prims with colliders) to the base link with a fixed drop pose. |
@@ -490,7 +512,7 @@ Sources: [models overview](https://platform.claude.com/docs/en/about-claude/mode
 
 | | |
 |---|---|
-| **Pick** | Local **sentence-transformers** `BAAI/bge-small-en-v1.5` (384-dim, no key, works offline on MPS/CPU). Embed `name \| brand \| category \| tags \| description` per product into pgvector `vector(384)`. The profile vector is a weighted mean of liked/purchased vectors minus disliked ones. Cosine top-k, then **Sonnet rerank** of the top few with a "why you'd like this" line. This produces the `interest` that routing turns into `penalty_m`. Cap 3-5 rec stops per trip and batch the rest into "want any of these?" at checkout (checkout batch). Show near-expiry markdowns only when a user's similarity is above a threshold. |
+| **Pick** | Local **sentence-transformers** `BAAI/bge-small-en-v1.5` (384-dim, no key, works offline on MPS/CPU). Embed `name \| brand \| category \| tags \| description` per product into pgvector `vector(384)`. The profile vector is a weighted mean of liked/purchased vectors minus disliked ones. Cosine top-k, then **Sonnet rerank** of the top few with a "why you'd like this" line. This produces the `interest` that routing turns into `penalty_m`. Cap 3-5 rec stops per trip. Cart Whisperer (`docs/cart-whisperer.md`) replaces the "want any of these?" batch: at most 3 cards per phase (planning, in-trip, before you pay), SKIP and WAIT included, zero allowed. Show near-expiry markdowns only when a user's similarity is above a threshold. |
 | **Fallback / upgrade** | **Voyage `voyage-4-lite`** (1024-dim by default; `input_type="document"` for products, `"query"` for profiles; normalized vectors). The key comes from a **MongoDB Atlas** model API key: `VOYAGE_API_KEY`, endpoint `https://ai.mongodb.com/v1`, `voyageai >= 0.3.7`. ⚠️ Free tokens and pricing are unverified ([billing](https://www.mongodb.com/docs/voyageai/management/billing/)). For about 500 products an exact numpy scan needs no index. |
 | **Post-purchase** | Haiku parses the follow-up reply into structured ratings, which update the profile and its vector. Trip 2 then re-plans. |
 
@@ -590,6 +612,7 @@ Sources: [beta iMessage guide](https://photon.codes/docs/beta/get-started/imessa
 |---|---|
 | **Pick** | **Next.js 16.4** (App Router, Turbopack; ⚠️ the 6 Oct 2026 release date is from the blog listing) + React 19 + **Tailwind 4.3** + **shadcn/ui** (CLI 4.22) + zustand + **Recharts 3.10**. **Store map:** hand-written SVG with a viewBox in store meters (`<g transform="scale(1,-1)">`). Shelves are `<rect>`s from the planogram, the route is a `<polyline>` (solid blue for mandatory legs, dashed amber for detour legs), and dropped recs are hollow markers. **Live view:** JPEG frames over WS into `<img>`/`<canvas>`. **Dashboard:** Recharts plus an SVG grid heatmap of shelves (stock/freshness). |
 | **Fallback** | Vite + React. A pre-recorded `<video autoplay loop>` as the "live view". Leaflet `L.CRS.Simple` if you need pan/zoom. (Streamlit hurts the UX score.) |
+| **As shipped** (teammate, `arm/frontend` @ `6fc1c41`) | Next.js 16.4.2, React 19.3, Tailwind 4, **shadcn/ui** (radix, CLI 4.22) + Lucide icons + motion + sonner on the team's own palette (`arms/frontend/DESIGN.md`), zustand 5, hand-drawn SVG charts and store map, `@anthropic-ai/sdk` for Ask Picky; **no Recharts**. Demo data from `data/*.yaml` via `scripts/gen-data.mjs`; the live feed has three labeled sources on the Live page (simulated cameras, gateway `/ws/frames`, a direct MJPEG / MP4 URL per camera). Where the pick above differs, the shipped app wins. |
 
 Setup: `pnpm create next-app@latest arms/frontend --ts --tailwind --app --turbopack`, `pnpm dlx shadcn@latest init`,
 `pnpm add recharts zustand`. One `useEventSocket()` hook connects to `ws://localhost:8000/ws`, narrows on `type`, and feeds a
@@ -663,11 +686,13 @@ Sources: [FastAPI SSE](https://fastapi.tiangolo.com/tutorial/server-sent-events/
 
 | Question | How to resolve | By |
 |---|---|---|
-| Does anyone have an RTX 4080+ box? | Ask the team | Hour 0 |
-| Which Isaac version, GPU and $/hr does Brev give? | Trial deploy | Hour 1 |
+| ~~Does anyone have an RTX 4080+ box?~~ Resolved: the Isaac worker runs on "vhagar" | – | Done |
+| Which Isaac version, GPU and $/hr does Brev give? (backup only now) | Trial deploy, only if vhagar fails | If needed |
 | DubHacks rules: team size, pre-existing code, Devpost URL, number of sponsor tracks, judging format | Hacker Guide in a browser, organizers | Hour 1 |
 | Visa track text and rubric; does Visa hand out sandbox keys or require a Visa API? | Visa table / Discord | Hour 2 |
-| SideShift track text | Sponsor tables | Hour 2 |
+| Confirm the T-Mobile brief docx wording and rubric (30 / 25 / 20 / 25 per the team plan); SideShift track text; prizes | Brief docx, sponsor tables | Hour 2 |
+| Sponsor-track limit (prior year: two sponsored tracks + title); we list three side tracks. OPEN TEAM DECISION; default cut order Visa → T-Mobile → Photon → SideShift | Organizers, then team | Sat evening |
+| Live demo store: grocery `store_ave` or wireless `store_tmobile` (OPEN TEAM DECISION) | Team | Sat ~9–10 PM |
 | Photon: beta signup gating, which dashboard issues spectrum-ts creds, shared-line first-message behavior | Signup + Terminal echo + Discord | Hour 1 |
 | Anthropic Evaluation-tier limits; any credits | Console limits page, Anthropic table | Hour 1 |
 | `penalty_m` scale K (interest -> meters) | routing + recommender owners agree | Hour 4 |
@@ -690,7 +715,7 @@ Sources: [FastAPI SSE](https://fastapi.tiangolo.com/tutorial/server-sent-events/
    "penalty -1 = mandatory" claim is not in the docs, so drop it. `CLAUDE.md`'s "Isaac Python 3.11" holds only for 5.x.
 
 **⚠️ Unverified register (check before relying on it):**
-- DubHacks: rubric weights 25/25/20/15/15; the Visa track name (from an image filename); the Photon/SideShift track text; team size,
+- DubHacks: rubric weights 25/25/20/15/15; the Visa track name (from an image filename); the T-Mobile/Photon/SideShift track text; team size,
   pre-existing code, Devpost, judging format; the "two sponsored tracks" rule (prior year).
 - Photon: beta free with no waitlist; $100 credits; free plan of 25 shared assignments; prizes and judging criteria applying to DubHacks; spectrum-ts
   credential source; stable-docs first-message behavior; 5 req/s HTTP limit; Python method signatures (copy from the guide).
