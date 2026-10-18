@@ -475,3 +475,17 @@ def test_shop_goal_titles_name_the_store_once_and_pluralize():
     assert shop_goal_title(f"Shopping ({ave})", 3, ave, "store_ave") == f"Shop 3 items at {ave}"
     assert shop_goal_title("Tacos (store_ave)", 1, ave, "store_ave") == f"Shop Tacos (1 item) at {ave}"
     assert shop_goal_title(None, 1, ave) == f"Shop 1 item at {ave}"
+
+
+def test_shop_goal_title_says_the_count_once():
+    """Live Isaac trip goal_nznwackk: 'Shop Your order (3 items) (3 items) at ...' (the order title has a count)."""
+    from arms.fleet.core import shop_goal_title
+
+    ave = "Picky Market - The Ave"
+    assert shop_goal_title("Your order (3 items)", 3, ave) == f"Shop Your order (3 items) at {ave}"
+    assert shop_goal_title("Your order (1 item)", 1, ave) == f"Shop Your order (1 item) at {ave}"
+    # a split sub-list keeps the parent's title: the count is the sub-list's own
+    assert (
+        shop_goal_title("Your order (3 items) (store_ave)", 2, ave, "store_ave")
+        == f"Shop Your order (2 items) at {ave}"
+    )
