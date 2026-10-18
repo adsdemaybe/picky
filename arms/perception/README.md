@@ -17,9 +17,9 @@ Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_fac
 - [x] **P0** Basket verified at drop (multiset diff vs expected)
 - [x] **P1** Barcode read (zxing-cpp) on crops → SKU (service.py, TODO 2 done; needs extra)
 - [ ] **P1** SigLIP 2 embedding match vs our label textures (TODO 3)
-- [ ] **P1** Claude vision (`claude-haiku-5-5`) pick-from-candidates on blurred crops (TODO 4)
+- [ ] **P1** LLM vision (`utils.llm` fast model: `gemini-3.8-flash`) pick-from-candidates on blurred crops (TODO 4)
 - [x] **P1** Face-free freshness thumbnails cropped from the blurred frame (TODO 5 done; needs pillow)
-- [ ] **P2** Freshness from pixels (multi-image Claude rank blended 0.6/0.4 with HSV heuristic) (TODO 6)
+- [ ] **P2** Freshness from pixels (multi-image LLM rank blended 0.6/0.4 with HSV heuristic) (TODO 6)
 - [ ] **P2** Basket verify from pixels (cascade per basket crop) (TODO 7)
 - [ ] **P2** Shelf-tag OCR for mispricing (TODO 8)
 - [x] **P0** `ScanReport.lot_counts` (units per lot when the count is exact; v0.2) (fake)
@@ -33,7 +33,7 @@ Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_fac
 - [x] **P0** Offline cameras (no robot service, robot error, sim gone) → rendered "offline" card, never a 500 (fake)
 - [x] **P0** `observe` fake: ground-truth description (instances → items, counts, shelf tag, mispricing note, freshness;
       empty aimed slot; planogram near the robot when the frame has no instances) + keyword question answering (fake)
-- [ ] **P1** `observe` real: `claude-haiku-5-5` vision on the blurred JPEG via `utils.llm`, ground truth as hints and
+- [ ] **P1** `observe` real: fast-model vision (`gemini-3.8-flash`) on the blurred JPEG via `utils.llm`, ground truth as hints and
       fallback (built + unit-tested with a mocked client; not run live: no `GEMINI_API_KEY` yet)
 
 **Planner → VLA → verifier loop (contracts 0.2.1)** — the verifier + evidence cameras; Perceptron is the vision provider.
@@ -80,13 +80,14 @@ Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_fac
   `utils.data` when catalog isn't wired. Cameras: `services.robot.capture_camera` / `frames(camera_id=...)`,
   `services.perception.blur_faces` (own blurrer if unwired), `services.sim_link.status()`; `utils.data.load_cameras`
   (built-in defaults with the fixed ids if robots.yaml is missing). Real `observe` goes through
-  `utils.llm.complete_json` (`kind="fast"` = claude-haiku-5-5; image block before text).
+  `utils.llm.complete_json` (`kind="fast"` = gemini-3.8-flash, claude-haiku-5-5 with `PICKY_LLM_PROVIDER=anthropic`;
+  image block before text).
 - Cheat sheet: [contracts/OVERVIEW.md](../../contracts/OVERVIEW.md) · models: [contracts/perception.py](../../contracts/perception.py)
 
 ## Stack (docs/research.md §9.2)
 | | Pick | Fallback |
 |---|---|---|
-| Identify | zxing-cpp → open_clip SigLIP 2 `hf-hub:timm/ViT-B-16-SigLIP2` → `claude-haiku-5-5` vision | ground-truth bypass; CLIP `ViT-B-32`/`laion2b_s34b_b79k` |
+| Identify | zxing-cpp → open_clip SigLIP 2 `hf-hub:timm/ViT-B-16-SigLIP2` → `utils.llm` fast-model vision (`gemini-3.8-flash`) | ground-truth bypass; CLIP `ViT-B-32`/`laion2b_s34b_b79k` |
 | Face blur | OpenCV YuNet `face_detection_yunet_2023mar.onnx` + Gaussian blur (20% pad) | synthetic-frame rule; MediaPipe BlazeFace |
 
 Gotchas: pin **`opencv-python-headless>=4.10,<5`** (5.x untested with 2023mar). SigLIP 2 needs `open-clip-torch>=2.31`,
@@ -113,7 +114,7 @@ undecodable frame becomes a placeholder card. `observe` sends only blurred frame
 - `service.py` — YuNet blur + cascade skeleton (barcode done; SigLIP/VLM TODO) over the ground-truth report
 - `tests/test_perception.py` — Protocol conformance + demo behavior (avocado top-3, mispricing, empty slot, basket diff)
 - `tests/test_cameras.py` — CameraService: registry (defaults, robots.yaml, sim overlay), snapshot scaling + privacy,
-  placeholders, live / stalled / legacy streams, fake observe, real observe with a mocked Claude client
+  placeholders, live / stalled / legacy streams, fake observe, real observe with a mocked LLM client
 - `evidence.py` — `EvidenceStore` (retention + sidecars + camera faults), `FakeEvidenceCameras`, `EvidenceRing`
 - `truth.py` — `LocalTruth`: `TruthSnapshot` from v0.2 Protocols when the robot arm's `TruthSource` is not wired
 - `verifier_fake.py` — `VerifierBase` (frames, per-frame truth, faults, baseline, ground-truth grounding) + `FakeVerifier`

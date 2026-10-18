@@ -212,6 +212,18 @@ def test_factories_conform_and_are_lazy(monkeypatch):
     assert calls == []
 
 
+def test_real_cameras_name_the_missing_key_of_the_configured_provider() -> None:
+    """/health shows this note: it must name GEMINI_API_KEY (the default provider), not a stale Anthropic key."""
+    from utils.config import reset_settings, set_settings
+
+    set_settings(picky_llm_provider="gemini", gemini_api_key="")
+    try:
+        with pytest.raises(llm.LLMNotConfigured, match="GEMINI_API_KEY"):
+            create_cameras(Services())
+    finally:
+        reset_settings()
+
+
 # ------------------------------------------------------------------------------------------------------------------
 # Registry
 # ------------------------------------------------------------------------------------------------------------------

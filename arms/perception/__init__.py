@@ -4,10 +4,10 @@ and the Cameras API.
 ``create(services)`` -> real CV cascade (extras: perception); ``create_fake(services)`` -> ground-truth bypass.
 Both satisfy ``contracts.services.PerceptionService``.
 
-``create_cameras(services)`` -> cameras with claude-haiku-5-5 ``observe`` (raises without ANTHROPIC_API_KEY so the
-gateway falls back); ``create_cameras_fake(services)`` -> ground-truth ``observe``. Both satisfy
-``contracts.services.CameraService``. ``jpeg_bytes`` / ``mjpeg_part`` / ``MJPEG_CONTENT_TYPE`` help the gateway serve
-snapshot.jpg and stream.mjpg.
+``create_cameras(services)`` -> cameras with LLM-vision ``observe`` (``utils.llm`` fast model, gemini-3.8-flash by
+default; raises without GEMINI_API_KEY so the gateway falls back); ``create_cameras_fake(services)`` -> ground-truth
+``observe``. Both satisfy ``contracts.services.CameraService``. ``jpeg_bytes`` / ``mjpeg_part`` /
+``MJPEG_CONTENT_TYPE`` help the gateway serve snapshot.jpg and stream.mjpg.
 
 Planner -> VLA -> verifier loop (contracts 0.2.1, ``LOOP_SERVICE_FACTORIES``):
 ``create_verifier(services)`` -> ``PerceptionVerifier`` (Perceptron Mk1.5 vision + robot state + sim ground truth;
