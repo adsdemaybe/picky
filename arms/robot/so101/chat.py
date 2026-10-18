@@ -23,7 +23,8 @@ HELP = """\
 Type a request, e.g.  pick up the oat milk and put it in the basket
   /dry        toggle dry-run (plan only, never move)      /status   joint angles
   /home       return to the pose captured at connect      /open /close   gripper
-  /snap       save a camera frame to snap.jpg             /help /quit"""
+  /snap       save a camera frame to snap.jpg             /cam N    switch camera index
+  /help /quit"""
 
 C = {
     "dim": "\033[2m",
@@ -83,6 +84,11 @@ def main() -> None:
                     else:
                         dry = not dry
                         say(f"dry-run {'on' if dry else 'off'}", "y")
+                elif cmd.startswith("/cam"):
+                    parts = cmd.split()
+                    if len(parts) == 2:
+                        cfg.camera_index = parts[1]
+                    say(f"camera index: {cfg.camera_index}  (then /snap to check the view)", "g")
                 elif cmd == "/snap":
                     import cv2
 
