@@ -53,7 +53,7 @@ ap.add_argument("--livestream", action="store_true", help="enable WebRTC livestr
 # --demo: autopilot shopping run (demo/autopilot.py): Gemini plans the route, the rovers drive + pick + check out
 ap.add_argument("--demo", action="store_true", help="LLM-planned autopilot shopping run (headless unless --livestream)")
 ap.add_argument("--demo-robot", choices=["so101", "rm2"], default="so101",
-                help="--demo robot: so101 = Picky SO-101 rover v3 (demo/so101_demo.py), rm2 = rm2_car/AIRBOT")  # fmt: skip
+                help="--demo robot: so101 = SO-101 rover v3 (demo/so101_demo.py), rm2 = rm2_car/AIRBOT")  # fmt: skip
 ap.add_argument("--so101-config", default=str(Path(__file__).parent / "demo" / "so101_config.json"))
 ap.add_argument("--light-scale", type=float, default=0.8, help="--demo so101: scale every scene light (exposure)")
 ap.add_argument("--demo-config", default=str(Path(__file__).parent / "demo" / "demo_config.json"))
