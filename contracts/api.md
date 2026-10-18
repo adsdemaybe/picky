@@ -95,6 +95,27 @@ Fixed ids: robots `rover-ave-1` (Pico), `rover-ave-2` (Rhea) in `store_ave`; `ro
 | GET | `/api/cameras/{camera_id}/stream.mjpg` | query: `fps=5`, `w?` | `multipart/x-mixed-replace; boundary=frame` MJPEG — works as `<img src>`; ≤ 2–3 per page | cameras (`stream`) |
 | POST | `/api/cameras/{camera_id}/observe` | `api.ObserveRequest` `{question?}` | `cameras.VisionObservation` (snapshot → blur → vision) | cameras |
 
+## REST — wireless retail for `store_tmobile` (new in 0.2.3; `contracts/wireless.py`)
+
+Every response is synthetic demo pricing (`synthetic: true`, `notice`); all math is deterministic code in
+`arms/wireless` over `data/wireless.yaml` + catalog prices and stock. Errors: unknown plan / sku / model / account →
+404; invalid combination (lines over the plan max, financing an accessory, bad term) → 409; bad body → 422.
+`POST /api/wireless/quote` never fails for cart problems: they come back in `errors` / `warnings`.
+
+| Method | Path | Request | Response | Owner |
+|---|---|---|---|---|
+| GET | `/api/wireless` | – | `wireless.WirelessCatalogInfo` (plans, promotions, trade-in models, financing terms, compatibility, tax rate, the engine's fixed `today`) | wireless |
+| GET | `/api/wireless/plans` | query: `lines=1`, `autopay=true`, `user_id?` (adds that account's eligibility, e.g. 55+) | `list[wireless.PlanQuote]` (cheapest eligible first; ineligible last with `ineligible_reason`) | wireless (`compare_plans`) |
+| GET | `/api/wireless/plans/{plan_id}/quote` | query: `lines=1`, `autopay=true`, `user_id?` | `wireless.PlanQuote` | wireless |
+| GET | `/api/wireless/compatible/{device_sku}` | query: `store_id=store_tmobile` | `list[wireless.CompatibleAccessory]` (cases, glass, chargers, audio that fit; live stock; always `optional`) | wireless → catalog |
+| POST | `/api/wireless/trade-in` | `wireless.TradeInRequest` `{model_id, condition, user_id?, target_sku?, plan_id?}` | `wireless.TradeInQuote` (value, eligible bonus, balance still owed, `keep_recommended` + reasons) | wireless |
+| POST | `/api/wireless/financing` | `wireless.FinancingRequest` `{sku, months=24, down_payment_cents, plan_id?, new_line, trade_in, port_in}` | `wireless.FinancingQuote` (installments, eligible promo credits, total) | wireless → catalog |
+| POST | `/api/wireless/promotions` | `wireless.QuoteRequest` | `list[wireless.PromoEligibility]` (every promo, eligible or not, with unmet conditions; `upcoming` = WAIT signal) | wireless |
+| GET | `/api/wireless/accounts` | – | `list[wireless.WirelessAccount]` (synthetic households) | wireless |
+| GET | `/api/wireless/accounts/{user_id}` | – | `wireless.WirelessAccount` (404 none) | wireless |
+| POST | `/api/wireless/household` | `wireless.HouseholdRequest` `{user_id?, lines?, current_monthly_cents?, max_usage_gb?, max_hotspot_gb?, eligibility?}` | `wireless.HouseholdOptimization` (options cheapest-that-fits first, `recommended_plan_id` or `keep_current`) | wireless |
+| POST | `/api/wireless/quote` | `wireless.QuoteRequest` `{items[{sku, qty, financed, months, down_payment_cents}], plan_id?, lines, new_lines, autopay, port_in, trade_in?, add_on_promo_ids, term_months}` | `wireless.CostBreakdown` (upfront vs monthly lines, est. taxes, total over the term, stock checks, applied promos, `errors`, `warnings`) | wireless → catalog |
+
 ## REST — shopper trips, profiles, trust (v0.1, unchanged unless noted)
 
 | Method | Path | Request | Response | Owner |

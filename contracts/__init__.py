@@ -415,7 +415,7 @@ from contracts.vla import (
     resolve_tier,
 )
 
-CONTRACTS_VERSION = "0.2.2"
+CONTRACTS_VERSION = "0.2.3"
 
 __all__ = [
     "ACTION_INSERTS",

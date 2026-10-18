@@ -22,6 +22,8 @@ Rules (CLAUDE.md §4):
   ``vla`` / ``truth`` / ``faults`` (robot), ``verifier`` / ``evidence`` (perception), all default None, built from
   ``LOOP_SERVICE_FACTORIES`` (kept apart from ``SERVICE_FACTORIES`` until the gateway wires them). ``exec_mode`` is the
   kill switch: anything but PICKY_EXEC_MODE=plan|tools with all four core loop services wired = the exact v0.2 path.
+- 0.2.3 (wireless retail, additive): ``WirelessService`` (arm ``wireless``, ``Services.wireless``) prices plans,
+  trade-ins, financing, promos and wireless carts for ``store_tmobile`` (contracts/wireless.py).
 """
 
 import asyncio
@@ -137,6 +139,21 @@ from contracts.verify import (
     VisionExpect,
 )
 from contracts.vla import ExecRecord, VlaCapabilities, VlaError, VlaRequest, VlaStatus
+from contracts.wireless import (
+    CompatibleAccessory,
+    CostBreakdown,
+    FinancingQuote,
+    FinancingRequest,
+    HouseholdOptimization,
+    HouseholdRequest,
+    PlanQuote,
+    PromoEligibility,
+    QuoteRequest,
+    TradeInQuote,
+    TradeInRequest,
+    WirelessAccount,
+    WirelessCatalogInfo,
+)
 
 
 @runtime_checkable
@@ -468,6 +485,49 @@ class TrustService(Protocol):
 
 
 InboundHandler = Callable[[InboundMessage], Awaitable[None]]
+
+
+@runtime_checkable
+class WirelessService(Protocol):
+    """Wireless retail math for ``store_tmobile`` (0.2.3): plans, trade-in, financing, promos, compatibility, quotes.
+
+    Deterministic code over data/wireless.yaml + the catalog (prices, stock via ``services.catalog`` at call time).
+    Every result is synthetic demo pricing (``synthetic=True``). Unknown plan/sku/model/user -> KeyError (404); invalid
+    combinations (lines over the plan's max, financing a non-financeable item) -> ValueError (409), except in
+    ``quote``, which never raises for cart problems and reports them in ``CostBreakdown.errors``.
+    """
+
+    async def info(self) -> WirelessCatalogInfo: ...
+
+    async def quote_plan(
+        self, plan_id: str, lines: int, autopay: bool = True, eligibility: list[str] | None = None
+    ) -> PlanQuote: ...
+
+    async def compare_plans(
+        self, lines: int, autopay: bool = True, eligibility: list[str] | None = None
+    ) -> list[PlanQuote]:
+        """Every plan quoted for ``lines``, cheapest eligible first."""
+        ...
+
+    async def compatible_accessories(
+        self, device_sku: Sku, store_id: StoreId = "store_tmobile"
+    ) -> list[CompatibleAccessory]: ...
+
+    async def estimate_trade_in(self, request: TradeInRequest) -> TradeInQuote: ...
+
+    async def finance(self, request: FinancingRequest) -> FinancingQuote: ...
+
+    async def promotions(self, request: QuoteRequest) -> list[PromoEligibility]:
+        """Every promo with its eligibility for this cart (``quote`` applies only the eligible ones)."""
+        ...
+
+    async def get_account(self, user_id: UserId) -> WirelessAccount | None: ...
+
+    async def list_accounts(self) -> list[WirelessAccount]: ...
+
+    async def optimize_household(self, request: HouseholdRequest) -> HouseholdOptimization: ...
+
+    async def quote(self, request: QuoteRequest) -> CostBreakdown: ...
 
 
 @runtime_checkable
@@ -1243,6 +1303,8 @@ class Services:
     truth: TruthSource | None = None
     evidence: EvidenceCameras | None = None
     faults: FaultInjector | None = None
+    # wireless retail (0.2.3)
+    wireless: WirelessService | None = None
 
     def require(self, name: str) -> Any:
         """Return ``getattr(self, name)`` or raise a clear error if that service isn't wired."""
@@ -1266,6 +1328,7 @@ ARM_NAMES: tuple[str, ...] = (
     "recommender",
     "trust",
     "messaging",
+    "wireless",
     "fleet",
     "gateway",
     "frontend",
@@ -1280,6 +1343,7 @@ SERVICE_PROTOCOLS: dict[str, type] = {
     "perception": PerceptionService,
     "trust": TrustService,
     "messaging": MessagingService,
+    "wireless": WirelessService,
     "agent": AgentService,
     "fleet": FleetService,
 }

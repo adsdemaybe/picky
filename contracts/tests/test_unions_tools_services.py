@@ -268,7 +268,7 @@ async def test_protocol_conformance():
 def test_registry_constants():
     assert set(SERVICE_ARMS) <= set(ARM_NAMES)
     assert set(SERVICE_ARMS) <= set(Services.field_names())
-    assert len(ARM_NAMES) == 12 and "fleet" in ARM_NAMES
+    assert len(ARM_NAMES) == 13 and "fleet" in ARM_NAMES and "wireless" in ARM_NAMES
     for proto in SERVICE_PROTOCOLS.values():
         assert getattr(proto, "_is_runtime_protocol", False)
 
