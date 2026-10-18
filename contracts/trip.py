@@ -12,6 +12,7 @@ from contracts.messaging import OutboundMessage
 from contracts.routing import Route, StopStatus
 from contracts.shopping import Cart, Intent, Recommendation, ShoppingList, TripState
 from contracts.trust import ApprovalRequest, ApprovalResponse, MandateDecision, Receipt
+from contracts.whisper import WhisperResponse
 
 
 class TripTransition(Model):
@@ -31,6 +32,11 @@ class Trip(Model):
     shopping_list: ShoppingList | None = None
     recs: list[Recommendation] = Field(default_factory=list, description="Detour + near-expiry recs on the route.")
     checkout_recs: list[Recommendation] = Field(default_factory=list, description="Batched 'want any of these?'.")
+    whisper: WhisperResponse | None = Field(
+        None,
+        description="0.2.5: the latest Cart Whisperer pass for this trip (phase + 0..3 cards; also sent as "
+        "whisper.cards), so a reconnecting client sees the current cards in trip.snapshot.",
+    )
     route: Route | None = None
     current_stop_id: StopId | None = None
     stop_status: dict[StopId, StopStatus] = Field(

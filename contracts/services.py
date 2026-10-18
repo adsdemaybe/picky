@@ -137,6 +137,7 @@ from contracts.verify import (
     VisionExpect,
 )
 from contracts.vla import ExecRecord, VlaCapabilities, VlaError, VlaRequest, VlaStatus
+from contracts.whisper import WHISPER_MAX_CARDS, ShopperContext, WhisperCard, WhisperResponse
 
 
 @runtime_checkable
@@ -303,6 +304,25 @@ class RecommenderService(Protocol):
     async def record_feedback(self, feedback: Feedback) -> ProfileUpdate: ...
 
     async def record_purchase(self, records: list[PurchaseRecord]) -> None: ...
+
+    async def whisper(self, context: ShopperContext, limit: int = WHISPER_MAX_CARDS) -> WhisperResponse:
+        """0.2.5 Cart Whisperer pass (docs/cart-whisperer.md): 0..``limit`` (max 3) cards for ``context.phase``,
+        SKIP and WAIT included, best first. Deterministic candidates -> hard gates in code (stock, compatibility,
+        allergens / dislikes, mandate + budget, not declined, max detour, not already a pending detour rec) ->
+        deterministic score + ``reason_codes`` -> below the threshold nothing (an empty ``cards`` list with
+        ``empty_reason`` is a normal result) -> the LLM may only phrase ``reason`` (template fallback). Cards in
+        ``context.answered_card_ids`` or declined before are never returned. ``sponsored`` is always False. The
+        recommender adds what it owns (profile, purchase history, owned items / devices, promo calendar) and reads
+        stock / prices / deals from ``services.catalog``. Unknown user -> KeyError."""
+        ...
+
+    async def whisper_feedback(
+        self, user_id: UserId, card: WhisperCard, decision: str, trip_id: TripId | None = None
+    ) -> ProfileUpdate | None:
+        """0.2.5: record the shopper's answer to a card (``decision`` 'accept' | 'decline'). A decline suppresses
+        that (kind, sku, line_sku) for the user and down-weights the kind; returns a ProfileUpdate with a one-line
+        summary ('Got it: no more swap suggestions for Ground Beef.'), None when nothing changed."""
+        ...
 
 
 @runtime_checkable

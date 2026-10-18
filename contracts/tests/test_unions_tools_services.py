@@ -100,6 +100,8 @@ EXPECTED_EVENT_TYPES = {
     "checkout.unload",
     "item.verification",
     "payment.agent_step",
+    # Cart Whisperer (0.2.5)
+    "whisper.cards",
 }
 
 
