@@ -3316,3 +3316,894 @@ products:
     dims_m: [0.12, 0.06, 0.2]
     label_color: '#e20074'
     mass_kg: 0.6
+# --- BEGIN generated: store_genie (scripts/genie_to_planogram.py; do not hand-edit) ---
+- sku: GN-DEGREASER-2PK
+  name: Kitchen Degreaser Spray Twin Pack
+  brand: Sparkhome
+  category: household
+  subcategory: cleaning
+  description: A twin-pack of red plastic spray bottles with yellow liquid contents, sealed in transparent shrink-wrap with
+    printed text and a yellow band across the top.
+  tags: [cleaning, kitchen, spray, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 799
+  unit: pack
+  size: 2 x 16 oz
+  barcode: '2000009000016'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.056, 0.214, 0.26]
+    label_color: '#d62828'
+    mass_kg: 0.4
+- sku: GN-TOILET-CLEANER
+  name: Toilet Bowl Cleaner
+  brand: Sparkhome
+  category: household
+  subcategory: cleaning
+  description: A white plastic bottle with a blue cap and angled neck, featuring a blue-and-white label with red printed text
+    and graphic elements.
+  tags: [cleaning, bathroom, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 449
+  unit: each
+  size: 24 oz
+  barcode: '2000009000023'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.057, 0.113, 0.27]
+    label_color: '#1d4ed8'
+    mass_kg: 0.4
+- sku: GN-PAPER-CUPS-50
+  name: Paper Party Cups 9 oz 50 ct
+  brand: Party Stack
+  category: household
+  subcategory: paper
+  description: Party Stack paper party cups 9 oz 50 ct, 50 ct.
+  tags: [party, disposable, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 549
+  unit: pack
+  size: 50 ct
+  barcode: '2000009000030'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.079, 0.301, 0.216]
+    label_color: '#ef4444'
+    mass_kg: 0.4
+- sku: GN-CLEAR-CUPS-100
+  name: Clear Plastic Cups 8 oz 100 ct
+  brand: Party Stack
+  category: household
+  subcategory: kitchen
+  description: A transparent plastic bag with blue and white printed branding, containing 100 stacked clear 240ml plastic
+    cups, sealed at the top and bottom.
+  tags: [party, disposable, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 699
+  unit: pack
+  size: 100 ct
+  barcode: '2000009000047'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.089, 0.301, 0.284]
+    label_color: '#60a5fa'
+    mass_kg: 0.4
+- sku: GN-CINNAMON-SWIRL
+  name: Cinnamon Swirl Bread 6 ct
+  brand: Golden Crumb
+  category: bakery
+  subcategory: pastry
+  description: A rectangular transparent plastic-wrapped package containing six golden-brown sliced cinnamon roll breads with
+    visible swirls of dark cinnamon filling.
+  tags: [breakfast, sweet, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 449
+  unit: pack
+  size: 6 ct
+  barcode: '2000009000054'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.132, 0.232, 0.086]
+    label_color: '#b45309'
+    mass_kg: 0.4
+- sku: GN-CHOCO-SWIRL-LOAF
+  name: Chocolate Swirl Bread Loaf
+  brand: Golden Crumb
+  category: bakery
+  subcategory: bread
+  description: A rectangular loaf of sliced bread wrapped in transparent plastic, featuring golden-brown crust and visible
+    dark chocolate swirls in each slice.
+  tags: [breakfast, sweet, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 429
+  unit: each
+  size: 16 oz
+  barcode: '2000009000061'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.132, 0.231, 0.088]
+    label_color: '#78350f'
+    mass_kg: 0.4
+- sku: GN-BUTTER-COOKIES
+  name: Butter Cookies Jar
+  brand: Crumb & Co
+  category: snacks
+  subcategory: cookies
+  description: A transparent cylindrical plastic jar with a yellow label, filled with stacked golden-brown oval-shaped cookies
+    and sealed with a clear lid showing powdered topping.
+  tags: [sweet, snack, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 549
+  unit: each
+  size: 12 oz
+  barcode: '2000009000078'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.112, 0.112, 0.156]
+    label_color: '#facc15'
+    mass_kg: 0.4
+- sku: GN-SWIRL-ROLLS-8
+  name: Red Bean Swirl Rolls 8 ct
+  brand: Golden Crumb
+  category: bakery
+  subcategory: pastry
+  description: A transparent plastic package containing multiple golden-brown cylindrical roll breads with visible dark swirl
+    fillings, sealed with a green label featuring printed text.
+  tags: [breakfast, sweet, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 499
+  unit: pack
+  size: 8 ct
+  barcode: '2000009000085'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.166, 0.29, 0.106]
+    label_color: '#16a34a'
+    mass_kg: 0.4
+- sku: GN-RICE-CRISPS
+  name: Puffed Rice Crisps
+  brand: Crunch Lab
+  category: snacks
+  subcategory: crackers
+  description: A packaged snack in a transparent plastic bag with red printed printed text, containing white irregularly shaped
+    pieces and a solid red base section.
+  tags: [snack, crunchy, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: []
+  price_cents: 379
+  unit: bag
+  size: 6 oz
+  barcode: '2000009000092'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.141, 0.204, 0.28]
+    label_color: '#dc2626'
+    mass_kg: 0.4
+- sku: GN-MINI-CROISSANT
+  name: Mini Croissant Tub
+  brand: Golden Crumb
+  category: bakery
+  subcategory: pastry
+  description: A clear plastic round container holding golden-brown, crescent-shaped baked snacks arranged in a circle under
+    a red-labeled lid.
+  tags: [breakfast, snack, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 599
+  unit: each
+  size: 10 oz
+  barcode: '2000009000108'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: cylinder
+    dims_m: [0.242, 0.242, 0.082]
+    label_color: '#f59e0b'
+    mass_kg: 0.4
+- sku: GN-SESAME-RICE-CAKE
+  name: Sesame Rice Cakes 6 ct
+  brand: Crunch Lab
+  category: snacks
+  subcategory: crackers
+  description: A rectangular packaged snack featuring a white, sesame-coated rice cake with visible brown filling, enclosed
+    in transparent plastic with a circular label bearing gold printed text.
+  tags: [snack, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [sesame]
+  price_cents: 349
+  unit: pack
+  size: 6 ct
+  barcode: '2000009000115'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.111, 0.202, 0.07]
+    label_color: '#e5e7eb'
+    mass_kg: 0.4
+- sku: GN-MATCHA-ROLL
+  name: Matcha Swiss Rolls 2 ct
+  brand: Golden Crumb
+  category: bakery
+  subcategory: pastry
+  description: A rectangular transparent plastic package containing two light green, spiral-cut Swiss rolls with a visible
+    cream filling, sealed with a labeled lid featuring blue and green branding.
+  tags: [sweet, dessert, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 399
+  unit: pack
+  size: 2 ct
+  barcode: '2000009000122'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.091, 0.213, 0.07]
+    label_color: '#84cc16'
+    mass_kg: 0.4
+- sku: GN-SANDWICH-BREAD
+  name: Soft Sandwich Bread
+  brand: Golden Crumb
+  category: bakery
+  subcategory: bread
+  description: Golden Crumb soft sandwich bread, 20 oz.
+  tags: [breakfast, sandwich, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk]
+  price_cents: 349
+  unit: each
+  size: 20 oz
+  barcode: '2000009000139'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.121, 0.291, 0.162]
+    label_color: '#2563eb'
+    mass_kg: 0.4
+- sku: GN-BLACK-TEA-100
+  name: Classic Black Tea 100 ct
+  brand: Teahouse Lane
+  category: pantry
+  subcategory: coffee
+  description: A rectangular Lipton tea box with a white front featuring the brand logo and green sides with text and barcodes.
+  tags: [tea, breakfast, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 649
+  unit: box
+  size: 100 ct
+  barcode: '2000009000146'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.094, 0.338, 0.143]
+    label_color: '#15803d'
+    mass_kg: 0.4
+- sku: GN-DRINK-YOGURT-12
+  name: Drinkable Yogurt 12-Pack
+  brand: Meadow Moo
+  category: dairy
+  subcategory: yogurt
+  description: Meadow Moo drinkable yogurt 12-pack, 12 x 7 oz.
+  tags: [breakfast, kid_friendly, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 899
+  unit: pack
+  size: 12 x 7 oz
+  barcode: '2000009000153'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.109, 0.284, 0.3]
+    label_color: '#1e40af'
+    mass_kg: 0.4
+- sku: GN-AP-FLOUR-5LB
+  name: All-Purpose Flour
+  brand: Mill Creek
+  category: pantry
+  subcategory: baking
+  description: A white plastic bag with green and red branding featuring a fish logo and printed text.
+  tags: [baking, vegan, genie_store]
+  dietary: [vegan]
+  allergens: [wheat]
+  price_cents: 429
+  unit: bag
+  size: 5 lb
+  barcode: '2000009000160'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.112, 0.163, 0.237]
+    label_color: '#16a34a'
+    mass_kg: 0.4
+- sku: GN-COCONUT-JUICE
+  name: Fresh Coconut Juice
+  brand: Coco Bay
+  category: beverages
+  subcategory: juice
+  description: Coco Bay fresh coconut juice, 11 fl oz.
+  tags: [coconut, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 279
+  unit: each
+  size: 11 fl oz
+  barcode: '2000009000177'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.05, 0.05, 0.155]
+    label_color: '#f8fafc'
+    mass_kg: 0.4
+- sku: GN-COLD-BREW
+  name: Cold Brew Iced Coffee
+  brand: Stripe Roast
+  category: beverages
+  subcategory: drinks
+  description: A brown plastic bottle with a black cap and a white label featuring yellow and blue diagonal stripes.
+  tags: [coffee, caffeine, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 349
+  unit: each
+  size: 10 fl oz
+  barcode: '2000009000184'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.055, 0.056, 0.153]
+    label_color: '#713f12'
+    mass_kg: 0.4
+- sku: GN-COLD-BREW-LATTE
+  name: Cold Brew Coffee Latte
+  brand: Stripe Roast
+  category: beverages
+  subcategory: drinks
+  description: A brown plastic beverage bottle with a black cap and a white label featuring yellow diagonal stripes and text.
+  tags: [coffee, caffeine, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 379
+  unit: each
+  size: 10 fl oz
+  barcode: '2000009000191'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.055, 0.056, 0.153]
+    label_color: '#92400e'
+    mass_kg: 0.4
+- sku: GN-MANGO-YOGURT-DRINK
+  name: Mango Yogurt Drink
+  brand: Sunny Cup
+  category: beverages
+  subcategory: drinks
+  description: A white rectangular beverage bottle with a white cap and yellow branding featuring printed text and fruit imagery.
+  tags: [fruit, kid_friendly, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 249
+  unit: each
+  size: 8.5 fl oz
+  barcode: '2000009000207'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: box
+    dims_m: [0.054, 0.054, 0.124]
+    label_color: '#fbbf24'
+    mass_kg: 0.4
+- sku: GN-CHOCOLATE-MILK
+  name: Chocolate Milk
+  brand: Meadow Moo
+  category: beverages
+  subcategory: drinks
+  description: Meadow Moo chocolate milk, 10 fl oz.
+  tags: [kid_friendly, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 229
+  unit: each
+  size: 10 fl oz
+  barcode: '2000009000214'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.055, 0.055, 0.13]
+    label_color: '#a16207'
+    mass_kg: 0.4
+- sku: GN-COCONUT-WATER
+  name: Coconut Water
+  brand: Island Palm
+  category: beverages
+  subcategory: water
+  description: A plastic beverage bottle with a green cap and white label featuring coconut imagery and 'Coco Royal' branding.
+  tags: [coconut, hydration, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 299
+  unit: each
+  size: 12 fl oz
+  barcode: '2000009000221'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.053, 0.053, 0.184]
+    label_color: '#22c55e'
+    mass_kg: 0.4
+- sku: GN-GRAPE-JUICE
+  name: Concord Grape Juice Drink
+  brand: Orchard Lane
+  category: beverages
+  subcategory: juice
+  description: A black plastic beverage bottle with a white cap and a label featuring red grapes and printed text.
+  tags: [fruit, kid_friendly, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 249
+  unit: each
+  size: 12 fl oz
+  barcode: '2000009000238'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.049, 0.06, 0.167]
+    label_color: '#581c87'
+    mass_kg: 0.4
+- sku: GN-GREEN-TEA
+  name: Unsweetened Green Tea
+  brand: Kumo Tea
+  category: beverages
+  subcategory: drinks
+  description: A white plastic beverage bottle with green and blue printed text and branding, featuring a white cap with a
+    green logo.
+  tags: [tea, unsweetened, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 229
+  unit: each
+  size: 16.9 fl oz
+  barcode: '2000009000245'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.06, 0.06, 0.158]
+    label_color: '#15803d'
+    mass_kg: 0.4
+- sku: GN-SPRING-WATER
+  name: Natural Spring Water
+  brand: Clearbrook
+  category: beverages
+  subcategory: water
+  description: A white, translucent plastic bottle with a tapered top and a green-and-white label featuring printed text.
+  tags: [water, hydration, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 149
+  unit: each
+  size: 16.9 fl oz
+  barcode: '2000009000252'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.071, 0.071, 0.125]
+    label_color: '#86efac'
+    mass_kg: 0.4
+- sku: GN-PROBIOTIC-MILK
+  name: Probiotic Milk Drink
+  brand: Kiddo Cultures
+  category: beverages
+  subcategory: drinks
+  description: A white plastic bottle with a green and red label featuring 'AD' text.
+  tags: [kid_friendly, probiotic, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 199
+  unit: each
+  size: 7.4 fl oz
+  barcode: '2000009000269'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.047, 0.047, 0.149]
+    label_color: '#ef4444'
+    mass_kg: 0.4
+- sku: GN-STRAWBERRY-YOGURT-DRINK
+  name: Strawberry Yogurt Drink
+  brand: Sunny Cup
+  category: beverages
+  subcategory: drinks
+  description: A white rectangular beverage bottle with a white cap, featuring pink and red text and graphics including strawberries
+    on its label.
+  tags: [fruit, kid_friendly, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 249
+  unit: each
+  size: 8.5 fl oz
+  barcode: '2000009000276'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: box
+    dims_m: [0.054, 0.054, 0.124]
+    label_color: '#f472b6'
+    mass_kg: 0.4
+- sku: GN-PEACH-OOLONG
+  name: Peach Oolong Tea
+  brand: Teahouse Lane
+  category: beverages
+  subcategory: drinks
+  description: A white plastic beverage bottle with a maroon cap and pink label featuring 'COSTA cha' branding.
+  tags: [tea, fruit, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 299
+  unit: each
+  size: 13.5 fl oz
+  barcode: '2000009000283'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.055, 0.055, 0.164]
+    label_color: '#fda4af'
+    mass_kg: 0.4
+- sku: GN-SOY-MILK
+  name: Original Soy Milk
+  brand: Bean Bright
+  category: dairy
+  subcategory: plant_milk
+  description: A white rectangular beverage bottle with a white cap and printed text on its label.
+  tags: [dairy_free, vegan, genie_store]
+  dietary: [dairy_free, vegan]
+  allergens: [soy]
+  price_cents: 199
+  unit: each
+  size: 8.5 fl oz
+  barcode: '2000009000290'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.062, 0.061, 0.132]
+    label_color: '#f5f5f4'
+    mass_kg: 0.4
+- sku: GN-BLUEBERRY-YOGURT-DRINK
+  name: Blueberry Yogurt Drink
+  brand: Sunny Cup
+  category: beverages
+  subcategory: drinks
+  description: A white plastic bottle with a purple and blue label featuring printed text and a white cap.
+  tags: [fruit, kid_friendly, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 249
+  unit: each
+  size: 10 fl oz
+  barcode: '2000009000306'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.05, 0.065, 0.17]
+    label_color: '#6d28d9'
+    mass_kg: 0.4
+- sku: GN-BABY-POWDER
+  name: Baby Powder
+  brand: Little Lily
+  category: personal_care
+  subcategory: bath_body
+  description: A white cylindrical bottle with a green and blue label featuring the Johnson's brand name and logo.
+  tags: [baby, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 499
+  unit: each
+  size: 7 oz
+  barcode: '2000009000313'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.052, 0.06, 0.159]
+    label_color: '#22c55e'
+    mass_kg: 0.4
+- sku: GN-RICE-CLEANSER
+  name: Rice Bran Facial Cleanser
+  brand: Bloom & Dew
+  category: personal_care
+  subcategory: bath_body
+  description: Bloom & Dew rice bran facial cleanser, 3.4 oz.
+  tags: [skincare, face, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 799
+  unit: each
+  size: 3.4 oz
+  barcode: '2000009000320'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.049, 0.078, 0.155]
+    label_color: '#facc15'
+    mass_kg: 0.4
+- sku: GN-PEACH-BODY-WASH
+  name: Peach Leaf Baby Body Wash
+  brand: Little Lily
+  category: personal_care
+  subcategory: bath_body
+  description: A white and pink rectangular box with 'Pigeon' branding and peach imagery, labeled as a 200ml body wash.
+  tags: [baby, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 899
+  unit: each
+  size: 6.8 fl oz
+  barcode: '2000009000337'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.056, 0.056, 0.162]
+    label_color: '#f9a8d4'
+    mass_kg: 0.4
+- sku: GN-ALOE-NIGHT-CREAM
+  name: Aloe Night Cream
+  brand: Bloom & Dew
+  category: personal_care
+  subcategory: bath_body
+  description: A small, rectangular skincare product box with a pink top and white sides featuring green imagery and printed
+    text.
+  tags: [skincare, face, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 1299
+  unit: each
+  size: 1.7 oz
+  barcode: '2000009000344'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.072, 0.07, 0.057]
+    label_color: '#f472b6'
+    mass_kg: 0.4
+- sku: GN-CHARCOAL-CLEANSER
+  name: Charcoal Facial Cleanser
+  brand: Bloom & Dew
+  category: personal_care
+  subcategory: bath_body
+  description: A small, translucent plastic tube with a black cap, featuring blue and black branding for Pond's bamboo charcoal
+    facial cleanser.
+  tags: [skincare, face, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 799
+  unit: each
+  size: 3.4 oz
+  barcode: '2000009000351'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.049, 0.076, 0.154]
+    label_color: '#111827'
+    mass_kg: 0.4
+- sku: GN-DAILY-FACE-WASH
+  name: Oil-Free Daily Face Wash
+  brand: ClearDay
+  category: personal_care
+  subcategory: bath_body
+  description: A blue and white plastic tube with 'Clean & Clear' branding, featuring a tapered top and flat base.
+  tags: [skincare, face, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 749
+  unit: each
+  size: 5 fl oz
+  barcode: '2000009000368'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.04, 0.06, 0.168]
+    label_color: '#2563eb'
+    mass_kg: 0.4
+- sku: GN-KIDS-FACE-WASH
+  name: Kids Gentle Face Wash
+  brand: Froggy Fresh
+  category: personal_care
+  subcategory: bath_body
+  description: A small, cone-shaped tube with a yellow body featuring a cartoon frog face and a light green cap.
+  tags: [kid_friendly, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 599
+  unit: each
+  size: 2.8 fl oz
+  barcode: '2000009000375'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.034, 0.052, 0.094]
+    label_color: '#facc15'
+    mass_kg: 0.4
+- sku: GN-KIDS-BODY-WASH
+  name: Kids 2-in-1 Body Wash
+  brand: Froggy Fresh
+  category: personal_care
+  subcategory: bath_body
+  description: A light blue plastic bottle with a green pump dispenser and base, featuring a cartoon frog on its label.
+  tags: [kid_friendly, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 699
+  unit: each
+  size: 13.5 fl oz
+  barcode: '2000009000382'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.094, 0.093, 0.236]
+    label_color: '#7dd3fc'
+    mass_kg: 0.4
+- sku: GN-HAND-CREAM
+  name: Hand Cream
+  brand: Silk Harbor
+  category: personal_care
+  subcategory: bath_body
+  description: A white plastic tube with a blue cap and NIVEA branding, featuring blue wave graphics and text on its surface.
+  tags: [skincare, hands, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 549
+  unit: each
+  size: 2.5 oz
+  barcode: '2000009000399'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.034, 0.053, 0.125]
+    label_color: '#1e3a8a'
+    mass_kg: 0.4
+- sku: GN-HAND-SANITIZER
+  name: Hand Sanitizer Gel
+  brand: Sparkhome
+  category: personal_care
+  subcategory: bath_body
+  description: A white plastic bottle with a bright yellow cap and green labeling, featuring printed text and a '99%' efficacy
+    claim.
+  tags: [hygiene, hands, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 399
+  unit: each
+  size: 8 fl oz
+  barcode: '2000009000405'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.034, 0.053, 0.115]
+    label_color: '#facc15'
+    mass_kg: 0.4
+- sku: GN-VITAMIN-E-LOTION
+  name: Vitamin E Body Lotion
+  brand: Bloom & Dew
+  category: personal_care
+  subcategory: bath_body
+  description: Bloom & Dew vitamin e body lotion, 6.8 fl oz.
+  tags: [skincare, body, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 849
+  unit: each
+  size: 6.8 fl oz
+  barcode: '2000009000412'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.03, 0.058, 0.13]
+    label_color: '#dc2626'
+    mass_kg: 0.4
+- sku: GN-BABY-LOTION
+  name: Baby Lotion
+  brand: Little Lily
+  category: personal_care
+  subcategory: bath_body
+  description: A small white plastic bottle with a light blue cap and a green-and-white label featuring printed text and leaf
+    imagery.
+  tags: [baby, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 699
+  unit: each
+  size: 6.8 fl oz
+  barcode: '2000009000429'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.042, 0.064, 0.126]
+    label_color: '#93c5fd'
+    mass_kg: 0.4
+- sku: GN-KIDS-SHAMPOO
+  name: Kids Detangling Shampoo
+  brand: Froggy Fresh
+  category: personal_care
+  subcategory: hair_care
+  description: A white bottle with a lime-green mushroom-shaped cap featuring white spots and a cute frog design on its front.
+  tags: [kid_friendly, hair, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 649
+  unit: each
+  size: 8 fl oz
+  barcode: '2000009000436'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.045, 0.073, 0.129]
+    label_color: '#a3e635'
+    mass_kg: 0.4
+- sku: GN-CALMING-CREAM
+  name: Calming Face Cream
+  brand: Bloom & Dew
+  category: personal_care
+  subcategory: bath_body
+  description: A small, light green cardboard box with a red oval logo and text, wrapped in clear plastic, showing product
+    details and a barcode on its sides.
+  tags: [skincare, face, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 1199
+  unit: each
+  size: 1.7 oz
+  barcode: '2000009000443'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.071, 0.071, 0.064]
+    label_color: '#86efac'
+    mass_kg: 0.4
+- sku: GN-SOFT-FACE-LOTION
+  name: Soft Facial Lotion
+  brand: Silk Harbor
+  category: personal_care
+  subcategory: bath_body
+  description: A white plastic bottle with a green cap and labeled 'SOD Soft Facial Lotion' on its front.
+  tags: [skincare, face, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 899
+  unit: each
+  size: 3.4 fl oz
+  barcode: '2000009000450'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.03, 0.061, 0.131]
+    label_color: '#16a34a'
+    mass_kg: 0.4
+# --- END generated: store_genie ---
