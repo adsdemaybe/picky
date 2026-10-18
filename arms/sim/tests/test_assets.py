@@ -140,7 +140,12 @@ def test_committed_map_covers_every_product():
 
     path = REPO / "data" / SKU_ASSETS_FILE
     sa = SkuAssets.load(path, "/assets", exists=lambda p: True)
-    products_ = load_products(str(REPO / "data"))
+    everything = load_products(str(REPO / "data"))
+    # The T-Mobile store's wireless SKUs are not in this grocery map on purpose: they render through the primitive
+    # path, where arms/sim/visuals.yaml supplies their models (phones, earbuds, watches) or keeps them labeled boxes.
+    wireless = {s for s, p in everything.items() if p.category == "wireless"}
+    assert wireless and all(sa.resolve(s) is None for s in wireless)
+    products_ = {s: p for s, p in everything.items() if s not in wireless}
     assert set(sa.entries) == set(products_)
     renders = [e["render"] for e in sa.entries.values()]
     assert renders.count("asset") + renders.count("parts") + renders.count("primitive") == len(products_)
@@ -188,6 +193,8 @@ def test_real_stores_keep_every_unit_with_models():
         assert ids == [i.instance_id for i in modeled.stores[sid].instances], sid
         per_slot = {s: len(spec.instances_in_slot(s)) for s in spec.slot_layouts}
         assert per_slot == {s: len(modeled.stores[sid].instances_in_slot(s)) for s in spec.slot_layouts}
+        if sid == "store_tmobile":  # dressed by arms/sim/visuals.yaml, not by the grocery map
+            continue
         on_models = [p for p in modeled.stores[sid].product_prims() if p.render != "primitive"]
         assert len(on_models) > 0.8 * len(spec.instances), sid
 
