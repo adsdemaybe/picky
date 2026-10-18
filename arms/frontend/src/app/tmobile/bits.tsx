@@ -17,6 +17,7 @@ const NAV = [
   { href: "/tmobile", label: "My line", match: (p: string) => p === "/tmobile" },
   { href: "/tmobile/shop", label: "Shop online", match: (p: string) => p.startsWith("/tmobile/shop") },
   { href: "/tmobile/store", label: "In store", match: (p: string) => p.startsWith("/tmobile/store") },
+  { href: "/tmobile/advisors", label: "Advisors", match: (p: string) => ["/tmobile/advisors", "/tmobile/match", "/tmobile/moment", "/tmobile/upgrade", "/tmobile/household"].some((x) => p.startsWith(x)) },
   { href: "/tmobile/trip", label: "Robot trip", match: (p: string) => p.startsWith("/tmobile/trip") },
   { href: "/tmobile/track", label: "How it works", match: (p: string) => p.startsWith("/tmobile/track") },
 ];

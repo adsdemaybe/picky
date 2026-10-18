@@ -309,8 +309,10 @@ export function moment(a: RetentionAccount): Moment {
   const drivers: Driver[] = [];
   const add = (id: string, w: number, text: string) => {
     const ex = drivers.find((x) => x.id === id);
-    if (ex) (ex.weight += w), (ex.text += `; ${text}`);
-    else drivers.push({ id, weight: w, text, root: !SYMPTOMS.has(id) });
+    if (ex) {
+      ex.weight += w;
+      ex.text += `; ${text}`;
+    } else drivers.push({ id, weight: w, text, root: !SYMPTOMS.has(id) });
   };
   if (a.support_contacts_90d.length)
     add("support_friction", Math.min(0.28, a.support_contacts_90d.length * 0.07), `${a.support_contacts_90d.length} support contact${a.support_contacts_90d.length > 1 ? "s" : ""} in 90 days (${[...new Set(a.support_contacts_90d.map((t) => TOPIC[t] ?? t))].join(", ")})`);
@@ -369,8 +371,13 @@ export function moment(a: RetentionAccount): Moment {
     const rootFixed = plan.length > 0;
     for (const dr of drivers.filter((x) => !x.root)) {
       if (rootFixed) dr.fixed_by = `fixing the cause (${roots.filter((r) => r.fixed_by).map((r) => r.id.replace(/_/g, " ")).join(", ")})`;
-      else if (dr.id === "support_friction") (push("check_in", act("check_in").cost_cents!), (dr.fixed_by = act("check_in").label));
-      else if (dr.id === "competitor_shopping") (push("perk", act("perk").cost_cents!), (dr.fixed_by = act("perk").label));
+      else if (dr.id === "support_friction") {
+        push("check_in", act("check_in").cost_cents!);
+        dr.fixed_by = act("check_in").label;
+      } else if (dr.id === "competitor_shopping") {
+        push("perk", act("perk").cost_cents!);
+        dr.fixed_by = act("perk").label;
+      }
     }
   }
 
@@ -430,7 +437,8 @@ function detail(id: string, a: RetentionAccount, opt: ReturnType<typeof househol
 /** The note the customer actually gets (empty when the right move is to leave them alone). */
 export function messageFor(m: Moment): string {
   const a = m.acct;
-  const first = a.name.replace(/ family$/, "").split(/[ ,]/)[0];
+  // greet the account holder by first name (the first line on the account), else the name on file
+  const first = accountOf(a.account_id)?.lines[0]?.label ?? a.name.replace(/ family$/, "").split(/[ ,]/)[0];
   const hh = DATA.households.find((h) => h.account_ids?.includes(a.account_id));
   const opt = hh ? household(hh) : null;
   const parts: string[] = [];
@@ -599,8 +607,10 @@ function priceMix(assign: Record<string, string>, lines: Line[], streaming: Hous
   const covered: string[] = [];
   let paid = 0;
   for (const st of [...streaming].sort((x, y) => y.monthly_cents - x.monthly_cents)) {
-    if (perks > 0) (perks--, covered.push(st.name));
-    else paid += st.monthly_cents;
+    if (perks > 0) {
+      perks--;
+      covered.push(st.name);
+    } else paid += st.monthly_cents;
   }
   const summary = groups.map((g) => `${g.lines.length > 1 ? `${g.lines.length} lines on ` : ""}${g.plan.name}${g.lines.length === 1 && groups.length > 1 ? ` (${g.lines[0].label})` : ""}`).join(" + ");
   return { assign, groups, service_cents: service, streaming_paid_cents: paid, streaming_covered: covered, monthly_cents: service + paid, summary };
