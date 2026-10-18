@@ -49,7 +49,9 @@ ap.add_argument("--livestream", action="store_true", help="enable WebRTC livestr
 # --demo: autopilot shopping run (demo/autopilot.py): Gemini plans the route, the rovers drive + pick + check out
 ap.add_argument("--demo", action="store_true", help="LLM-planned autopilot shopping run (headless unless --livestream)")
 ap.add_argument("--demo-config", default=str(Path(__file__).parent / "demo" / "demo_config.json"))
-ap.add_argument("--ik", default=str(Path(__file__).parent / "demo" / "arm_ik.json"), help="robot/solve_arm_ik.py output")
+ap.add_argument(
+    "--ik", default=str(Path(__file__).parent / "demo" / "arm_ik.json"), help="robot/solve_arm_ik.py output"
+)
 ap.add_argument("--robots", type=int, default=1, help="how many rovers shop at once (--demo)")
 ap.add_argument("--max-items", type=int, default=12)
 ap.add_argument("--record", action="store_true", help="--demo: save camera frames + per-frame log to --out")
@@ -530,7 +532,7 @@ def main():
         smap = StoreMap(stage, extra_fixtures=extra)
         log(f"store map: {len(smap.products)} products, {len(smap.fixtures)} fixtures, {len(smap.sections)} sections")
         products = product_entities(stage)
-        pickys = [Picky(stage, path, r["spawn"], products) for path, r in zip(paths, rcfg)]
+        pickys = [Picky(stage, path, r["spawn"], products) for path, r in zip(paths, rcfg, strict=False)]
     else:
         pickys = [Picky(stage)]
     picky = pickys[0]

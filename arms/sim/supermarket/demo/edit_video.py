@@ -154,7 +154,7 @@ class MiniMap:
                 pts.append((slot[0], slot[1]))
             if show_plan and len(pts) > 1:
                 pp = [self.p(*q) for q in pts]
-                for a, b in zip(pp, pp[1:]):
+                for a, b in zip(pp, pp[1:], strict=False):
                     _dash(d, a, b, col + (200,), max(2, int(3 * s)))
             # current A* path
             path = self.r.path_at(name, t)
@@ -227,7 +227,7 @@ def plan_shots(run: Run, fr0: int, fr1: int, base_speed=2.0):
                 held_until = fi + 75
                 pick_n = sum(len(r["done"]) for r in fr["rovers"])
                 sfx = "" if focus == 0 else str(focus + 1)
-                cur = ("side" if (focus == 0 and pick_n % 3 == 1) else "chase" + sfx)
+                cur = "side" if (focus == 0 and pick_n % 3 == 1) else "chase" + sfx
             sfx = "" if focus == 0 else str(focus + 1)
             pip = "wrist" + sfx if fr["rovers"][focus]["phase"] in ("reach", "lift", "pick", "unload") else None
             speed = 1.0 if fr["rovers"][focus]["phase"] != "checkout" else 1.5
@@ -382,7 +382,7 @@ class Editor:
         x = 60 + mm.size[0] + 60
         d.text((x, 70), "Gemini plans the trip", font=font(56, True), fill=(255, 255, 255))
         model = r.plan.get("model") or r.plan.get("source")
-        d.text((x, 140), f"{model} · {r.plan.get('latency_s', '?')} s · {len(r.items)} items · map built from the scene",
+        d.text((x, 140), f"{model} · {r.plan.get('latency_s', '?')} s · {len(r.items)} items · map built from the scene",  # noqa: E501
                font=font(24), fill=(170, 175, 185))  # fmt: skip
         y = 190
         for ln in wrap_text(d, f"“{r.plan.get('summary', '')}”", font(30), W - x - 60)[:4]:
@@ -414,7 +414,7 @@ class Editor:
         d = ImageDraw.Draw(bg)
         panel(bg, (W / 2 - 520, 110, W / 2 + 520, H - 110), 220, 30)
         d.text((W / 2, 200), "Paid ✓", font=font(110, True), fill=GREEN, anchor="mm")
-        d.text((W / 2, 290), "Checkout complete · everything unloaded at the counter (simulated payment)", font=font(30),
+        d.text((W / 2, 290), "Checkout complete · everything unloaded at the counter (simulated payment)", font=font(30),  # noqa: E501
                fill=(210, 210, 210), anchor="mm")  # fmt: skip
         y = 350
         for i, rv in enumerate(fr["rovers"]):
@@ -483,7 +483,7 @@ def full_cut(ed: Editor):
     yield from ed.title_card("over" if r.has("over", i0) else "orbit", i0, int(3.5 * FPS))
     for fi in range(i0, i1 + 1):  # intro orbit, shopping list
         names = ", ".join(it["name"] for it in list(r.items.values())[:8])
-        yield ed.compose(fi, "orbit", None, (f"Shopping list: {len(r.items)} items", names + ("…" if len(r.items) > 8 else ""),
+        yield ed.compose(fi, "orbit", None, (f"Shopping list: {len(r.items)} items", names + ("…" if len(r.items) > 8 else ""),  # noqa: E501
                                              (255, 255, 255)), minimap=False)  # fmt: skip
     yield from ed.plan_card(first_main, int(7 * FPS))
     shots = plan_shots(r, m0, m1)
@@ -493,7 +493,11 @@ def full_cut(ed: Editor):
     yield from ed.paid_card("chase" if r.has("chase", last) else "over", last, int(4 * FPS))
     if o0 is not None:
         for fi in range(o0, o1 + 1):
-            yield ed.end_card("orbit", fi) if fi > o0 + FPS else ed.compose(fi, "orbit", None, ("", "", GREEN), minimap=False)
+            yield (
+                ed.end_card("orbit", fi)
+                if fi > o0 + FPS
+                else ed.compose(fi, "orbit", None, ("", "", GREEN), minimap=False)
+            )
 
 
 def highlight(ed: Editor, target_s=55):
@@ -503,7 +507,7 @@ def highlight(ed: Editor, target_s=55):
     o0, o1 = phase_range(r, "outro")
     yield from ed.title_card("over" if r.has("over", i0) else "orbit", i0, int(2.5 * FPS))
     for fi in range(i0, i1 + 1, 3):
-        yield ed.compose(fi, "orbit", None, (f"Shopping list: {len(r.items)} items", "Gemini maps the store and plans the route",
+        yield ed.compose(fi, "orbit", None, (f"Shopping list: {len(r.items)} items", "Gemini maps the store and plans the route",  # noqa: E501
                                              (255, 255, 255)), minimap=False)  # fmt: skip
     yield from ed.plan_card(m0, int(4 * FPS))
     # 3 picks from different sections at 1.5x, everything else at 5x

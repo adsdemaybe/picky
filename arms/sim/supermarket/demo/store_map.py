@@ -247,7 +247,9 @@ class StoreMap:
         mid_store = (f_lo + f_hi) / 2  # compass words relative to the shelving area, not the whole building
         span = np.maximum(f_hi - f_lo, 1e-3)
         self.sections = []
-        for k, idxs in enumerate(sorted(groups.values(), key=lambda g: (-self.fixtures[g[0]].lo[1], self.fixtures[g[0]].lo[0]))):
+        for k, idxs in enumerate(
+            sorted(groups.values(), key=lambda g: (-self.fixtures[g[0]].lo[1], self.fixtures[g[0]].lo[0]))
+        ):
             lo = np.min([self.fixtures[i].lo for i in idxs], axis=0)
             hi = np.max([self.fixtures[i].hi for i in idxs], axis=0)
             c = (lo[:2] + hi[:2]) / 2
@@ -404,9 +406,7 @@ class StoreMap:
         f = self.fixtures[p.fixture]
         nx, ny = SIDES[side]
         c = p.center
-        depth = {"west": c[0] - f.lo[0], "east": f.hi[0] - c[0], "south": c[1] - f.lo[1], "north": f.hi[1] - c[1]}[
-            side
-        ]
+        depth = {"west": c[0] - f.lo[0], "east": f.hi[0] - c[0], "south": c[1] - f.lo[1], "north": f.hi[1] - c[1]}[side]
         reach = FRONT_CLEAR + depth if reach is None else reach
         yaw = math.atan2(-ny, -nx)  # face into the fixture
         cy, sy = math.cos(yaw), math.sin(yaw)
@@ -421,7 +421,7 @@ class StoreMap:
         for j in range(self.ny - 1, -1, -k):
             rows.append("".join("#" if self.occ[i : i + k, max(j - k + 1, 0) : j + 1].mean() > 0.5 else "."
                                 for i in range(0, self.nx, k)))  # fmt: skip
-        return (f"cell {cell} m; columns west->east from x={self.lo[0]:.2f}; rows north->south from y={self.hi[1]:.2f}\n"
+        return (f"cell {cell} m; columns west->east from x={self.lo[0]:.2f}; rows north->south from y={self.hi[1]:.2f}\n"  # noqa: E501
                 + "\n".join(rows))  # fmt: skip
 
     def summary(self) -> dict:
