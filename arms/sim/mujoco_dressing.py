@@ -19,7 +19,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from contracts.planogram import Fixture, Planogram
+from contracts.planogram import Fixture, Planogram  # noqa: I001
 
 SIGN_DIR = Path(os.environ.get("PICKY_SIM_LABEL_DIR") or tempfile.gettempdir()) / "picky-mj-signs"
 VISUAL = 'contype="0" conaffinity="0"'
@@ -58,7 +58,9 @@ def _sign_png(text: str, fg: tuple[int, int, int], bg: tuple[int, int, int], nam
 class Dressing:
     """Collects the MJCF for one model build: ``asset_xml()`` + ``geoms_xml()``."""
 
-    def __init__(self) -> None:
+    def __init__(self, fixtures_root: str | os.PathLike | None = None) -> None:
+        root = Path(fixtures_root or os.environ.get("PICKY_MJ_ASSET_ROOT") or Path.home() / "picky-assets-mj")
+        self.fx_root = root.expanduser() / "fixtures"
         self.assets: list[str] = [
             '<texture name="d.tiles" type="2d" builtin="checker" rgb1="0.90 0.89 0.86" rgb2="0.84 0.83 0.80" '
             'width="256" height="256" mark="edge" markrgb="0.70 0.69 0.66"/>',
@@ -73,9 +75,63 @@ class Dressing:
         ]
         self.geoms: list[str] = []
         self._signs = 0
+        self._meshes: set[str] = set()
+        self._textures: set[str] = set()
+        tex = self.fx_root / "tex"
+        # real CC0 surface textures when built (arms/sim/tools/mujoco_fixtures.py), else the flat fallbacks above
+        for surface, repeat, extra in (
+            ("floor", "1.0 1.0", 'specular="0.3" shininess="0.5" reflectance="0.04"'),
+            ("wall", "0.5 0.5", 'specular="0.05"'),
+            ("ceiling", "1.0 1.0", 'specular="0.02"'),
+            ("metal", "2 2", 'specular="0.6" shininess="0.7"'),
+        ):
+            if (tex / f"{surface}.png").is_file():
+                self.assets.append(f'<texture name="d.t.{surface}" type="2d" file="{tex / f"{surface}.png"}"/>')
+                self.assets.append(
+                    f'<material name="d.s.{surface}" texture="d.t.{surface}" texrepeat="{repeat}" '
+                    f'texuniform="true" {extra}/>'
+                )
+                self._textures.add(surface)
 
     def material_for_role(self, role: str) -> str:
+        surface = {"floor": "floor", "wall": "wall", "ceiling": "ceiling"}.get(role)
+        if surface in self._textures:
+            return f"d.s.{surface}"
         return {"floor": "d.tiles", "wall": "d.wall"}.get(role, "")
+
+    def _metal(self) -> str:
+        return "d.s.metal" if "metal" in self._textures else "d.metal"
+
+    def _model(self, name: str, center, dims, yaw: float) -> bool:
+        """Place a converted fixture model (bottom-center at ``center``) scaled into ``dims``; False if not built."""
+        import json
+
+        meta_p = self.fx_root / name / "meta.json"
+        if not meta_p.is_file():
+            return False
+        meta = json.loads(meta_p.read_text())
+        bx, by, bz = (max(1e-4, v) for v in meta["bbox_m"])
+        s = (dims[0] / bx, dims[1] / by, dims[2] / bz)
+        q = (math.cos(yaw / 2), 0.0, 0.0, math.sin(yaw / 2))
+        for k, part in enumerate(meta["parts"]):
+            mesh = f"d.m.{name}.{k}.{s[0]:.3f}.{s[1]:.3f}.{s[2]:.3f}"
+            if mesh not in self._meshes:
+                self._meshes.add(mesh)
+                obj = self.fx_root / name / part["obj"]
+                self.assets.append(f'<mesh name="{mesh}" file="{obj}" scale="{s[0]:.5f} {s[1]:.5f} {s[2]:.5f}"/>')
+                if part.get("png"):
+                    self.assets.append(f'<texture name="{mesh}" type="2d" file="{self.fx_root / name / part["png"]}"/>')
+                    self.assets.append(f'<material name="{mesh}" texture="{mesh}" specular="0.2"/>')
+            mat = (
+                f' material="{mesh}" rgba="1 1 1 1"'
+                if part.get("png")
+                else (' rgba="{:.3f} {:.3f} {:.3f} 1"'.format(*part["rgba"][:3]))
+            )
+            self.geoms.append(
+                f'<geom type="mesh" mesh="{mesh}"{mat} pos="{center[0]:.4f} {center[1]:.4f} {center[2]:.4f}" '
+                f'quat="{q[0]:.6f} {q[1]:.6f} {q[2]:.6f} {q[3]:.6f}" {VISUAL}/>'
+            )
+        return True
 
     def _sign(self, text: str, fg, bg, c, size, face: tuple[int, int]) -> None:
         """A flat sign whose texture faces ``face`` (unit axis in the floor plane)."""
@@ -114,6 +170,11 @@ class Dressing:
                 self._cooler(fx, (ox, oy, oz))
             elif fx.kind == "checkout":
                 self._checkout(fx, (ox, oy, oz))
+        # a row of shopping carts by the entrance (decor; robots never drive there: it's beside the door)
+        e = plan.entrance
+        for i in range(3):
+            x = min(b.x + b.w - 0.5, e.x + 1.1 + i * 0.28)
+            self._model("cart", (x + ox, b.y + 0.65 + oy, oz), (0.43, 1.05, 0.90), math.pi / 2)
 
     def _frame(self, fx: Fixture):
         r = fx.rect
@@ -142,11 +203,11 @@ class Dressing:
 
         # end panels and uprights every ~1.25 m
         for u in (-length / 2 + 0.015, length / 2 - 0.015):
-            self.geoms.append(_box(P(u, 0, h / 2), S(0.03, depth, h), material="d.metal"))
+            self.geoms.append(_box(P(u, 0, h / 2), S(0.03, depth, h), material=self._metal()))
         n = max(1, round(length / 1.25))
         for k in range(1, n):
             u = -length / 2 + k * length / n
-            self.geoms.append(_box(P(u, 0, h / 2), S(0.04, 0.05, h), material="d.metal"))
+            self.geoms.append(_box(P(u, 0, h / 2), S(0.04, 0.05, h), material=self._metal()))
         for fu, fv in fronts:
             sgn = fv if along_x else fu
             edge = sgn * (depth / 2 if not fx.double_sided else depth / 2)
@@ -218,6 +279,17 @@ class Dressing:
         ox, oy, oz = off
         r, along_x, length, depth, cx, cy, fronts = self._frame(fx)
         h = fx.height_m
+        if self._model("checkout", (cx + ox, cy + oy, oz), (length, depth, h), 0.0 if along_x else math.pi / 2):
+            face = fronts[0]
+            self._sign(
+                "Checkout",
+                (255, 255, 255),
+                (200, 40, 50),
+                (cx + ox, cy + oy, h + 0.9 + oz),
+                (1.2, 0.02, 0.25),
+                (face[0] or 0, face[1] or -1),
+            )
+            return
 
         def P(u, v, z):
             return (cx + u + ox, cy + v + oy, z + oz) if along_x else (cx + v + ox, cy + u + oy, z + oz)

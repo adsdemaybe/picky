@@ -21,6 +21,7 @@ arm hits shelves and products but never its own mast, and the rover body pushes 
 """
 
 import math
+import os
 import re
 import time
 from pathlib import Path
@@ -74,7 +75,8 @@ def _qaxis(axis: tuple[float, float, float], ang: float):
 
 
 def so101_xml_path(explicit: str | None = None) -> Path | None:
-    for p in (explicit, DEFAULT_SO101_XML, FALLBACK_SO101_XML):
+    light = Path(os.environ.get("PICKY_MJ_ASSET_ROOT") or Path.home() / "picky-assets-mj") / "so101/so101_new_calib.xml"
+    for p in (explicit, light, DEFAULT_SO101_XML, FALLBACK_SO101_XML):
         if p and Path(p).is_file():
             return Path(p)
     return None
