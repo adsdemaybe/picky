@@ -126,6 +126,7 @@ def main() -> None:
     ap.add_argument("command", help='e.g. "pick up the gum and put it on the plate"')
     ap.add_argument("--height", type=float, default=0.05, help="object height in metres (standing gum pack: 0.05)")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--record", action="store_true", help="film every episode (overhead camera) to its folder")
     args = ap.parse_args()
 
     cfg = RigConfig()
@@ -158,15 +159,23 @@ def main() -> None:
                 continue
             actions = policy.act(rng)
             theta = policy.steer(actions)
+            ep = DATA_DIR / time.strftime("%Y%m%d-%H%M%S")
+            ep.mkdir(parents=True, exist_ok=True)
+            rec = None
+            if args.record:
+                from .camera import start_recording
+
+                rec = start_recording(cfg, str(ep / "video.mp4"), title=f'Picky  |  "{args.command}"')
+                rec.caption = "looking at the table"
             print(f"actions: grasp={actions['grasp']}  drop={actions['drop']}", flush=True)
             frame = grab_frame(cfg)
             p = plan(cfg, kin, cam, args.command, rest, args.height, frame=frame.copy(), steer=theta)
             print(describe(p), flush=True)
             if p.error:
                 print("not running this episode (fix the scene and press Enter)")
+                if rec:
+                    rec.stop()
                 continue
-            ep = DATA_DIR / time.strftime("%Y%m%d-%H%M%S")
-            ep.mkdir(parents=True, exist_ok=True)
             cv2.imwrite(str(ep / "scene.jpg"), frame)
             label: str | None = None
             print("running... type s or f + Enter any time", flush=True)
@@ -175,6 +184,8 @@ def main() -> None:
             traj: list[dict] = []
             try:
                 for w in p.waypoints:
+                    if rec:
+                        rec.caption = w.name
                     traj += execute(
                         robot, kin, type(p)(**{**p.__dict__, "waypoints": [w]}), log=lambda m: print(m, flush=True)
                     )
@@ -187,11 +198,17 @@ def main() -> None:
                         elif kk == "q":
                             raise KeyboardInterrupt
             finally:
+                if rec:
+                    rec.caption = "returning home"
                 go_home(robot, rest, GRIP_OPEN)  # reset pose
             try:
                 cv2.imwrite(str(ep / "after.jpg"), grab_frame(cfg))
             except RuntimeError:
                 pass
+            if rec:
+                rec.caption = "done"
+                time.sleep(1.5)  # hold the final shot
+                print(f"video: {rec.stop()}  ({rec.frames} frames)", flush=True)
             while label is None:
                 print("success or failure? (s/f + Enter)", flush=True)
                 kk = keys.get()
@@ -230,6 +247,10 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nstopping")
     finally:
+        from . import camera
+
+        if camera._ACTIVE is not None:  # quit mid-episode: close the video so it stays playable
+            print(f"video: {camera._ACTIVE.stop()}")
         go_home(robot, rest, GRIP_OPEN)
         robot.disconnect()
         print("arm released")
