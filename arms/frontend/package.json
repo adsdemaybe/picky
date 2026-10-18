@@ -10,6 +10,7 @@
     "gen-data": "node scripts/gen-data.mjs",
     "gen-types": "node scripts/gen-types.mjs",
     "typecheck": "tsc --noEmit",
+    "pretypecheck": "node scripts/gen-data.mjs && next typegen",
     "predev": "node scripts/gen-data.mjs",
     "prebuild": "node scripts/gen-data.mjs",
     "check:grocery": "node scripts/check-grocery-trips.mjs",
