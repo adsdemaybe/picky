@@ -37,3 +37,10 @@ recordings/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# Playwright e2e screenshots / traces (tests/e2e)
+tests/e2e/artifacts/
+test-results/
+
+# purchase-history SQLite (PICKY_PURCHASES_DB)
+var/

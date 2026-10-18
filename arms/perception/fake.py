@@ -12,6 +12,7 @@ freshness, pixel bbox). This fake reads that ground truth instead of pixels:
 """
 
 import asyncio
+import logging
 import time
 from collections import Counter, defaultdict
 
@@ -104,6 +105,7 @@ class FakePerception:
     def __init__(self, services: Services | None = None, seed: int | str = "perception") -> None:
         self._services = services or Services()
         self._ids = IdFactory(seed)
+        self._warned_unsynthetic = False
 
     # ---------------------------------------------------------------------------------------------------------------
     # Catalog access (call time only; falls back to data/ when catalog isn't wired)
@@ -146,7 +148,10 @@ class FakePerception:
             return frame.model_copy()
         if is_synthetic_frame(frame):
             return frame.model_copy(update={"blurred": True})
-        log.warning("perception fake: frame %s is not synthetic; left blurred=False (do not stream)", frame.frame_id)
+        # Warn once, then debug: live streams would otherwise log this for every frame.
+        level = logging.DEBUG if self._warned_unsynthetic else logging.WARNING
+        self._warned_unsynthetic = True
+        log.log(level, "perception fake: frame %s is not synthetic; left blurred=False (do not stream)", frame.frame_id)
         return frame.model_copy()
 
     async def identify(
@@ -205,6 +210,11 @@ class FakePerception:
             if i.lot_id is not None and i.freshness is not None:
                 by_lot[i.lot_id].append(i.freshness)
         lot_freshness = {lot: round(sum(v) / len(v), 4) for lot, v in sorted(by_lot.items())}
+        # Units per lot of the expected sku: only meaningful (and only sent) when the count is exact.
+        lot_counts: dict[str, int] = {}
+        if has_truth:
+            counted = Counter(i.lot_id for i in seen if i.lot_id is not None and i.sku == expected_sku)
+            lot_counts = dict(sorted(counted.items()))
 
         product = products.get(expected_sku) if expected_sku else None
         return ScanReport(
@@ -218,6 +228,7 @@ class FakePerception:
             mismatch=mismatch,
             freshness=freshness,
             lot_freshness=lot_freshness,
+            lot_counts=lot_counts,
             shelf_tag_cents=shelf_tag_price(slot, product) if slot is not None else None,
             pose=frame.pose,
             frame_id=frame.frame_id,

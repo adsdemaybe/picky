@@ -9,7 +9,9 @@ alwaysApply: false
 
 **Purpose.** Owns shopper profiles and produces explainable extra-item suggestions: detour stops for the route,
 "want any of these?" at checkout, and near-expiry markdowns. Post-purchase feedback updates the profile, so trip 2
-ranks differently.
+ranks differently. Also owns **Cart Whisperer** (T-Mobile track): ≤3 explained cards per phase (planning / in-trip /
+checkout), SKIP and WAIT included, zero is valid; grocery stores and the T-Mobile-style wireless store; designed, not
+implemented (see below).
 **Pipeline:** `sourcing.split` → **`recommender.recommend`** → `recs.ready` → routing (optional stops, skip penalty =
 `interest`) … `followup` reply → `agent.interpret_reply` → **`recommender.record_feedback`** → `profile.updated`.
 
@@ -28,6 +30,33 @@ ranks differently.
 - [ ] **P1** Persist profiles / feedback / purchases / taste vectors in Postgres (`service.py` TODO 1, 3)
 - [ ] **P2** pgvector `product_embeddings` + HNSW `<=>` query instead of the numpy scan (TODO 2)
 - [ ] **P2** Voyage `voyage-4-lite` embeddings upgrade (TODO 4)
+
+## Cart Whisperer (T-Mobile track)
+
+Design: [`docs/cart-whisperer.md`](../../docs/cart-whisperer.md). **Designed, not implemented:** it needs the
+proposed contracts v0.3 (`ShopperContext`, `Suggestion`, `RecommenderService.suggest` / `respond`,
+`suggestions.updated`), which lands after the v0.2 build merges. It replaces the checkout batch above
+(`checkout_batch` stays until then). From the shopper's full context (commerce, customer and real-time physical
+signals) it shows ≤3 explained cards per phase: planning (list ready), in-trip (cart changes, item picked, robot at a
+shelf) and "before you pay". SKIP (owned, incompatible, duplicate) and WAIT (promo soon, over budget, upgrade too
+early) are card kinds, and zero cards is a valid answer. Ranking is deterministic with reason codes; the LLM only
+phrases the "why". It runs in the grocery stores and the T-Mobile-style wireless store (`store_tmobile`). The web app
+already shows the planning-phase SKIP / WAIT cards and the zero case on demo data (`arm/frontend`, not wired).
+
+- [ ] **P0** `suggest(context, limit=3)`: 8 candidate generators (complete, replenish, swap/save, qty fix, deal match, remove/warn, skip, wait)
+- [ ] **P0** Hard gates in code: stock, compatibility (`compatible_with`, ×∞), already owned, allergens / dislikes / guest dietary, mandate snapshot + budget headroom (or `needs_approval`), not declined, conversation ("no cilantro"), max detour, no pending-rec duplicates; joint-set cap check; a gated item the shopper asked for or picked becomes a SKIP card
+- [ ] **P0** Deterministic score (need + taste + money − budget_pressure − detour − fatigue; SKIP / WAIT = avoided spend × certainty), stable ids, ≤3 per phase incl. SKIP / WAIT; allergen warnings first
+- [ ] **P0** Score threshold (`PICKY_SUGGEST_MIN_SCORE`, proposal 0.35): zero suggestions is a normal result ("Nothing worth adding today")
+- [ ] **P0** Deterministic `reason_codes` on every suggestion (`ALREADY_OWNED`, `INCOMPATIBLE`, `PROMO_SOON`, `INSTALLMENTS_LEFT`, `OVER_BUDGET`, ...)
+- [ ] **P0** Fake: templated reasons citing reason codes + signals; deterministic; base deps only; reproduces the demo cards incl. skip, wait and the zero case (doc §11)
+- [ ] **P0** `respond(user_id, suggestion, decision)`: suppress declined (3 trips / 30 days), down-weight the kind, `ProfileUpdate` summary; WAIT accept → reminder via messaging
+- [ ] **P1** `complements.py`: dish / setup templates (tacos, new phone, ...) + pair rules (beef → seasoning, chips → salsa, party ≥ 6 → plates / napkins) + co-purchase pairs
+- [ ] **P1** Cadence model: per-SKU interval from `PurchaseRecord.ts`, subcategory defaults × `household_size` (labeled "default" in signals)
+- [ ] **P1** Real: Sonnet phrases the "why" from reason codes + signals (no rerank), validated against them; template fallback on any failure
+- [ ] **P1** Wireless signals: owned items, device age, installments left, household lines, `compatible_with`, promo calendar (once v0.3 + data land)
+- [ ] **P1** User-aware "Skip it" price verdict, shared with the web app's Find & compare
+- [ ] **P1** Metrics: per-trip `SuggestionMetrics` (accepted rate, $ saved, avoided spend, $ added, basket completeness, zero-suggestion rate); per-store aggregates for `MerchantDashboard.kpis`
+- [ ] **P2** Persist suppressions / outcomes in Postgres with the profile store
 
 ## Contract
 
@@ -61,7 +90,7 @@ ranks differently.
 ```bash
 uv run pytest arms/recommender                         # base deps; data/ test skips until data/ exists
 make demo                                              # fake (default)
-uv sync --extra recommender && PICKY_REAL_ARMS=recommender make demo   # real (needs ANTHROPIC_API_KEY for the rerank)
+uv sync --extra recommender && PICKY_REAL_ARMS=recommender make demo   # real (needs GEMINI_API_KEY for the rerank)
 ```
 
 ## How to contribute
@@ -85,12 +114,25 @@ Full flow: CLAUDE.md §5. For this arm:
 - [ ] `sponsored=False` everywhere; every rec has reason + signals (trust rubric)
 - [ ] Embedding model warmed on the demo machine
 
+## Judges' demo (contracts 0.2.4)
+
+- `purchases.py`: the purchase-history database (SQLite via `utils.db.sqlite_connect`, `PICKY_PURCHASES_DB`), seeded
+  from `data/fixtures/purchase_history.yaml` relative to now (re-seeded after 6 h; checkout rows never touched);
+  `record_purchase` appends every paid line (+ verification photos). Gateway extras: `purchase_history`,
+  `add_purchase_photos`, `suggestions` / `replenish_suggestions`.
+- `suggest.py`: deterministic candidates (replenish by own cadence, substitute for an out-of-stock due item,
+  complement = bought on the same trips, deal = on deal here + bought / liked), only in stock at the store; optional
+  LLM re-rank (`PICKY_SUGGESTIONS_LLM`) whose reasons must quote only numbers from the card's signals.
+- Limitation: the purchase DB is SQLite (one gateway process); the real Postgres catalog DB is not used for it.
+
 ## Known limitations
 
 - Profiles live in memory (reset on restart); Postgres persistence is TODO.
 - Heuristic needs the data's `tags`/`subcategory`/`spice_level` to be filled for good reasons.
 - Real service subclasses the fake; LLM rerank can reorder but never changes prices, filters or `sponsored`.
 - Recs for `store_id="online"` return `[]` (detours only make sense in a physical store).
+- Cart Whisperer SKIP / WAIT signals for the wireless store need v0.3 fields and `data/planograms/store_tmobile.yaml`
+  (not in `data/` yet; today they exist only in the web app's `tmobile.ts`).
 - Detour mix (`rank(..., mix=True)`): one slot each for the best taste pick, the best near-expiry *markdown* (a
   discount is required for `near_expiry_offer`) and the best deal, then fill by score. SKUs bought on the last trip
   (`record_purchase`) get `-0.75` and lose reserved slots to something new. `SPICE_GAIN` is 3.0 so "too mild"

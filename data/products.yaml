@@ -1,5 +1,7 @@
 # Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
-# Product master. Prices are integer cents. Barcodes are valid EAN-13 in the in-store 200 prefix.
+# Product master: 122 in-store SKUs + 3 online-only. Prices are integer cents (realistic 2026 US
+# supermarket prices); brands are made up. Barcodes are valid EAN-13 in the in-store 200 prefix.
+# category = top-level id in data/categories.yaml; subcategory = one of its children.
 # asset: sim prop hints (item frame x=width, y=depth, z=height; label on the -y face).
 schema_version: 1
 products:
@@ -47,7 +49,7 @@ products:
   name: Crunchy Taco Shells 12 ct
   brand: La Milpa
   category: pantry
-  subcategory: tortillas
+  subcategory: taco_shells
   description: Pre-formed crunchy corn taco shells.
   tags: [taco, mexican, kid_friendly, vegetarian, vegan, gluten_free]
   dietary: [vegetarian, vegan, gluten_free]
@@ -541,7 +543,7 @@ products:
   name: Fresh Pico de Gallo 12 oz
   brand: Verde Cocina
   category: deli
-  subcategory: salsa
+  subcategory: fresh_salsa
   description: Fresh-cut tomato, onion, jalapeno and cilantro.
   tags: [taco, mexican, salsa, fresh, vegetarian, vegan, gluten_free]
   dietary: [vegetarian, vegan, gluten_free]
@@ -562,7 +564,7 @@ products:
   name: White Queso Dip 15 oz
   brand: Cascade Creamery
   category: dairy
-  subcategory: dips
+  subcategory: cheese_dip
   description: Creamy white queso with green chiles.
   tags: [mexican, dip, party, cheese, kid_friendly, vegetarian, gluten_free]
   dietary: [vegetarian, gluten_free]
@@ -1347,7 +1349,7 @@ products:
   name: Fire-Roasted Corn 16 oz
   brand: Polar Creamery
   category: frozen
-  subcategory: vegetables
+  subcategory: frozen_vegetables
   description: Flame-roasted sweet corn, frozen.
   tags: [mexican, healthy, budget, vegetarian, vegan, gluten_free]
   dietary: [vegetarian, vegan, gluten_free]
@@ -1384,6 +1386,1038 @@ products:
     dims_m: [0.25, 0.06, 0.2]
     label_color: '#ff7043'
     mass_kg: 1.6
+- sku: GARLIC
+  name: Garlic 3 ct Sleeve
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Three whole white garlic bulbs.
+  tags: [garlic, aromatics, cooking, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 149
+  unit: pack
+  size: 3 bulbs
+  barcode: '2000000020006'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: sphere
+    dims_m: [0.07, 0.07, 0.06]
+    label_color: '#f5f0e1'
+    mass_kg: 0.15
+- sku: POTATO-RUSSET
+  name: Russet Potatoes 5 lb Bag
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Washington russets for baking, mashing and fries.
+  tags: [potato, staple, budget, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 499
+  unit: bag
+  size: 5 lb
+  barcode: '2000000020075'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: box
+    dims_m: [0.3, 0.12, 0.4]
+    label_color: '#a1887f'
+    mass_kg: 2.3
+- sku: CARROTS
+  name: Carrots 2 lb Bag
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Crunchy whole carrots.
+  tags: [carrot, snacking, budget, kid_friendly, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 199
+  unit: bag
+  size: 2 lb
+  barcode: '2000000020143'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.18, 0.06, 0.3]
+    label_color: '#fb8c00'
+    mass_kg: 0.9
+- sku: BROCCOLI
+  name: Broccoli Crown
+  brand: Picky Farms
+  category: produce
+  subcategory: vegetables
+  description: Fresh green broccoli crown.
+  tags: [broccoli, greens, healthy, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 179
+  unit: each
+  size: about 12 oz
+  barcode: '2000000020211'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: sphere
+    dims_m: [0.14, 0.14, 0.14]
+    label_color: '#2e7d32'
+    mass_kg: 0.35
+- sku: STRAWBERRIES
+  name: Strawberries 1 lb Clamshell
+  brand: Sunny Grove
+  category: produce
+  subcategory: fruit
+  description: Sweet red strawberries.
+  tags: [berries, fruit, snacking, kid_friendly, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 399
+  unit: pack
+  size: 1 lb
+  barcode: '2000000020280'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.18, 0.12, 0.08]
+    label_color: '#e53935'
+    mass_kg: 0.5
+- sku: SPINACH-BABY
+  name: Baby Spinach 5 oz Clamshell
+  brand: Picky Farms
+  category: produce
+  subcategory: greens
+  description: Triple-washed baby spinach.
+  tags: [spinach, salad, greens, healthy, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 349
+  unit: pack
+  size: 5 oz
+  barcode: '2000000020358'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.19, 0.13, 0.08]
+    label_color: '#43a047'
+    mass_kg: 0.15
+- sku: LEMONS
+  name: Lemon
+  brand: Sunny Grove
+  category: produce
+  subcategory: fruit
+  description: Bright, juicy lemon.
+  tags: [lemon, citrus, baking, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 69
+  unit: each
+  size: 1 medium
+  barcode: '2000000020426'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: sphere
+    dims_m: [0.07, 0.07, 0.08]
+    label_color: '#fdd835'
+    mass_kg: 0.12
+- sku: MILK-WHOLE
+  name: Whole Milk 1 gal
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: milk
+  description: Vitamin D whole milk, rBST-free.
+  tags: [milk, breakfast, kid_friendly, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 429
+  unit: each
+  size: 1 gal
+  barcode: '2000000020495'
+  perishable: true
+  shelf_life_days: 14
+  asset:
+    shape: box
+    dims_m: [0.15, 0.15, 0.27]
+    label_color: '#e3f2fd'
+    mass_kg: 3.9
+- sku: CHEESE-CHEDDAR
+  name: Sharp Cheddar Block 8 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cheese
+  description: Aged sharp cheddar.
+  tags: [cheese, cheddar, sandwich, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 399
+  unit: each
+  size: 8 oz
+  barcode: '2000000020563'
+  perishable: true
+  shelf_life_days: 60
+  asset:
+    shape: box
+    dims_m: [0.15, 0.03, 0.08]
+    label_color: '#ffb300'
+    mass_kg: 0.23
+- sku: CREAM-CHEESE
+  name: Cream Cheese 8 oz
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cheese
+  description: Original cream cheese brick.
+  tags: [cheese, breakfast, bagel, baking, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 279
+  unit: each
+  size: 8 oz
+  barcode: '2000000020631'
+  perishable: true
+  shelf_life_days: 45
+  asset:
+    shape: box
+    dims_m: [0.11, 0.04, 0.06]
+    label_color: '#90caf9'
+    mass_kg: 0.23
+- sku: HALF-HALF
+  name: Half & Half 1 pt
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: milk
+  description: Half milk, half cream. For coffee.
+  tags: [coffee, cream, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 249
+  unit: each
+  size: 1 pt
+  barcode: '2000000020709'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.07, 0.07, 0.15]
+    label_color: '#bbdefb'
+    mass_kg: 0.5
+- sku: STRING-CHEESE
+  name: Mozzarella String Cheese 12 ct
+  brand: Cascade Creamery
+  category: dairy
+  subcategory: cheese
+  description: Individually wrapped low-moisture mozzarella sticks.
+  tags: [cheese, snacking, kid_friendly, lunchbox, vegetarian]
+  dietary: [vegetarian, gluten_free]
+  allergens: [milk]
+  price_cents: 549
+  unit: pack
+  size: 12 ct
+  barcode: '2000000020778'
+  perishable: true
+  shelf_life_days: 60
+  asset:
+    shape: box
+    dims_m: [0.2, 0.05, 0.16]
+    label_color: '#fff59d'
+    mass_kg: 0.34
+- sku: CHICKEN-BREAST
+  name: Boneless Chicken Breast 1.5 lb
+  brand: Prairie Ranch
+  category: meat
+  subcategory: poultry
+  description: Air-chilled boneless, skinless chicken breasts.
+  tags: [chicken, protein, grill, high_protein]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 899
+  unit: pack
+  size: 1.5 lb
+  barcode: '2000000020846'
+  perishable: true
+  shelf_life_days: 4
+  asset:
+    shape: box
+    dims_m: [0.24, 0.05, 0.17]
+    label_color: '#ffccbc'
+    mass_kg: 0.7
+- sku: CHICKEN-THIGHS
+  name: Boneless Chicken Thighs 2 lb
+  brand: Prairie Ranch
+  category: meat
+  subcategory: poultry
+  description: Boneless, skinless thighs. Great for tinga.
+  tags: [chicken, protein, budget, grill]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 699
+  unit: pack
+  size: 2 lb
+  barcode: '2000000020914'
+  perishable: true
+  shelf_life_days: 4
+  asset:
+    shape: box
+    dims_m: [0.24, 0.05, 0.17]
+    label_color: '#ffab91'
+    mass_kg: 0.9
+- sku: BACON
+  name: Applewood Smoked Bacon 12 oz
+  brand: Prairie Ranch
+  category: meat
+  subcategory: pork
+  description: Thick-cut, applewood smoked.
+  tags: [bacon, pork, breakfast]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 649
+  unit: pack
+  size: 12 oz
+  barcode: '2000000020983'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.25, 0.02, 0.15]
+    label_color: '#d84315'
+    mass_kg: 0.34
+- sku: SALMON-FILLET
+  name: Atlantic Salmon Fillet 1 lb
+  brand: Harbor Catch
+  category: meat
+  subcategory: seafood
+  description: Skin-on salmon fillet, farm-raised.
+  tags: [salmon, fish, seafood, omega3, protein]
+  dietary: [gluten_free, dairy_free]
+  allergens: [fish]
+  price_cents: 1199
+  unit: pack
+  size: 1 lb
+  barcode: '2000000021058'
+  perishable: true
+  shelf_life_days: 3
+  asset:
+    shape: box
+    dims_m: [0.26, 0.04, 0.14]
+    label_color: '#ff8a65'
+    mass_kg: 0.45
+- sku: STEAK-FLANK
+  name: Flank Steak 1.5 lb
+  brand: Prairie Ranch
+  category: meat
+  subcategory: beef
+  description: Lean flank steak, perfect for carne asada.
+  tags: [beef, steak, grill, carne_asada, protein]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 1349
+  unit: pack
+  size: 1.5 lb
+  barcode: '2000000021126'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.28, 0.04, 0.16]
+    label_color: '#c62828'
+    mass_kg: 0.7
+- sku: HUMMUS
+  name: Classic Hummus 10 oz
+  brand: Verde Cocina
+  category: deli
+  subcategory: dips
+  description: Chickpea hummus with tahini and lemon.
+  tags: [hummus, dip, snacking, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: [sesame]
+  price_cents: 399
+  unit: each
+  size: 10 oz
+  barcode: '2000000021195'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: cylinder
+    dims_m: [0.11, 0.11, 0.06]
+    label_color: '#d7ccc8'
+    mass_kg: 0.3
+- sku: TURKEY-DELI
+  name: Oven Roasted Turkey Breast 9 oz
+  brand: Prairie Ranch
+  category: deli
+  subcategory: deli_meat
+  description: Thin-sliced turkey for sandwiches.
+  tags: [turkey, sandwich, lunchbox, protein]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 549
+  unit: pack
+  size: 9 oz
+  barcode: '2000000021263'
+  perishable: true
+  shelf_life_days: 14
+  asset:
+    shape: box
+    dims_m: [0.18, 0.04, 0.16]
+    label_color: '#efebe9'
+    mass_kg: 0.26
+- sku: TOFU-FIRM
+  name: Organic Firm Tofu 14 oz
+  brand: Lotus Garden
+  category: deli
+  subcategory: plant_protein
+  description: Water-packed organic firm tofu.
+  tags: [tofu, protein, organic, plant_based, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: [soy]
+  price_cents: 249
+  unit: each
+  size: 14 oz
+  barcode: '2000000021331'
+  perishable: true
+  shelf_life_days: 30
+  asset:
+    shape: box
+    dims_m: [0.12, 0.05, 0.1]
+    label_color: '#fafafa'
+    mass_kg: 0.4
+- sku: BAGELS
+  name: Plain Bagels 6 ct
+  brand: Harbor Bakehouse
+  category: bakery
+  subcategory: bread
+  description: New York style boiled bagels.
+  tags: [bagel, breakfast, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [wheat]
+  price_cents: 399
+  unit: pack
+  size: 6 ct
+  barcode: '2000000021409'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.22, 0.1, 0.12]
+    label_color: '#d7a86e'
+    mass_kg: 0.6
+- sku: BUNS-HAMBURGER
+  name: Hamburger Buns 8 ct
+  brand: Harbor Bakehouse
+  category: bakery
+  subcategory: bread
+  description: Soft enriched burger buns.
+  tags: [buns, grill, kid_friendly, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat]
+  price_cents: 299
+  unit: pack
+  size: 8 ct
+  barcode: '2000000021478'
+  perishable: true
+  shelf_life_days: 10
+  asset:
+    shape: box
+    dims_m: [0.24, 0.12, 0.1]
+    label_color: '#ffcc80'
+    mass_kg: 0.45
+- sku: MUFFINS-BLUEBERRY
+  name: Blueberry Muffins 4 ct
+  brand: Harbor Bakehouse
+  category: bakery
+  subcategory: pastry
+  description: Bakery-fresh blueberry muffins.
+  tags: [muffin, breakfast, sweet, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 499
+  unit: pack
+  size: 4 ct
+  barcode: '2000000021546'
+  perishable: true
+  shelf_life_days: 5
+  asset:
+    shape: box
+    dims_m: [0.2, 0.2, 0.1]
+    label_color: '#7986cb'
+    mass_kg: 0.45
+- sku: FLOUR-AP
+  name: All-Purpose Flour 5 lb
+  brand: Morning Mill
+  category: pantry
+  subcategory: baking
+  description: Unbleached all-purpose flour.
+  tags: [baking, flour, staple, vegetarian, vegan]
+  dietary: [vegetarian, vegan]
+  allergens: [wheat]
+  price_cents: 349
+  unit: bag
+  size: 5 lb
+  barcode: '2000000021614'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.17, 0.09, 0.28]
+    label_color: '#f5f5f5'
+    mass_kg: 2.3
+- sku: SUGAR
+  name: Granulated Sugar 4 lb
+  brand: Morning Mill
+  category: pantry
+  subcategory: baking
+  description: Pure cane granulated sugar.
+  tags: [baking, sugar, staple, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 379
+  unit: bag
+  size: 4 lb
+  barcode: '2000000021683'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: box
+    dims_m: [0.15, 0.08, 0.24]
+    label_color: '#e0f7fa'
+    mass_kg: 1.8
+- sku: TOMATOES-DICED
+  name: Diced Tomatoes 14.5 oz
+  brand: Nonna Bella
+  category: pantry
+  subcategory: canned
+  description: Diced tomatoes in juice.
+  tags: [tomato, canned, budget, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 129
+  unit: each
+  size: 14.5 oz
+  barcode: '2000000021751'
+  perishable: false
+  shelf_life_days: 540
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.11]
+    label_color: '#d32f2f'
+    mass_kg: 0.45
+- sku: BROTH-CHICKEN
+  name: Chicken Broth 32 oz
+  brand: Puget Pantry
+  category: pantry
+  subcategory: soup
+  description: Low-sodium chicken broth carton.
+  tags: [broth, soup, cooking]
+  dietary: [gluten_free, dairy_free]
+  allergens: []
+  price_cents: 279
+  unit: each
+  size: 32 oz
+  barcode: '2000000021829'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.1, 0.065, 0.19]
+    label_color: '#ffe082'
+    mass_kg: 1.0
+- sku: TUNA
+  name: Chunk Light Tuna in Water 5 oz
+  brand: Harbor Catch
+  category: pantry
+  subcategory: canned
+  description: Dolphin-safe chunk light tuna.
+  tags: [tuna, fish, protein, budget, lunchbox]
+  dietary: [gluten_free, dairy_free]
+  allergens: [fish]
+  price_cents: 149
+  unit: each
+  size: 5 oz
+  barcode: '2000000021898'
+  perishable: false
+  shelf_life_days: 1095
+  asset:
+    shape: cylinder
+    dims_m: [0.085, 0.085, 0.04]
+    label_color: '#1565c0'
+    mass_kg: 0.17
+- sku: MAC-CHEESE
+  name: Macaroni & Cheese 7.25 oz
+  brand: Puget Pantry
+  category: pantry
+  subcategory: pasta
+  description: Classic boxed mac and cheese.
+  tags: [pasta, cheese, kid_friendly, budget, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat, milk]
+  price_cents: 129
+  unit: each
+  size: 7.25 oz
+  barcode: '2000000021966'
+  perishable: false
+  shelf_life_days: 540
+  asset:
+    shape: box
+    dims_m: [0.15, 0.04, 0.19]
+    label_color: '#ffa000'
+    mass_kg: 0.21
+- sku: HONEY
+  name: Wildflower Honey 12 oz
+  brand: Sunny Coop
+  category: pantry
+  subcategory: spreads
+  description: Raw Pacific Northwest wildflower honey.
+  tags: [honey, breakfast, sweet, vegetarian]
+  dietary: [vegetarian, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 599
+  unit: each
+  size: 12 oz
+  barcode: '2000000022031'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: cylinder
+    dims_m: [0.07, 0.07, 0.14]
+    label_color: '#ffb300'
+    mass_kg: 0.4
+- sku: MASA-HARINA
+  name: Masa Harina Corn Flour 4.4 lb
+  brand: La Milpa
+  category: international
+  subcategory: mexican
+  description: Instant corn masa flour for tortillas and tamales.
+  tags: [masa, corn, baking, vegetarian, vegan, gluten_free]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: []
+  price_cents: 449
+  unit: bag
+  size: 4.4 lb
+  barcode: '2000000022109'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.16, 0.09, 0.27]
+    label_color: '#fff176'
+    mass_kg: 2.0
+- sku: SOY-SAUCE
+  name: Naturally Brewed Soy Sauce 15 oz
+  brand: Lotus Garden
+  category: international
+  subcategory: asian
+  description: Traditionally brewed soy sauce.
+  tags: [asian, sauce, umami, vegetarian, vegan]
+  dietary: [vegetarian, vegan, dairy_free]
+  allergens: [soy, wheat]
+  price_cents: 329
+  unit: each
+  size: 15 oz
+  barcode: '2000000022178'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: cylinder
+    dims_m: [0.07, 0.07, 0.2]
+    label_color: '#4e342e'
+    mass_kg: 0.5
+- sku: RAMEN
+  name: Shoyu Ramen Noodles 5 pk
+  brand: Lotus Garden
+  category: international
+  subcategory: asian
+  description: Instant wavy noodles with soy-sauce broth packets.
+  tags: [asian, noodles, quick_meal, budget]
+  dietary: [dairy_free]
+  allergens: [wheat, soy]
+  price_cents: 449
+  unit: pack
+  size: 5 x 3 oz
+  barcode: '2000000022246'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.2, 0.1, 0.16]
+    label_color: '#c62828'
+    mass_kg: 0.45
+- sku: COCONUT-MILK
+  name: Coconut Milk 13.5 oz
+  brand: Lotus Garden
+  category: international
+  subcategory: asian
+  description: Full-fat coconut milk for curries.
+  tags: [asian, curry, coconut, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: [coconut]
+  price_cents: 249
+  unit: each
+  size: 13.5 oz
+  barcode: '2000000022314'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.115]
+    label_color: '#eceff1'
+    mass_kg: 0.45
+- sku: PRETZELS
+  name: Mini Twist Pretzels 16 oz
+  brand: Crunch Co
+  category: snacks
+  subcategory: pretzels
+  description: Classic salted mini pretzel twists.
+  tags: [pretzels, salty, party, vegetarian, vegan]
+  dietary: [vegetarian, vegan, dairy_free]
+  allergens: [wheat]
+  price_cents: 399
+  unit: bag
+  size: 16 oz
+  barcode: '2000000022383'
+  perishable: false
+  shelf_life_days: 180
+  asset:
+    shape: box
+    dims_m: [0.24, 0.07, 0.3]
+    label_color: '#8d6e63'
+    mass_kg: 0.45
+- sku: CRACKERS
+  name: Woven Wheat Crackers 9 oz
+  brand: Crunch Co
+  category: snacks
+  subcategory: crackers
+  description: Whole grain woven wheat crackers.
+  tags: [crackers, whole_grain, snacking, vegetarian, vegan]
+  dietary: [vegetarian, vegan, dairy_free]
+  allergens: [wheat]
+  price_cents: 379
+  unit: box
+  size: 9 oz
+  barcode: '2000000022451'
+  perishable: false
+  shelf_life_days: 240
+  asset:
+    shape: box
+    dims_m: [0.19, 0.06, 0.24]
+    label_color: '#bf8f00'
+    mass_kg: 0.26
+- sku: COOKIES-CHOC-CHIP
+  name: Chocolate Chip Cookies 13 oz
+  brand: Cacao Coast
+  category: snacks
+  subcategory: cookies
+  description: Crunchy chocolate chip cookies.
+  tags: [cookies, sweet, kid_friendly, vegetarian]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, soy]
+  price_cents: 449
+  unit: pack
+  size: 13 oz
+  barcode: '2000000022529'
+  perishable: false
+  shelf_life_days: 240
+  asset:
+    shape: box
+    dims_m: [0.2, 0.06, 0.2]
+    label_color: '#5d4037'
+    mass_kg: 0.37
+- sku: GRANOLA-BARS
+  name: Oat & Honey Granola Bars 12 ct
+  brand: Morning Mill
+  category: snacks
+  subcategory: bars
+  description: Crunchy oat and honey bars, 2 per pouch.
+  tags: [granola, bars, lunchbox, kid_friendly, vegetarian]
+  dietary: [vegetarian, dairy_free]
+  allergens: [wheat]
+  price_cents: 499
+  unit: box
+  size: 12 ct
+  barcode: '2000000022598'
+  perishable: false
+  shelf_life_days: 300
+  asset:
+    shape: box
+    dims_m: [0.2, 0.06, 0.18]
+    label_color: '#ffca28'
+    mass_kg: 0.5
+- sku: WATER-24PK
+  name: Spring Water 24 pk
+  brand: Cascade Springs
+  category: beverages
+  subcategory: water
+  description: Natural spring water bottles.
+  tags: [water, hydration, party, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 499
+  unit: pack
+  size: 24 x 16.9 fl oz
+  barcode: '2000000022666'
+  perishable: false
+  shelf_life_days: 730
+  asset:
+    shape: box
+    dims_m: [0.4, 0.27, 0.21]
+    label_color: '#4fc3f7'
+    mass_kg: 9.0
+- sku: SPORTS-DRINK
+  name: Lemon-Lime Sports Drink 28 oz
+  brand: Fizz Peak
+  category: beverages
+  subcategory: sports
+  description: Electrolyte sports drink.
+  tags: [sports, electrolytes, hydration]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 179
+  unit: each
+  size: 28 fl oz
+  barcode: '2000000022734'
+  perishable: false
+  shelf_life_days: 270
+  asset:
+    shape: cylinder
+    dims_m: [0.08, 0.08, 0.25]
+    label_color: '#c0ca33'
+    mass_kg: 0.85
+- sku: APPLE-JUICE
+  name: 100% Apple Juice 64 oz
+  brand: Sunny Grove
+  category: beverages
+  subcategory: juice
+  description: Shelf-stable apple juice, no sugar added.
+  tags: [juice, kid_friendly, breakfast, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 349
+  unit: each
+  size: 64 fl oz
+  barcode: '2000000022802'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.11, 0.11, 0.27]
+    label_color: '#ffb74d'
+    mass_kg: 2.0
+- sku: PIZZA-FROZEN
+  name: Pepperoni Pizza 12 inch
+  brand: Polar Kitchen
+  category: frozen
+  subcategory: meals
+  description: Thin-crust frozen pepperoni pizza.
+  tags: [pizza, quick_meal, kid_friendly]
+  dietary: []
+  allergens: [wheat, milk]
+  price_cents: 749
+  unit: each
+  size: 12 inch
+  barcode: '2000000022871'
+  perishable: false
+  shelf_life_days: 270
+  asset:
+    shape: box
+    dims_m: [0.3, 0.05, 0.3]
+    label_color: '#e64a19'
+    mass_kg: 0.6
+- sku: PEAS-FROZEN
+  name: Sweet Peas 12 oz
+  brand: Polar Kitchen
+  category: frozen
+  subcategory: frozen_vegetables
+  description: Steam-in-bag sweet peas.
+  tags: [peas, healthy, budget, vegetarian, vegan]
+  dietary: [vegetarian, vegan, gluten_free, dairy_free]
+  allergens: []
+  price_cents: 199
+  unit: bag
+  size: 12 oz
+  barcode: '2000000022949'
+  perishable: false
+  shelf_life_days: 365
+  asset:
+    shape: box
+    dims_m: [0.16, 0.04, 0.22]
+    label_color: '#7cb342'
+    mass_kg: 0.34
+- sku: SHRIMP-FROZEN
+  name: Raw Shrimp 1 lb (31-40 ct)
+  brand: Harbor Catch
+  category: frozen
+  subcategory: frozen_seafood
+  description: Peeled, deveined, tail-on raw shrimp.
+  tags: [shrimp, seafood, protein, quick_meal]
+  dietary: [gluten_free, dairy_free]
+  allergens: [shellfish]
+  price_cents: 999
+  unit: bag
+  size: 1 lb
+  barcode: '2000000023014'
+  perishable: false
+  shelf_life_days: 270
+  asset:
+    shape: box
+    dims_m: [0.2, 0.05, 0.26]
+    label_color: '#ff7043'
+    mass_kg: 0.5
+- sku: LAUNDRY-DETERGENT
+  name: Laundry Detergent 92 oz
+  brand: HomeBase
+  category: household
+  subcategory: laundry
+  description: Free & clear liquid detergent, 64 loads.
+  tags: [laundry, cleaning, free_clear]
+  dietary: []
+  allergens: []
+  price_cents: 1299
+  unit: each
+  size: 92 fl oz
+  barcode: '2000000023083'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.18, 0.11, 0.28]
+    label_color: '#1e88e5'
+    mass_kg: 3.0
+- sku: ALUMINUM-FOIL
+  name: Aluminum Foil 75 sq ft
+  brand: HomeBase
+  category: household
+  subcategory: kitchen
+  description: Standard-duty aluminum foil roll.
+  tags: [foil, kitchen, grill]
+  dietary: []
+  allergens: []
+  price_cents: 499
+  unit: each
+  size: 75 sq ft
+  barcode: '2000000023151'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.32, 0.05, 0.05]
+    label_color: '#b0bec5'
+    mass_kg: 0.4
+- sku: TOILET-PAPER
+  name: Toilet Paper 12 Double Rolls
+  brand: HomeBase
+  category: household
+  subcategory: paper
+  description: Soft 2-ply bath tissue.
+  tags: [paper, bathroom, bulk]
+  dietary: []
+  allergens: []
+  price_cents: 1199
+  unit: pack
+  size: 12 rolls
+  barcode: '2000000023229'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.3, 0.2, 0.3]
+    label_color: '#e1f5fe'
+    mass_kg: 1.4
+- sku: TOOTHPASTE
+  name: Fresh Mint Toothpaste 4.8 oz
+  brand: Fern & Fog
+  category: personal_care
+  subcategory: oral_care
+  description: Fluoride toothpaste, fresh mint.
+  tags: [toothpaste, oral_care, mint]
+  dietary: []
+  allergens: []
+  price_cents: 399
+  unit: each
+  size: 4.8 oz
+  barcode: '2000000023298'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.2, 0.04, 0.05]
+    label_color: '#26a69a'
+    mass_kg: 0.15
+- sku: SHAMPOO
+  name: Daily Shampoo 12 oz
+  brand: Fern & Fog
+  category: personal_care
+  subcategory: hair_care
+  description: Gentle daily shampoo with rosemary.
+  tags: [shampoo, hair_care]
+  dietary: []
+  allergens: []
+  price_cents: 699
+  unit: each
+  size: 12 fl oz
+  barcode: '2000000023366'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.07, 0.07, 0.2]
+    label_color: '#66bb6a'
+    mass_kg: 0.4
+- sku: BODY-WASH
+  name: Cedar & Sea Salt Body Wash 18 oz
+  brand: Fern & Fog
+  category: personal_care
+  subcategory: bath_body
+  description: Moisturizing body wash.
+  tags: [body_wash, bath]
+  dietary: []
+  allergens: []
+  price_cents: 649
+  unit: each
+  size: 18 fl oz
+  barcode: '2000000023434'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.05, 0.22]
+    label_color: '#5c6bc0'
+    mass_kg: 0.55
+- sku: DEODORANT
+  name: Aluminum-Free Deodorant 2.6 oz
+  brand: Fern & Fog
+  category: personal_care
+  subcategory: bath_body
+  description: Aluminum-free deodorant stick.
+  tags: [deodorant]
+  dietary: []
+  allergens: []
+  price_cents: 599
+  unit: each
+  size: 2.6 oz
+  barcode: '2000000023502'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.06, 0.04, 0.13]
+    label_color: '#8d6e63'
+    mass_kg: 0.1
+- sku: WINE-RED
+  name: Columbia Valley Red Blend 750 ml
+  brand: Bench Cellars
+  category: alcohol
+  subcategory: wine
+  description: 'Washington red blend: dark cherry, soft tannins.'
+  tags: [wine, red_wine, 21_plus]
+  dietary: [vegetarian, vegan, gluten_free]
+  allergens: [sulfites]
+  price_cents: 1299
+  unit: each
+  size: 750 ml
+  barcode: '2000000023571'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.075, 0.075, 0.3]
+    label_color: '#6a1b4d'
+    mass_kg: 1.3
 - sku: MOLCAJETE
   name: Volcanic Stone Molcajete
   brand: Casa Verde

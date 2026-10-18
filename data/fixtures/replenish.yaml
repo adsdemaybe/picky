@@ -1,0 +1,30 @@
+# Picky demo data (DubHacks 2026): purchase history for the judges' demo "replenish" suggestion cards
+# (GET /api/users/{user_id}/suggestions, arms/recommender/replenish.py). Fictional users (CLAUDE.md section 8).
+#
+# Dates are RELATIVE to "now" (days_ago, oldest first), so a card always reads "You bought this 12 days ago - you
+# usually buy it every 10 days" no matter when the gateway started. cadence = mean gap between the purchases;
+# overdue = days since the last purchase - cadence; cards are sorted most overdue first. Every SKU is a real sim item
+# stocked in store_ave (data/planograms/store_ave.yaml; per-item model in data/sim/sku_assets.yaml). Purchases recorded
+# at runtime (a paid trip -> recommender.record_purchase) are added on top, so a bought item drops off the list.
+schema_version: 1
+users:
+  maya:
+    store_id: store_ave
+    due_window_days: 3          # also show items due within this many days ("you'll likely need it in 3 days")
+    purchases:
+      SALSA-MILD: {days_ago: [32, 22, 12], qty: 1}        # every 10 days, last 12 days ago -> 2 days overdue
+      TORT-CORN: {days_ago: [34, 23, 12], qty: 1}         # every 11 days -> 1 day overdue
+      LIMES: {days_ago: [22, 15, 8], qty: 4}              # every 7 days -> 1 day overdue
+      OAT-MILK: {days_ago: [25, 17, 9], qty: 1}           # every 8 days -> 1 day overdue
+      BEANS-BLACK: {days_ago: [46, 31, 16], qty: 2}       # every 15 days -> 1 day overdue
+      AVOCADO: {days_ago: [18, 12, 6], qty: 3}            # every 6 days -> due today
+      COFFEE: {days_ago: [60, 39, 18], qty: 1}            # every 21 days -> due in 3 days
+      HOTSAUCE-RED: {days_ago: [80, 50, 20], qty: 1}      # every 30 days -> not due yet (hidden)
+  sam:
+    store_id: store_ave
+    due_window_days: 3
+    purchases:
+      COFFEE: {days_ago: [44, 23, 2], qty: 1}
+      BANANAS: {days_ago: [15, 10, 5], qty: 1}
+      YOGURT-GREEK: {days_ago: [20, 13, 7], qty: 1}
+      GRANOLA: {days_ago: [30, 16, 2], qty: 1}

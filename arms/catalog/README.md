@@ -2,9 +2,12 @@
 
 **Purpose.** One catalog over every store: the physical stores (planograms), plus the mock `online` store. It answers
 "where is it, how many are left, what does it cost, what's on deal or about to expire". It also takes in robot scans
-and picks, and serves the merchant dashboard. Pipeline: `agent.source_list` / `recommender` → **catalog.search /
-get_offers** → split sourcing; robot scan → perception → **catalog.apply_scan**; `item.picked` → **catalog.record_pick**.
-It is a leaf: it calls no other service.
+and picks, serves the merchant dashboard, the **categories API** and **stock management** (levels, low/out alerts,
+restock, adjustments, movement history). Pipeline: `agent.source_list` / `recommender` / fleet store choice →
+**catalog.search / get_offers** → split sourcing; robot brain scan → perception → **catalog.apply_scan**; brain
+`place_in_basket` → **catalog.record_pick**; staff web view → **restock / adjust_stock** → `robot.sync_stock`.
+It publishes `stock.updated` / `stock.alert` and calls only `services.events` and `services.robot.sync_stock`
+(both optional, best-effort).
 
 Owner: TBD · Branch: `arm/catalog` · Contract: [`contracts/services.py::CatalogService`](../../contracts/services.py),
 models in [`contracts/catalog.py`](../../contracts/catalog.py) and [`contracts/planogram.py`](../../contracts/planogram.py)
@@ -14,11 +17,15 @@ models in [`contracts/catalog.py`](../../contracts/catalog.py) and [`contracts/p
 - [x] P0 Planogram files are the single source of truth. `data/` is loaded through `utils.data`; the seed is generated from it (`seed.py`)
 - [x] P0 Store API: search, location, stock/price/deals, near-expiry (fake)
 - [x] P0 Multi-store catalog: `store_ave`, `store_hill` and `online` are queried as one; split sourcing works off `SearchHit.offers` (fake)
-- [x] P0 Apply scan updates: stock (`count_is_exact` rule), per-lot freshness, mispricing, misplaced SKUs, slot-less scans located by pose (fake)
-- [x] P0 `record_pick` decrements stock (FIFO by lot expiry) and feeds the heatmap
+- [x] P0 Apply scan updates: stock (`count_is_exact` rule, per-lot `lot_counts`), per-lot freshness, mispricing, misplaced SKUs, slot-less scans located by pose; records a 'scan' movement (fake)
+- [x] P0 `record_pick(store, slot, sku, qty, trip_id, robot_id, lot_id)` decrements the picked lot (else FIFO), records a 'pick' movement, feeds the heatmap (fake)
 - [x] P1 Merchant dashboard: OOS, mispricing, near-expiry, heatmap (scans/picks/OOS events), KPIs (fake)
-- [ ] P0 Real (Postgres) impl: `search`, `get_offers`, `apply_scan` (service.py TODO 1–3)
-- [ ] P1 Real `merchant_dashboard` + persisted pick counts (TODO 4–5; needs a `contracts/db` PR for a picks column/table)
+- [x] P0 Categories API: `list_categories` (taxonomy from `data/categories.yaml` merged with what products use; product / in-stock / low / out counts + aisle labels per store, all physical stores, or online), `category_products` (category OR subcategory) (fake)
+- [x] P0 Stock management: `stock_levels` (status/category/q filters, worst first), `stock_alerts` (active low/out, raised at boot for SKUs that start low/out), `restock` (fill or qty, new lot, rejects over capacity), `adjust_stock` (delta / set_qty rules), `stock_history` (sku / before / reason / actor-prefix filters) (fake)
+- [x] P0 Events: `stock.updated` (one per movement) + `stock.alert` (raise / low↔out / clear) with envelope `store_id` (+ `robot_id` for robot-caused changes); best-effort `robot.sync_stock` after restock / adjust (fake)
+- [x] P0 Real (Postgres) impl: `search`, `get_offers`, `apply_scan` (per-call database snapshots run the fake's rules; parity test `tests/test_catalog_db.py`). Ran in the vhagar loop test (2026-10-18, user-space Postgres 16 :5433)
+- [x] P1 Real `category_products`, `restock`, `adjust_stock`; `stock_levels` / `stock_alerts` / `stock_history` / `list_categories` / `record_pick` run against a live DB (parity test)
+- [x] P1 Real `merchant_dashboard` (scans table + pick movements = the persisted pick counts)
 - [ ] P1 pgvector product embeddings (`EMBED_DIM=384`) blended into search
 - [ ] P2 Open Food Facts enrichment (DuckDB over the parquet dump, never the live API)
 
@@ -27,10 +34,10 @@ models in [`contracts/catalog.py`](../../contracts/catalog.py) and [`contracts/p
 | | |
 |---|---|
 | Implements | `CatalogService` (runtime-checkable; `isinstance` is checked in the tests) |
-| In | `data/` → `ProductsFile`, `Planogram`, `OnlineCatalog`; `SearchQuery`; `ScanReport` (`count_is_exact`, `lot_freshness`, `shelf_tag_cents`, `pose`, `detections[].lot_id`); `record_pick(store, slot, sku, qty, trip_id)` |
-| Out | `StoreInfo` (online carries `shipping_cents` / `free_shipping_over_cents` / `default_eta_hours`), live `Planogram`, `SearchHit` / `StoreOffer` / `ProductLocation`, `Deal`, `NearExpiryItem`, `ScanApplyResult`, `MerchantDashboard` |
-| Events | none (the gateway publishes `scan.result`, `item.picked`, …) |
-| Calls | nothing (leaf) |
+| In | `data/` → `ProductsFile`, `Planogram`, `OnlineCatalog`, `CategoriesFile`; `SearchQuery`; `ScanReport` (`count_is_exact`, `lot_counts`, `lot_freshness`, `shelf_tag_cents`, `pose`, `robot_id`, `detections[].lot_id`); `record_pick(store, slot, sku, qty, trip_id, robot_id, lot_id)`; `RestockRequest`; `StockAdjustment` |
+| Out | `StoreInfo`, live `Planogram`, `SearchHit` / `StoreOffer` / `ProductLocation`, `Deal`, `NearExpiryItem`, `ScanApplyResult`, `MerchantDashboard`, `CategoryInfo`, `StockLevel`, `StockAlert`, `StockMovement`, `StockChangeResult` |
+| Events | `stock.updated` (`level`, `movement`), `stock.alert` (`alert`; `active=False` = cleared). Envelope: `store_id`, `robot_id` when the actor is `robot:<id>`, `trip_id` None (store-level), `source="catalog"` |
+| Calls | `services.events.publish` and `services.robot.sync_stock(store_id, slot_ids)` after restock / adjust — both optional; failures are logged, never raised. Scans and picks never sync (they come from the sim) |
 
 Semantics other arms rely on:
 - **Deal ids:** a slot deal is `f"{store_id}:{slot_id}"` and an online deal is `f"online:{sku}"`. A lot deal (`near_expiry`) is
@@ -40,9 +47,23 @@ Semantics other arms rely on:
 - **Search:** token scoring (name 3, tag/dietary 2, category 1.5, brand 1, description 0.5, prefix 0.75, plus a phrase
   bonus) with naive plural stemming. `tags`/`dietary`/`category` are AND filters. A product with no offer in the
   requested stores is dropped. Sort order: score, then in-stock, then cheapest, then sku.
+- **Stock rules** are the ones in `contracts/catalog.py` (status, thresholds, lots, scans, restock, adjust). Arm-specific
+  choices: movement ids `mv_000001…` (fake; `new_id("mv")` real), minted restock lots `"<slot_id>-R<n>"`, a perishable
+  restock without `expiry` gets `today + shelf_life_days`, a lot-less slot stays lot-less unless a lot id / expiry is
+  given (its existing units then become `"<slot_id>-base"`). A change that moves no units records no movement and
+  publishes nothing (e.g. a pick from a slot already recorded as empty, a `set_qty` equal to the current qty, a
+  fill-restock of a full SKU). Alert lifecycle (`arms/catalog/stock.py::next_alert`): raise on low/out, update silently
+  while the status holds, re-raise (published) on low↔out, clear (published, `active=False`) when back to ok.
+- **Categories:** flat list, each top-level category (by `sort`, id) followed by its subcategories (by `sort`, name).
+  `product_count` = products carried in scope (a slot in that store / any physical store / an online item);
+  `in_stock_count` = qty > 0; low/out via `stock_status` on the scope totals. A missing `data/categories.yaml` is
+  tolerated (taxonomy derived from products; display names from `taxonomy.DISPLAY_NAMES`).
 - **Errors:** `get_planogram` / `get_deals` / `get_near_expiry` / `merchant_dashboard` raise `KeyError` for an unknown store
-  (`get_planogram` and `merchant_dashboard` also raise it for `online`). `apply_scan` / `record_pick` never raise: they
-  return `applied=False` with `notes`.
+  (`get_planogram` and `merchant_dashboard` also raise it for `online`). Stock methods raise `KeyError` (→ 404) for an
+  unknown / online store, a SKU not stocked there or a `slot_id` that doesn't hold the SKU, and `ValueError` (→ 409)
+  for over-capacity / below-zero / ambiguous `set_qty`, with nothing applied. `list_categories` accepts `online`;
+  `category_products` raises `KeyError` for an unknown category. `apply_scan` / `record_pick` never raise: they return
+  `applied=False` with `notes`.
 
 ## Stack
 
@@ -59,18 +80,30 @@ Semantics other arms rely on:
 | File | What |
 |---|---|
 | `__init__.py` | `create(services)` → `PostgresCatalogService`; `create_fake(services, data_root=, today=, now=)` → `FakeCatalogService` |
-| `fake.py` | Complete in-memory catalog over `utils.data` (lazy load, `reset()` reloads). Base deps only |
-| `service.py` | Postgres impl: list_stores, get_planogram (live overlay), get_product, get_locations, get_deals, get_near_expiry and record_pick are real. TODO 1–6 for the rest |
-| `seed.py` | `python -m arms.catalog.seed [--out f] [--schema] [--apply] [--no-users] [--data-dir d]` renders INSERT SQL for the catalog and demo-user tables |
-| `tests/` | `test_catalog_fake.py` (conformance + the taco scenario), `test_catalog_seed.py`. `tests/data/` is a tiny contract-valid fixture with the same schema as `data/` |
+| `fake.py` | Complete in-memory catalog over `utils.data` (lazy load, `reset()` reloads), incl. categories + stock management + events. Base deps only |
+| `stock.py` | Pure stock helpers shared by fake + real: alert lifecycle (`next_alert`), messages, ordering, actor matching, history filter |
+| `taxonomy.py` | Pure taxonomy helpers: load / merge `categories.yaml` with product categories, display names, `category_matches`, natural aisle sort |
+| `service.py` | Postgres impl of every method: SQL reads (locations, stores, products, deals, near-expiry, stock levels / alerts / history, categories), `record_pick` in SQL, and per-call database snapshots (`_snapshot`) that run the fake's pricing / ranking / stock rules for search, offers, planogram, category products, dashboard, scans, restock and adjustments |
+| `seed.py` | `python -m arms.catalog.seed [--out f] [--schema] [--apply] [--no-users] [--data-dir d]` renders INSERT SQL for the catalog (incl. `categories`, slot `low_threshold`, initial `stock_alerts`) and demo-user tables |
+| `tests/` | `test_catalog_fake.py` (conformance + the taco scenario), `test_catalog_stock.py` (categories + stock management + events + sim sync), `test_catalog_seed.py`. `tests/data/` is a tiny contract-valid fixture with the same schema as `data/` (incl. `categories.yaml`) |
 
 ## How to run
 
 **Run it real** (prerequisites, else the gateway boots the fake and `/health` says why):
 `uv sync --extra catalog && make db-up && make seed`, then `PICKY_REAL_ARMS=catalog make demo`. Note `make setup`
 (`uv sync --locked`) removes extras, so re-run `uv sync --extra catalog` after it. `create()` refuses to build without
-sqlalchemy; `search` / `get_offers` / `apply_scan` are still TODO in `service.py`, so the real trip fails until they land
-(`make demo ARGS=--allow-errors` shows how far it gets).
+sqlalchemy. Where every answer comes from: `service.py`'s docstring (slots / inventory / lots / deals rows, read per call).
+
+**No Docker (vhagar, laptops):** the pip `pgserver` package ships Postgres 16 + pgvector binaries that run as a normal
+user:
+```bash
+uv venv /tmp/pg && uv pip install --python /tmp/pg/bin/python pgserver
+B=$(/tmp/pg/bin/python -c 'import pgserver,os;print(os.path.dirname(pgserver.__file__))')/pginstall/bin
+$B/initdb -D ~/pgdata -U picky --auth=trust && $B/postgres -D ~/pgdata -p 5433 -c listen_addresses=localhost -k ''
+$B/createdb -h localhost -p 5433 -U picky picky
+export DATABASE_URL=postgresql+psycopg://picky@localhost:5433/picky && uv run python -m arms.catalog.seed --schema --apply
+PICKY_TEST_DATABASE_URL=$DATABASE_URL uv run pytest arms/catalog      # + the real-vs-fake parity test (re-seeds!)
+```
 
 ```bash
 uv run pytest arms/catalog                                   # base deps only
@@ -86,13 +119,13 @@ Fake: `create_fake(Services())` (gateway default). Pass `data_root=` / `today=` 
 
 ## Demo-ready checklist (CLAUDE.md §6)
 
-- [ ] `CatalogService` fully implemented in `service.py`, with no `NotImplementedError` on demo paths (search, offers, apply_scan, dashboard)
+- [x] `CatalogService` fully implemented in `service.py`, with no `NotImplementedError` on demo paths (search, offers, apply_scan, dashboard)
 - [ ] `PICKY_REAL_ARMS=catalog make demo` completes the taco trip: black beans OOS at `store_ave` → online; guac-kit near-expiry deal; hot-sauce deal
 - [ ] Produce scans update lot freshness, and the dashboard shows the OOS item, the mispricing and the heatmap after the trip
 - [ ] DB down → logged, and the gateway can fall back to the fake by env flag alone (unset `PICKY_REAL_ARMS`)
 - [x] Fake + seed tests green with base deps
-- [ ] Real-data smoke test (`test_real_data_demo_store_smoke`) passes once `data/` lands; `uv run python -m utils.data` clean
-- [ ] README updated: what works, limitations, how to run
+- [x] Real-data smoke tests (`test_real_data_demo_store_smoke`, `test_real_data_stock_and_categories_smoke`) pass on the current `data/` (fake)
+- [x] README updated: what works, limitations, how to run
 
 ## Contributing to this arm
 
@@ -106,9 +139,16 @@ messages look like `catalog: <imperative>`.
 
 ## Known limitations
 
+- `StockAlert.status` is only `low` / `out` (contract): near-expiry and mispricing are not stock alerts; they are in
+  `merchant_dashboard` (`near_expiry`, `mispricings`) and `get_near_expiry`.
+- Stock events carry `trip_id=None` even for picks during a shop trip (envelope rule for store-level events); the
+  trip id is in `movement.ref_id`.
+- Real writes are serialized per gateway process (one asyncio lock); two gateways on one database could interleave a
+  snapshot write. Fine for the demo (one gateway).
+
 - The fake's state is per process and in memory. A gateway restart reloads `data/`, and scans and picks are lost.
 - Search is lexical (no synonyms or embeddings yet), so "chips" does not find "tortilla crisps". Name the products to match.
 - Heatmap cells are 0.5 m squares around each slot's `item_position` (one per slot; levels overlap).
-- Lot attribution on picks is FIFO by expiry, not the exact instance picked.
+- Lot attribution on picks uses `record_pick(lot_id=...)` when the brain passes the unit's lot, else FIFO by expiry.
 - The seed TRUNCATEs with CASCADE, which also wipes trips/cart rows that reference users (fine for the demo; no migrations).
 - The real impl doesn't track pick counts: the schema has no column for them yet.

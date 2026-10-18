@@ -21,6 +21,7 @@ from contracts.common import (
     ApprovalId,
     Cents,
     Channel,
+    GoalId,
     JsonScalar,
     LineId,
     MandateId,
@@ -28,6 +29,7 @@ from contracts.common import (
     OrderId,
     ReceiptId,
     RecId,
+    RobotId,
     Score01,
     Sku,
     StoreId,
@@ -222,6 +224,11 @@ class ApprovalKind(StrEnum):
     ONLINE_ORDER = "online_order"
     CHECKOUT = "checkout"
     PICK_CHOICE = "pick_choice"
+    QUESTION = "question"
+    """Free-form question from a robot brain (ask_user tool): yes/no or ``options``."""
+    VERIFY_ITEM = "verify_item"
+    """0.2.4: 'Is this the right item?' with the robot's photo of the unit in its gripper (``payload.photo_url``);
+    options 'correct' / 'wrong'. Times out to auto-accept (``ItemVerification.status='auto_accepted'``)."""
 
 
 class ApprovalOption(Model):
@@ -233,8 +240,15 @@ class ApprovalOption(Model):
 
 class ApprovalRequest(Model):
     approval_id: ApprovalId
-    trip_id: TripId
-    user_id: UserId
+    trip_id: TripId | None = Field(
+        None, description="Always set for shopper trips; None only for robot-brain questions on goals without a trip."
+    )
+    goal_id: GoalId | None = Field(None, description="Goal of the robot brain that asks (ask_user tool).")
+    robot_id: RobotId | None = Field(None, description="Robot that asks (shown as 'Pico asks: ...').")
+    store_id: StoreId | None = Field(None, description="Store it concerns (staff view filter /api/approvals?store_id).")
+    user_id: UserId = Field(
+        description="Who must answer. Goals without a user (manual staff goals) ask common.STAFF_USER_ID ('staff')."
+    )
     kind: ApprovalKind
     title: str = Field(description="Short question: 'Add pepper-jack? 30% off'.")
     body: str = ""
@@ -322,6 +336,82 @@ class Receipt(Model):
     error: str | None = None
     signature: str | None = None
     created_at: Timestamp = Field(default_factory=utcnow)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# 0.2.4: per-item photo verification + the Visa payment agent timeline
+# --------------------------------------------------------------------------------------------------------------------
+ItemVerificationStatus = Literal["pending", "accepted", "rejected", "auto_accepted", "cancelled"]
+VERIFY_CORRECT = "correct"
+VERIFY_WRONG = "wrong"
+
+
+class ItemVerification(Model):
+    """A photo of the unit the robot just picked, sent to the shopper (event ``item.verification``; REST
+    ``GET /api/verifications``, ``POST /api/verifications/{id}``). Backed by an ``ApprovalRequest`` of kind
+    ``verify_item`` with the same id. ``wrong`` -> the robot puts the unit back and picks another (then skips the item
+    after ``max_rejections``); no answer within ``auto_accept_s`` -> ``auto_accepted`` (labelled as such)."""
+
+    verification_id: ApprovalId = Field(description="= the ApprovalRequest.approval_id.")
+    trip_id: TripId | None = None
+    goal_id: GoalId | None = None
+    robot_id: RobotId | None = None
+    store_id: StoreId | None = None
+    user_id: UserId
+    sku: Sku
+    name: str | None = None
+    item_id: str | None = None
+    unit: int | None = None
+    question: str = Field(description="'Is this the right Mild Chunky Salsa 16 oz?'.")
+    photo_url: str | None = Field(None, description="Blurred photo (/api/evidence/{frame_id}.jpg, retained >= 10 min).")
+    frame_id: str | None = None
+    camera_id: str | None = None
+    status: ItemVerificationStatus = "pending"
+    decided_by: Literal["user", "auto", "system"] | None = None
+    auto_accept_s: float = Field(20.0, gt=0)
+    attempt: int = Field(1, ge=1, description="1 = first unit shown for this item unit; 2 = after a 'wrong'.")
+    created_at: Timestamp = Field(default_factory=utcnow)
+    decided_at: Timestamp | None = None
+
+
+PaymentAgentStepName = Literal[
+    "cart_mandate",
+    "intent_check",
+    "passkey_requested",
+    "passkey_verified",
+    "token_issued",
+    "authorized",
+    "captured",
+    "receipt_signed",
+    "ledger",
+    "declined",
+    "error",
+]
+PAYMENT_SANDBOX_LABEL = "Sandbox / simulated — no real money"
+
+
+class PaymentAgentStep(Model):
+    """One step of the Visa payment agent's checkout timeline (event ``payment.agent_step``, producer gateway).
+    Money, mandate checks and approvals are deterministic code; the LLM only writes ``narration`` (grounded in
+    ``detail`` / ``data``). Always a sandbox: a mock Visa Intelligent Commerce service (tokenized credential, no PAN)
+    or Stripe test mode."""
+
+    step_id: str
+    trip_id: TripId
+    user_id: UserId
+    n: int = Field(ge=1, description="Position in the trip's payment timeline.")
+    name: PaymentAgentStepName
+    status: Literal["ok", "waiting", "failed", "skipped"] = "ok"
+    title: str = Field(description="'Agentic token issued'.")
+    detail: str = Field("", description="Deterministic facts: 'vic_tok_…4f2a · max $38.12 · expires in 10 min'.")
+    narration: str = Field("", description="The agent's one-line narration (LLM or template).")
+    narrated_by: Literal["llm", "template"] = "template"
+    provider: str = Field("mock_vic", description="'mock_vic' (simulated Visa Intelligent Commerce) | 'stripe_test'.")
+    simulated: bool = True
+    label: str = PAYMENT_SANDBOX_LABEL
+    amount_cents: Cents | None = None
+    data: dict[str, JsonScalar] = Field(default_factory=dict)
+    ts: Timestamp = Field(default_factory=utcnow)
 
 
 # --------------------------------------------------------------------------------------------------------------------
