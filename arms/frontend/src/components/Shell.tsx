@@ -1,5 +1,5 @@
 "use client";
-import { Bot, ChartPie, House, LogOut, ScanSearch, Search, ShieldHalf, Sparkles, Video } from "lucide-react";
+import { Bot, ChartPie, House, LogOut, MonitorSmartphone, ScanSearch, Search, ShieldHalf, Sparkles, Video } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -25,6 +25,7 @@ const NAV = [
   { href: "/purchases", label: "Spending", icon: ChartPie, match: (p: string) => p.startsWith("/purchases") },
   { href: "/order", label: "Robot", icon: Bot, match: (p: string) => p.startsWith("/order") || p.startsWith("/trip") },
   { href: "/live", label: "Live", icon: Video, match: (p: string) => p.startsWith("/live") },
+  { href: "/robot/rover-ave-1/screen", label: "In store", icon: MonitorSmartphone, match: (p: string) => p.startsWith("/robot/") },
   { href: "/ask", label: "Ask", icon: Sparkles, match: (p: string) => p.startsWith("/ask") },
 ];
 // phones get five tabs; Ask stays one tap away in the search box

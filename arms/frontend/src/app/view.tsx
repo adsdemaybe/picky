@@ -1,5 +1,5 @@
 "use client";
-import { Bot, ChevronRight, Plus, Check } from "lucide-react";
+import { Bot, ChevronRight, MonitorSmartphone, Plus, Check } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { motion } from "motion/react";
@@ -53,6 +53,11 @@ export default function Home() {
                   <Bot /> Send the robot
                 </Link>
               </Button>
+              <Button asChild size="lg" variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white">
+                <Link href="/robot/rover-ave-1/screen">
+                  <MonitorSmartphone /> In the store? Talk to a robot
+                </Link>
+              </Button>
               <Button size="lg" variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white" onClick={() => ask("How can I save on groceries?")}>
                 How can I save this month?
               </Button>
@@ -62,6 +67,29 @@ export default function Home() {
             <LottieSlot slot="robotHero" className="mx-auto aspect-[8/7] w-full max-w-[380px]" fallback={<RobotArt />} />
           </motion.div>
         </div>
+      </section>
+
+      <section aria-label="Robots in the store" className="grid gap-3 sm:grid-cols-3">
+        {[
+          { id: "rover-ave-1", name: "Pico", store: "The Ave" },
+          { id: "rover-ave-2", name: "Rhea", store: "The Ave" },
+          { id: "rover-hill-1", name: "Hazel", store: "Capitol Hill" },
+        ].map((r) => (
+          <Link key={r.id} href={`/robot/${r.id}/screen`} className="group">
+            <Panel className="flex items-center gap-3 p-4 transition-colors group-hover:bg-muted">
+              <span className="grid size-11 place-items-center rounded-full bg-leaf/15 text-leaf">
+                <MonitorSmartphone className="size-5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold">{r.name}&apos;s screen</span>
+                <span className="block text-[13px] text-muted-foreground">
+                  {r.store}: ask where things are, get it for you, check out
+                </span>
+              </span>
+              <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+            </Panel>
+          </Link>
+        ))}
       </section>
 
       <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
