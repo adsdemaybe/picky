@@ -279,6 +279,8 @@ Not required: every edge case, scale beyond the demo, perfect polish.
 - Config only via `utils.config.settings` (env/.env). Logging only via `utils.log.get_logger(__name__)`. Two tooling
   knobs are process-env only (not in Settings, not read from `.env`): `PICKY_LOG_LEVEL` and `PICKY_ID_SEED`. DB access
   only via `utils.db` (one shared pool).
+  Secrets via `utils.secrets` / `make secret NAME=...` (OS keychain, team bundle `make secrets-pull`; `docs/secrets.md`);
+  `settings` resolves env > vault > `.env`. Never commit keys or paste them in chat, PRs or issues.
   LLM calls go through `utils.llm` (one place for model ids, retries, JSON/tool helpers). Real LLM code is
   unit-tested with a mocked client (`client=` / `utils.llm.set_client`); the demo must run on fakes with no
   `ANTHROPIC_API_KEY`. One interim exception: the web app's Ask Picky route (`arms/frontend` `/api/chat`: Claude over

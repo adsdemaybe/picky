@@ -213,6 +213,7 @@ Needs [uv](https://docs.astral.sh/uv/) (Python 3.12) and `make`. Docker only for
 gh repo clone adsdemaybe/picky && cd picky
 make setup               # uv sync --locked (base deps + dev tools)
 cp .env.example .env     # every key is optional; blank = fakes
+make secret NAME=ANTHROPIC_API_KEY   # optional: API keys live in your OS keychain (docs/secrets.md)
 make check               # lint, format check, rules check, tests (what CI runs)
 make demo                # headless trip 1 → follow-up → trip 2, all arms fake; ends with "DEMO OK"
 make dev                 # gateway on http://localhost:8000
@@ -235,9 +236,11 @@ PICKY_REAL_ARMS=routing,trust make demo         # a real arm that can't start fa
 make db-up && make seed                         # local Postgres + pgvector, seeded from data/ (catalog extra)
 ```
 
-Keys go in `.env` (see [`.env.example`](.env.example)): `ANTHROPIC_API_KEY` switches the agent and robot brains to
-Claude (blank = deterministic fakes); also `STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`. The web
-app reads its own `arms/frontend/.env.local`.
+Keys go in the team key vault: `make secret NAME=...` stores one in your OS keychain, `make secrets` lists them
+(masked), `make secrets-pull` fetches the team's age-encrypted bundle ([`docs/secrets.md`](docs/secrets.md)); `.env`
+still works as the lowest-priority fallback. `ANTHROPIC_API_KEY` switches the agent and robot brains to Claude
+(blank = deterministic fakes); also `STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`,
+`PERCEPTRON_ROBOTICS_API_KEY`. The web app reads its own `arms/frontend/.env.local`.
 `make setup` removes extras, so re-run `uv sync --extra <arm>` after it.
 
 ## API at a glance (for the web app)
@@ -297,8 +300,9 @@ contracts/   locked interfaces: pydantic models, service Protocols, events, LLM 
 utils/       shared helpers: config, logging, db, LLM client, money, geometry, ids, event bus, data loaders
 arms/<arm>/  one folder per feature arm: README.md, __init__.py (create / create_fake), service.py, fake.py, tests/
 data/        source of truth: products, planograms per store, online store, categories, fixtures (users, robots)
-docs/        research.md, architecture.md, demo-script.md, cart-whisperer.md, frontend-backend-map.md, pitch/ (slides,
-             Devpost text); team-plan.md (team master plan) is on arm/frontend until #12 merges
+docs/        research.md, architecture.md, demo-script.md, cart-whisperer.md, frontend-backend-map.md, secrets.md,
+             pitch/ (slides, Devpost text); team-plan.md (team master plan) is on arm/frontend until #12 merges
+secrets/     team key vault bundle: team.age (age-encrypted keys) + recipients.txt (public keys); docs/secrets.md
 scripts/     repo tooling (sync_agent_rules.py)
 ```
 

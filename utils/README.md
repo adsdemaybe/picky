@@ -3,8 +3,8 @@
 Shared helpers that **two or more arms** use and that contain **no business logic**. Anything that knows about
 trips, carts, mandates, SKUs or routes belongs in an arm (or, if it is an interface, in `contracts/`).
 
-Base deps only (pydantic, pydantic-settings, pyyaml, numpy, httpx, anthropic). `utils` never imports `contracts`
-or any arm, and `import utils` is free (no eager submodule imports, no env reads, no network).
+Base deps only (pydantic, pydantic-settings, pyyaml, numpy, httpx, anthropic, keyring). `utils` never imports
+`contracts` or any arm, and `import utils` is free (no eager submodule imports, no env reads, no network).
 
 ## Module index
 
@@ -20,6 +20,7 @@ or any arm, and `import utils` is free (no eager submodule imports, no env reads
 | `llm.py` | `get_client()` (lazy `AsyncAnthropic`; `LLMNotConfigured` without `ANTHROPIC_API_KEY`), `model("brain"\|"fast"\|"smart")` / `MODEL_BRAIN`..., `complete_json(prompt, Model)` (structured output + pydantic validation + 1 retry; tool-forcing fallback), `run_tool_loop(messages, tools, handlers, max_iters=8)`, `cached_system` / `cached_tools` (prompt caching), `extract_json`, `tool_from_model`. Every call takes `client=` for tests. |
 | `signing.py` | `canonical_json(obj, exclude=...)` (sorted keys, compact, pydantic-aware), `sha256_hex(obj)` (cart hash), `sign(obj, key=PICKY_SIGNING_KEY)` / `verify(obj, sig)` (HMAC-SHA256, constant-time). |
 | `fsm.py` | `StateMachine(transitions, initial, any_to=[FAILED], terminal=[...], on_transition=cb)`: `transition(dst, reason)` raises `IllegalTransition`; `can`, `allowed`, `history`, `path()`. Used by the gateway's `TripState`. |
+| `secrets.py` | Team key vault ([`docs/secrets.md`](../docs/secrets.md)). Fixed `REGISTRY` of secret names; each resolves env > OS keychain (`keyring`, service `picky`) > `~/.config/picky/secrets.env` (600; automatic on headless Linux) > repo `.env`. `Settings` reads it via `settings_sources` (`Settings(_env_file=None)` skips it). `get_vault()` / `set_vault(Vault(keyring_backend=..., home=...))` for tests. CLI `python -m utils.secrets set/list/delete/env/check/identity/push/pull`; the age team bundle (`secrets/team.age`) needs the `secrets` extra (`pyrage`). `PICKY_SECRETS_BACKEND=auto\|keyring\|file\|off` (process env only). Values are never logged. |
 | `data.py` | Loaders for `data/` YAML (products, planograms, online store, users). Owned by the contracts author. |
 
 ## Examples
