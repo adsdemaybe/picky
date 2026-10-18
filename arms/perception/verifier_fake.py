@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from contracts.cameras import robot_camera_id
-from contracts.common import RobotId, SlotId, Timestamp
+from contracts.common import RobotId, Sku, SlotId, Timestamp
 from contracts.evidence import FrameRef, GroundTruthSidecar, TruthSnapshot
 from contracts.faults import FaultContext
 from contracts.grounding import Evidence, GroundedTarget, NormBox, ProviderCall
@@ -33,6 +33,7 @@ from contracts.verify import (
     GroundingResult,
     GroundRequest,
     ProviderInfo,
+    StateFacts,
     Verdict,
     VerifierCapabilities,
     VerifierMode,
@@ -44,7 +45,8 @@ from contracts.verify import (
 )
 from utils.log import get_logger
 
-from .truth import LocalTruth, truth_for
+from .judges import humanize_atoms
+from .truth import LocalTruth, product_label, truth_for
 
 log = get_logger(__name__)
 
@@ -78,6 +80,31 @@ class VerifierBase:
         self.calls = 0
         self.local = LocalTruth(services)
         self._cache: OrderedDict[str, Verdict] = OrderedDict()
+        self._labels: dict[Sku, str] = {}
+
+    # ---- shopper-visible names -----------------------------------------------------------------------------------
+    async def _label(self, sku: Sku) -> str:
+        if sku not in self._labels:
+            self._labels[sku] = product_label(await self.local.product(sku), sku)
+        return self._labels[sku]
+
+    async def _names_for(
+        self,
+        cond: Condition,
+        facts: StateFacts | None,
+        baseline: VerifyBaseline | None,
+        bindings: Mapping[str, GroundedTarget],
+    ) -> dict[Sku, str]:
+        """SKU -> '<brand> <name>' for every SKU a reason can mention (atoms, bindings, robot state, baseline)."""
+        skus: list[Sku] = []
+        for _, atom in iter_atoms(cond):
+            skus += [s for s in [getattr(atom, "sku", None), *(getattr(atom, "counts", None) or {})] if s]
+        skus += [b.target.sku for b in bindings.values()]
+        if facts is not None:
+            skus += [*facts.basket_counts, *facts.counter_counts, *([facts.holding_sku] if facts.holding_sku else [])]
+        if baseline is not None:
+            skus += list(baseline.basket_counts)
+        return {s: await self._label(s) for s in dict.fromkeys(skus) if s}
 
     # ---- cache ---------------------------------------------------------------------------------------------------
     def _cached(self, verify_id: str) -> Verdict | None:
@@ -385,6 +412,7 @@ class FakeVerifier(VerifierBase):
             camera_confidence=float(low.get("confidence", DEFAULT_LOW_CONFIDENCE)) if low is not None else None,
             approvals=request.approvals,
         )
+        atoms = humanize_atoms(atoms, await self._names_for(cond, None, request.baseline, request.bindings))
         atoms = self._attach_frames(cond, atoms, frames, request.robot_id, request.alternate_cameras)
         degraded = "provider_down" in effects
         reason = verdict_reason(outcome, atoms)

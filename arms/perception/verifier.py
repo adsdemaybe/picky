@@ -64,6 +64,7 @@ from .judges import (
     ONE_CUE_CONFIDENCE,
     TWO_CUES_CONFIDENCE,
     CameraAnswers,
+    humanize_atoms,
     judge_basket_contains,
     judge_basket_delta,
     judge_gripper,
@@ -72,8 +73,8 @@ from .judges import (
     judge_label,
     judge_shelf_tag,
     judge_slot_visible,
+    unpair_reason,
 )
-from .truth import product_label
 from .verifier_fake import DEFAULT_LOW_CONFIDENCE, VERIFIER_FAULTS, VerifierBase, exec_ctx_dict
 from .vision.common import ProviderStats, answer_ok, failed_answer, provider_method
 
@@ -136,7 +137,6 @@ class PerceptionVerifier(VerifierBase):
         self.stats = ProviderStats()
         self._fails = 0
         self._breaker_until = 0.0
-        self._labels: dict[Sku, str] = {}
 
     # ---- mode / health -------------------------------------------------------------------------------------------
     def resolve_mode(self, requested: VerifierMode | None, backend: str | None) -> VerifierMode:
@@ -184,11 +184,6 @@ class PerceptionVerifier(VerifierBase):
             )
 
     # ---- inputs --------------------------------------------------------------------------------------------------
-    async def _label(self, sku: Sku) -> str:
-        if sku not in self._labels:
-            self._labels[sku] = product_label(await self.local.product(sku), sku)
-        return self._labels[sku]
-
     async def _state(
         self,
         robot_id: RobotId,
@@ -456,6 +451,7 @@ class PerceptionVerifier(VerifierBase):
             raise VerifierUnavailableError("no robot state and no ground truth to judge from")
         low = effects.get("low_confidence")
         low_conf = float(low.get("confidence", DEFAULT_LOW_CONFIDENCE)) if low is not None else None
+        names = await self._names_for(cond, facts, req.baseline, req.bindings)
 
         gt: tuple[str, float, list[AtomVerdict]] | None = None
         if truth is not None:
@@ -468,10 +464,11 @@ class PerceptionVerifier(VerifierBase):
                 camera_confidence=low_conf,
                 approvals=req.approvals,
             )
+            gt = (gt[0], gt[1], humanize_atoms(gt[2], names))  # type: ignore[index]
         state_leaves: dict[str, AtomVerdict] = {}
         if facts is not None:
             _, _, leaves = evaluate_on_state(cond, facts, baseline=req.baseline, bindings=req.bindings)
-            state_leaves = {a.path: a for a in leaves}
+            state_leaves = {a.path: a for a in humanize_atoms(leaves, names)}
         gt_leaves = {a.path: a for a in gt[2]} if gt is not None else {}
 
         camera_atoms = [p for p, a in iter_atoms(cond) if atom_cameras(a)]
@@ -514,7 +511,10 @@ class PerceptionVerifier(VerifierBase):
                 return st.model_copy(update={"reason": why, "confidence": min(st.confidence, 0.8)})
             if vis is not None:
                 used.add("provider")
-                return combine_verdicts(st, vis) if ("state" in sources and st is not None) else vis
+                if "state" not in sources or st is None:
+                    return vis
+                both = combine_verdicts(st, vis)
+                return both.model_copy(update={"reason": unpair_reason(both.reason, st.reason)})
             if g is not None:
                 used.add("ground_truth")
                 return g
@@ -579,6 +579,7 @@ class PerceptionVerifier(VerifierBase):
                 decided_by, degraded, methods = "ground_truth", False, ["ground_truth"]
             else:  # no sim truth (Isaac without instances, robot arm truth unwired): robot state decides
                 outcome, conf, atoms = evaluate_on_state(cond, facts, baseline=req.baseline, bindings=req.bindings)  # type: ignore[arg-type]
+                atoms = humanize_atoms(atoms, names)
                 decided_by, degraded, methods = "state", True, ["ground_truth", "state"]
             shadow: list[ShadowOpinion] = []
             agrees = None

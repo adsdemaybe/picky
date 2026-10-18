@@ -86,7 +86,8 @@ async def test_one_disagreeing_cue_cannot_override_state():
     services, robot, v = _setup(provider)
     robot.pick("SALSA-MILD")
     verdict = await v.verify(_req(HOLD_MILD))
-    assert verdict.outcome == "uncertain" and "camera (" in verdict.reason
+    assert verdict.outcome == "uncertain" and "gripper is empty" in verdict.reason
+    assert verdict.reason.endswith(f"; robot state: holding {MILD}")  # words + product name, no 'camera (..) vs ..'
 
 
 async def test_conflicting_cues_are_uncertain_and_state_decides():
