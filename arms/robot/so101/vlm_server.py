@@ -11,8 +11,7 @@ Same job as the Perceptron API's detect(): image + object names -> one box per n
 Bind to the tailnet address, not 0.0.0.0: there is no auth.
 """
 
-from __future__ import annotations
-
+# No `from __future__ import annotations`: FastAPI must see the real DetectRequest class, not a string.
 import argparse
 import base64
 import io
