@@ -21,6 +21,8 @@ import time
 from typing import Any
 from xml.sax.saxutils import quoteattr
 
+import numpy as np
+
 from arms.sim import mujoco_dressing, mujoco_models
 from arms.sim.geometry import NEAR_CLIP_M, CameraPose
 from arms.sim.scene_spec import PrimSpec, RoverSpec, SceneSpec, Vec3
@@ -117,7 +119,10 @@ def _geom_xml(
     return f'<geom {attrs}{where} rgba="{_rgba(prim.color)}" contype="0" conaffinity="0"{extra}/>'
 
 
-STORE_GROUPS = (4, 5)  # geom groups for the first two stores (0-2 robots / arm visuals, 3 ceilings + colliders)
+STORE_GROUPS = (4, 4)  # every store's geoms (0-2 robots / arm visuals, 3 ceilings + colliders, 5 = culled)
+CULL_GROUP = 5
+CULL_DIST_M = 8.0  # small geoms farther than this from the render camera are skipped for that frame
+CULL_RBOUND_M = 1.2  # only geoms smaller than this are culled (floors, walls, long shelf boards always draw)
 
 
 def _in_group(xml: str, group: int) -> str:
@@ -270,6 +275,8 @@ class MujocoBackend(SketchBackend):
         self._model, self._data, self._renderers = model, data, {}
         self._parked = {k for k in self._parked if k in self._instance_mocap and k not in self.instance_prims}
         self._dirty = False
+        grp = model.geom_group
+        self._cullable = np.where(np.isin(grp, list(set(STORE_GROUPS))) & (model.geom_rbound < CULL_RBOUND_M))[0]
         self.builds += 1
         if self._want_viewer:
             self._open_viewer()
@@ -352,6 +359,24 @@ class MujocoBackend(SketchBackend):
                 d.mocap_pos[mid] = (wx + ox, wy + oy, wz + oz)
                 d.mocap_quat[mid] = _quat(yaw, prim.pitch)
 
+    def _cull(self, eye: "np.ndarray", fwd: "np.ndarray", hfov: float) -> "np.ndarray | None":
+        """Move this frame's invisible small store geoms (far away or well behind the camera) to CULL_GROUP; returns
+        the groups to restore right after update_scene (the viewer window and other cameras keep seeing them).
+        MuJoCo draws every geom it is given, so with ~7k stocked units this saves most of the draw time."""
+        idx = getattr(self, "_cullable", None)
+        if idx is None or len(idx) == 0:
+            return None
+        m = self._model
+        rel = self._data.geom_xpos[idx] - eye
+        dist = np.linalg.norm(rel, axis=1)
+        ahead = rel @ fwd
+        # inside a generous cone around the view direction (or right next to the camera)
+        cos_lim = math.cos(min(math.pi * 0.95, hfov * 0.5 + 0.6))
+        visible = (dist < CULL_DIST_M) & ((ahead >= dist * cos_lim) | (dist < 1.0))
+        saved = m.geom_group[idx].copy()
+        m.geom_group[idx[~visible]] = CULL_GROUP
+        return saved
+
     def _forward_for_render(self) -> None:
         self._mj.mj_kinematics(self._model, self._data)
         self._mj.mj_camlight(self._model, self._data)
@@ -385,9 +410,13 @@ class MujocoBackend(SketchBackend):
             self._forward_for_render()
             renderer = self._renderer(w, h)
             opt = self._scene_option
-            for sid, grp in getattr(self, "_store_group", {}).items():
-                opt.geomgroup[grp] = 1 if sid == store_id else 0
+            for grp in set(STORE_GROUPS):
+                opt.geomgroup[grp] = 1
+            opt.geomgroup[CULL_GROUP] = 0
+            restore = self._cull(np.array((cam.x + ox, cam.y + oy, cam.z + oz)), np.array(fwd), cam.hfov)
             renderer.update_scene(d, camera=self._cam_id, scene_option=opt)
+            if restore is not None:
+                self._model.geom_group[self._cullable] = restore
             pixels = renderer.render()
             self._sync_viewer()
         from PIL import Image

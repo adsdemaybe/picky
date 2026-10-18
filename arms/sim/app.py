@@ -215,7 +215,10 @@ class GatewayLink(threading.Thread):
         backoff = 1.0
         while not self._stop.is_set():
             try:
-                with connect(self.url, open_timeout=10, max_size=None, close_timeout=2) as ws:
+                # generous keepalive: a busy renderer (MuJoCo on a laptop) or a gateway route solve can stall a ping
+                with connect(
+                    self.url, open_timeout=10, max_size=None, close_timeout=2, ping_interval=20, ping_timeout=90
+                ) as ws:
                     ws.send(self.hello().model_dump_json())
                     welcome = parse_gateway_to_sim(ws.recv(timeout=15))
                     if getattr(welcome, "type", None) != "welcome" or not welcome.ok:
