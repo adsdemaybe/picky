@@ -1,7 +1,7 @@
 // Generates the app's demo data from the repo's source-of-truth YAML (CLAUDE.md rule 5).
 //   data/products.yaml, data/planograms/{store_ave,store_tmobile}.yaml, data/online_store.yaml,
-//   data/fixtures/{users,wireless}.yaml
-//   -> src/data/generated/{products,store_ave,store_tmobile,wireless,online,maya}.json
+//   data/fixtures/{users,wireless,tmobile_directions}.yaml, data/wireless.yaml
+//   -> src/data/generated/{products,store_ave,store_tmobile,wireless,directions,online,maya}.json
 // Purchase history beyond the fixture trips is synthesized deterministically (seeded) and flagged synthetic=true.
 // Run: pnpm gen-data   (never hand-edit the output)
 
@@ -94,6 +94,32 @@ write("wireless.json", {
   purchases: load("data/fixtures/users.yaml").users.find((u) => u.user_id === "maya").purchases.filter((p) => p.store_id === "store_tmobile"),
   sources: wireless.sources ?? [],
 });
+
+// ---- the other four T-Mobile challenge directions (Matchmaker, Next Best Moment, Timekeeper, Household Mix) ----
+// Plans, financing, trade-in values and households: data/wireless.yaml (the wireless arm's rules). Extra signals:
+// data/fixtures/tmobile_directions.yaml. All synthetic.
+{
+  const rules = load("data/wireless.yaml");
+  const dir = load("data/fixtures/tmobile_directions.yaml");
+  const promo = (id) => rules.promotions.find((p) => p.promo_id === id) ?? null;
+  write("directions.json", {
+    as_of: dir.as_of,
+    today: rules.today,
+    service_taxes_fees_bps: rules.service_taxes_fees_bps,
+    new_line_fee_cents: rules.new_line_fee_cents,
+    financing: rules.financing,
+    plans: rules.plans,
+    trade_in_models: rules.trade_in_models,
+    accounts: rules.accounts,
+    add_ons: { protection: promo("protection_360"), home_internet: promo("home_internet_bundle"), third_line: promo("third_line_on_us") },
+    phone_traits: dir.phone_traits,
+    matchmaker_presets: dir.matchmaker_presets,
+    retention_accounts: dir.retention_accounts,
+    retention_actions: dir.retention_actions,
+    upgrade_cases: dir.upgrade_cases,
+    households: dir.households,
+  });
+}
 
 // ---- online store ----
 const online = load("data/online_store.yaml");
