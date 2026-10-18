@@ -38,7 +38,7 @@ from arms.sim.geometry import (
     LIFT_REST_M,
     CameraPose,
     clamp_lift,
-    gripper_position,
+    held_position,
     mount_camera,
     project_box,
     robot_camera_pose,
@@ -799,7 +799,8 @@ class WorkerCore:
         self.backend.set_robot_pose(rover.robot_id, rover.pose, rover.lift, rover.arm_ext)
         yaw = rover.pose.theta + math.pi / 2
         if rover.holding is not None and rover.holding in scene.instances:
-            self.move_instance(scene, rover.holding, gripper_position(rover.pose, rover.lift, rover.arm_ext), yaw)
+            dims = scene.item_dims(rover.holding)
+            self.move_instance(scene, rover.holding, held_position(rover.pose, rover.lift, rover.arm_ext, dims), yaw)
         for k, iid in enumerate(rover.basket):
             if iid in scene.instances:
                 self.move_instance(scene, iid, basket_drop_position(rover.pose, k, scene.item_dims(iid)), yaw)

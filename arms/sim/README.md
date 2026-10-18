@@ -26,7 +26,7 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 - [x] **P0** Verified in the pipeline with the Pillow backend: gateway `/api/sim/status` shows both stores + 3 robots on `isaac`; the camera snapshots come from the worker; a shop goal ran through the worker
 - [x] **P1** Readable label textures (`labels.py`): brand, name, size, price and a real EAN-13 barcode as a PNG mapped on a label quad on each unit's -y face (Isaac)
 - [x] **P1** Pillow `SketchBackend` (`sketch.py`): flat-shaded 3D raster of the same specs with label text, so frames look like a store without Isaac
-- [ ] **P0** Isaac backend run on vhagar (`IsaacBackend`): written against the 5.x/6.x APIs, **not run on a GPU yet** (vhagar unreachable while building). Steps are in `DEPLOY.md`
+- [x] **P0** Isaac backend run on vhagar (`IsaacBackend`, Isaac Sim 6.0.0-rc.59, RTX 5090): both stores + 3 rovers + all 12 cameras render (labelled products, shelves, rovers); the taco request ran end to end on Isaac. Synchronous `rep.orchestrator.step` per changed capture (plain `app.update()` gave stale frames). Steps + measured timings are in `DEPLOY.md`
 - [ ] **P1** Real SO-101 URDF on the lift (`--so101-urdf`, experimental importer path; joints stay at zero)
 - [ ] **P2** Physics grasp (FixedJoint), animated SO-101 joints, VLA (LeRobot / LeIsaac) later, per CLAUDE.md "Later"
 
@@ -79,14 +79,18 @@ matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop t
 - [x] Worker attaches to the gateway; both stores + 3 robots are routed to it (Pillow backend, local gateway)
 - [x] A request-created shop goal executes on the worker: navigate / scan / pick / place through `/ws/sim`
 - [x] Every command gets exactly one result (also bad JSON with a `cmd_id`), and every failure has an error code
-- [ ] `PICKY_REAL_ARMS=robot make demo` with **Isaac** on vhagar + a screen-recorded backup video
+- [ ] `PICKY_REAL_ARMS=robot make demo` with **Isaac** on vhagar + a screen-recorded backup video (the same request via `POST /api/requests` against a gateway on vhagar completed on Isaac: 10/10 items, ~195 s)
 - [ ] Scan bboxes line up with the Isaac render (they line up in the Pillow render, which uses the same camera math)
 - [ ] Live view ≥ 8 fps on Isaac (tune `SetStreamsCmd` fps / number of streams)
 
 ## Known limitations
 
-- `IsaacBackend` has **not run on a GPU yet**. vhagar was unreachable while it was written, so expect a debugging pass on first
-  launch (API drift between Isaac 5.x and 6.x: replicator render products, `UsdPrimvarReader` `varname` type, the URDF importer).
+- Isaac frames cost one synchronous replicator step whenever the camera or the scene changed (~60-135 ms with 1-3 enabled
+  render products on vhagar): fine for 2 fps streams + snapshots, not for many high-fps live views. Idle render products
+  pause after 3 s. The URDF importer path (`--so101-urdf`) is still untested on 6.0.
+- Rover self-view: the front camera (on the mast) sees the lift carriage + arm when it tilts down to a low shelf, and
+  the wrist camera sees the jaws (clipped by the 5 cm near plane). The held unit rides just ahead of the jaws so the
+  wrist camera is never inside it.
 - Motion is set-pose and grasping is magic: no physics, and the SO-101 joints don't animate. The arm group only stretches
   along x and the lift moves.
 - The front camera sits at 1.45 m on the mast, so bottom-shelf scans are steep top-down views and the camera can see its own

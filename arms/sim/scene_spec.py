@@ -71,6 +71,9 @@ WALL_HEIGHT_M = 3.0
 WALL_THICKNESS_M = 0.1
 FLOOR_THICKNESS_M = 0.05
 CEILING_HEIGHT_M = 3.4
+CEILING_SLAB_GAP_M = 0.08
+"""The ceiling slab sits this far above CEILING_HEIGHT_M (lights, camera mounts): ceiling cameras mounted AT the
+ceiling height (robots.yaml) otherwise start inside the slab and render its unlit inside (black band in Isaac)."""
 OBSTACLE_HEIGHT_M = 3.0
 ITEM_GAP_M = 0.01
 MAX_UNITS_PER_SLOT = 120
@@ -90,6 +93,10 @@ BASE_SIZE_M: Vec3 = (0.46, 0.36, 0.16)
 BASE_CLEARANCE_M = 0.05
 WHEEL_RADIUS_M = 0.06
 MAST_HEIGHT_M = 1.50
+MAST_CAMERA_CLEARANCE_M = 0.15
+"""The mast tops out this far below the front camera eye (> the renderers' 0.05 m near clip; a thin neck BEHIND the
+eye carries the camera head): with the eye inside the mast column, Isaac (RTX renders back faces) showed the mast's
+unlit interior across the bottom of the front view, and a mast top just below the lens filled a quarter of it."""
 LIFT_REF_M = 0.55
 """Lift-group prims are authored for this lift height; the builder translates the group by (lift - LIFT_REF_M)."""
 SO101_LINKS_M: tuple[tuple[str, float], ...] = (("upper_arm", 0.116), ("forearm", 0.135), ("wrist_gripper", 0.10))
@@ -352,7 +359,7 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
         PrimSpec(
             path=f"{root}/Ceiling",
             role="ceiling",
-            center=(cx, cy, CEILING_HEIGHT_M + 0.025),
+            center=(cx, cy, CEILING_HEIGHT_M + CEILING_SLAB_GAP_M + 0.025),
             size=(b.w + 2 * t, b.h + 2 * t, 0.05),
             color=CEILING_COLOR,
             collider=False,
@@ -699,17 +706,30 @@ def build_rover_spec(robot: RobotSpec) -> RoverSpec:
         )
     deck = BASE_CLEARANCE_M + bz
     # lift mast at ARM_MOUNT_X_M with the pan-tilt front camera head on top (DEFAULT_ROBOT_CAMERA_MOUNTS['front'])
+    fm = DEFAULT_ROBOT_CAMERA_MOUNTS["front"]
+    mast_top = min(MAST_HEIGHT_M, fm.z - MAST_CAMERA_CLEARANCE_M)
     prims.append(
         prim(
             "mast",
             "base",
-            (ARM_MOUNT_X_M, 0.0, deck + (MAST_HEIGHT_M - deck) / 2),
-            (0.05, 0.07, MAST_HEIGHT_M - deck),
+            (ARM_MOUNT_X_M, 0.0, deck + (mast_top - deck) / 2),
+            (0.05, 0.07, mast_top - deck),
             "#d0d4da",
         )
     )
-    fm = DEFAULT_ROBOT_CAMERA_MOUNTS["front"]
     prims.append(prim("front_cam_head", "base", (fm.x, fm.y, fm.z), (0.07, 0.12, 0.06), "#111111"))
+    # neck from the mast top to the head, entirely behind the eye (x < fm.x): the forward-looking front camera never
+    # sees it
+    neck_x0, neck_x1, head_bottom = ARM_MOUNT_X_M - 0.04, fm.x - 0.005, fm.z - 0.03
+    prims.append(
+        prim(
+            "front_cam_neck",
+            "base",
+            ((neck_x0 + neck_x1) / 2, fm.y, (mast_top + head_bottom) / 2),
+            (neck_x1 - neck_x0, 0.02, head_bottom - mast_top),
+            "#d0d4da",
+        )
+    )
     # basket on a post behind the mast (BASKET_OFFSET_LOCAL = basket floor center)
     kx, ky, kz = BASKET_SIZE_M
     ox, oy, oz = BASKET_OFFSET_M

@@ -14,12 +14,14 @@ loop queues; it never touches USD. The main loop owns Isaac: drain inbox -> ``Wo
 ``app.update()``. Scenes = ``arms.sim.scene_spec`` primitives turned into USD prims with ``pxr``; each store is a
 translation-only ``/World/Stores/<store>`` Xform, so every coordinate below it is store-local like the wire.
 
-Isaac notes (written against the 5.x/6.x docs; first GPU run still to do, see README "Known limitations"):
+Isaac notes (6.0, verified on vhagar):
 - ``SimulationApp`` must exist before any ``omni`` / ``pxr`` import (``require_isaac`` returns the class).
 - Motion is set-pose (kinematic); no physics timeline is played, so no rigid bodies / joints are needed for the
   magic grasp (the held unit's Xform follows the gripper every tick).
 - Cameras: one ``UsdGeom.Camera`` + replicator render product + ``rgb`` annotator per camera id, created lazily on the
-  first capture/stream; idle render products are paused (``hydra_texture.set_updates_enabled``) to save GPU.
+  first capture/stream (first frames via ``rep.orchestrator.step``, then plain ``app.update()``, see
+  ``IsaacBackend._update``); idle render products are paused (``hydra_texture.set_updates_enabled``) to save GPU.
+- Verified on vhagar (Isaac Sim 6.0.0-rc.59, RTX 5090): two stores + three rovers + all 12 cameras.
 - SO-101: primitives by default. ``--so101-urdf <path to so101_new_calib.urdf>`` (from the SO-ARM100 / LeRobot repo)
   imports the real arm onto each lift carriage with the Isaac URDF importer (experimental, joints left at zero).
 """
@@ -36,7 +38,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from arms.sim.geometry import CameraPose
+from arms.sim.geometry import NEAR_CLIP_M, CameraPose
 from arms.sim.labels import label_png
 from arms.sim.scene_spec import LIFT_REF_M, PrimSpec, RoverSpec, SceneSpec, Vec3, camera_prim_path, usd_name
 from arms.sim.worker import NullBackend, SimBackend, WorkerCore
@@ -50,7 +52,17 @@ JPEG_QUALITY = 75
 LOOP_HZ = 60.0
 MAX_DT_S = 0.25
 RECONNECT_MAX_S = 10.0
-CAMERA_IDLE_PAUSE_S = 5.0
+CAMERA_IDLE_PAUSE_S = 3.0
+"""Render products unused this long stop rendering (every enabled one makes each synchronous step slower)."""
+RT_SUBFRAMES = 1
+"""RTX subframes per synchronous replicator step."""
+RT_SUBFRAMES_NEW = 2
+"""RTX subframes for the first frames of a new render product."""
+RT_WARMUP_STEPS = 2
+"""Synchronous replicator steps for a new render product (starts the orchestrator; materials + textures load)."""
+IDLE_UPDATE_S = 0.25
+"""Idle ``app.update()`` period (4 Hz) when no frame was rendered this tick (frames come from synchronous steps)."""
+CEILING_EMISSIVE = 0.6
 DEFAULT_LABEL_DIR = "/tmp/picky-sim-labels"
 
 
@@ -231,6 +243,9 @@ class _IsaacCamera:
         self.last_rows: Any = None
         self.last_used = 0.0
         self.active = True
+        self.dirty = True
+        """Pose changed (or resumed) since the last synchronous replicator step."""
+        self.resumed = False
 
 
 class IsaacBackend:
@@ -261,13 +276,16 @@ class IsaacBackend:
         self._cams: dict[str, _IsaacCamera] = {}
         self._materials: dict[str, Any] = {}
         self._specs: dict[str, SceneSpec] = {}
-        self._dirty = True
+        self._scene_dirty = True
+        self._last_update = 0.0
+        self._stats_n = 0
+        self._stats_s = 0.0
 
     # -- materials -----------------------------------------------------------------------------------------------------
-    def _color_material(self, hex_color: str) -> Any:
+    def _color_material(self, hex_color: str, emissive: float = 0.0) -> Any:
         from pxr import Gf, Sdf, UsdShade  # type: ignore[import-not-found]
 
-        key = f"color_{hex_color.lstrip('#').lower()}"
+        key = f"color_{hex_color.lstrip('#').lower()}" + (f"_e{int(emissive * 100)}" if emissive else "")
         if key not in self._materials:
             path = f"/World/Looks/{key}"
             mat = UsdShade.Material.Define(self.stage, path)
@@ -275,6 +293,9 @@ class IsaacBackend:
             sh.CreateIdAttr("UsdPreviewSurface")
             sh.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*_rgb(hex_color)))
             sh.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.55)
+            if emissive:
+                rgb = _rgb(hex_color)
+                sh.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).Set(Gf.Vec3f(*(c * emissive for c in rgb)))
             mat.CreateSurfaceOutput().ConnectToSource(sh.ConnectableAPI(), "surface")
             self._materials[key] = mat
         return self._materials[key]
@@ -359,7 +380,10 @@ class IsaacBackend:
         xf.SetRotate(Gf.Vec3f(0.0, math.degrees(spec.pitch), math.degrees(spec.yaw)))
         xf.SetScale(Gf.Vec3f(*spec.size))
         g.CreateDisplayColorAttr([Gf.Vec3f(*_rgb(spec.color))])
-        self._bind(g.GetPrim(), self._color_material(spec.color))
+        # The ceiling's underside only gets bounce light (the RectLights emit down) and renders black in RTX real-time,
+        # right where the ceiling cameras (mounted at ceiling height) look: make it a softly glowing panel instead.
+        emissive = CEILING_EMISSIVE if spec.role == "ceiling" else 0.0
+        self._bind(g.GetPrim(), self._color_material(spec.color, emissive=emissive))
         if spec.collider:
             UsdPhysics.CollisionAPI.Apply(g.GetPrim())
         return g
@@ -425,8 +449,8 @@ class IsaacBackend:
             else:
                 self._define(p)
         for _ in range(5):
-            self.app.update()
-        self._dirty = True
+            self._update()
+        self._changed()
         log.info(
             "store %s built at %s: %d prims, %d units", spec.store_id, offset, len(spec.prims), len(spec.instances)
         )
@@ -437,7 +461,7 @@ class IsaacBackend:
         root = self._store_roots.get(store_id)
         if root:
             UsdGeom.XformCommonAPI(self.stage.GetPrimAtPath(root)).SetTranslate(Gf.Vec3d(*offset))
-            self._dirty = True
+            self._changed()
 
     def spawn_robot(self, rover: RoverSpec) -> None:
         from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
@@ -465,7 +489,7 @@ class IsaacBackend:
             "scale": scale,
             "root": rover.root_path,
         }
-        self._dirty = True
+        self._changed()
 
     def _import_so101(self, dest: str) -> bool:
         """Import the SO-101 URDF under ``dest`` (Isaac URDF importer). False (primitives used) on any failure."""
@@ -495,7 +519,7 @@ class IsaacBackend:
         info = self._robots.pop(robot_id, None)
         if info and self.stage.GetPrimAtPath(info["root"]):
             self.stage.RemovePrim(info["root"])
-        self._dirty = True
+        self._changed()
 
     def set_robot_pose(self, robot_id: str, pose: Pose2D, lift_height_m: float, arm_ext_m: float) -> None:
         from pxr import Gf  # type: ignore[import-not-found]
@@ -507,18 +531,18 @@ class IsaacBackend:
         info["xf"].SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(pose.theta)))
         info["lift"].Set(Gf.Vec3d(0.0, 0.0, lift_height_m - LIFT_REF_M))
         info["scale"].Set(Gf.Vec3f(max(0.3, min(1.0, arm_ext_m / 0.33)), 1.0, 1.0))
-        self._dirty = True
+        self._changed()
 
     def add_instance(self, prim: PrimSpec) -> None:
         spec = self._specs.get(prim.store_id or "")
         self._define_unit(spec, prim)
-        self._dirty = True
+        self._changed()
 
     def remove_instance(self, store_id: str, instance_id: str) -> None:
         path = self._inst_paths.pop((store_id, instance_id), None)
         if path and self.stage.GetPrimAtPath(path):
             self.stage.RemovePrim(path)
-        self._dirty = True
+        self._changed()
 
     def set_instance_pose(self, store_id: str, instance_id: str, position: Point3, yaw: float | None = None) -> None:
         from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
@@ -530,9 +554,38 @@ class IsaacBackend:
         xf.SetTranslate(Gf.Vec3d(position.x, position.y, position.z))
         if yaw is not None:
             xf.SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(yaw)))
-        self._dirty = True
+        self._changed()
 
     # -- cameras -------------------------------------------------------------------------------------------------------
+    # Isaac 6.0 rendering, measured on vhagar (RTX 5090, both stores, 640x480 render products, GPU shared):
+    # - the rgb annotator only fills once the replicator orchestrator has run, and plain ``app.update()`` gives NO
+    #   reliable freshness: after a robot + camera move the annotator needed 2..6 updates depending on how many render
+    #   products are enabled and on GPU load (a resumed render product needed 5), i.e. stale frames from the old pose.
+    # - ``rep.orchestrator.step(rt_subframes=1)`` (default delta_time; 0.0 does NOT wait) renders every ENABLED render
+    #   product synchronously and was exact in every trial: ~60-100 ms with 1 enabled, ~120 ms with 3, ~270 ms with 12.
+    # So: one synchronous step only when the requested camera or the scene changed since the last step (one step
+    # serves every enabled camera: ``prepare`` poses all stream cameras due in a tick first), and render products idle
+    # for CAMERA_IDLE_PAUSE_S are paused so steps stay cheap (a resumed one gets a second step).
+    def _update(self) -> None:
+        self.app.update()
+        self._last_update = time.monotonic()
+
+    def _changed(self) -> None:
+        self._scene_dirty = True
+
+    def _sync(self, steps: int = 1, subframes: int = RT_SUBFRAMES) -> None:
+        """Synchronous replicator frame(s): afterwards every enabled annotator holds the current scene."""
+        import omni.replicator.core as rep  # type: ignore[import-not-found]
+
+        for _ in range(steps):
+            rep.orchestrator.step(rt_subframes=subframes, pause_timeline=True)
+        self._scene_dirty = False
+        self._last_update = time.monotonic()
+        for cam in self._cams.values():
+            if cam.active:
+                cam.dirty = False
+                cam.resumed = False
+
     def _camera(self, camera_id: str, store_id: str, cam: CameraPose) -> _IsaacCamera:
         existing = self._cams.get(camera_id)
         if existing is not None and (existing.w, existing.h) == (cam.w, cam.h):
@@ -548,13 +601,28 @@ class IsaacBackend:
         c.CreateHorizontalApertureAttr(h_ap)
         c.CreateVerticalApertureAttr(h_ap * cam.h / cam.w)
         c.CreateFocalLengthAttr(h_ap / (2 * math.tan(cam.hfov / 2)))
-        c.CreateClippingRangeAttr(Gf.Vec2f(0.03, 200.0))
+        # near clip = the sketch / bbox math's NEAR_CLIP_M; it also hides the camera's own housing prim (the front
+        # camera eye sits inside front_cam_head, the wrist eye 1-2 cm in front of so101_wrist_cam)
+        c.CreateClippingRangeAttr(Gf.Vec2f(NEAR_CLIP_M, 200.0))
         op = UsdGeom.Xformable(c).AddTransformOp()
+        rows = cam.usd_matrix_rows()
+        op.Set(Gf.Matrix4d(*[v for row in rows for v in row]))
         rp = rep.create.render_product(path, (cam.w, cam.h))
         annotator = rep.AnnotatorRegistry.get_annotator("rgb")
         annotator.attach([rp])
         made = _IsaacCamera(path, op, rp, annotator, cam.w, cam.h)
+        made.last_rows = rows
+        made.last_used = time.monotonic()
         self._cams[camera_id] = made
+        t0 = time.monotonic()
+        self._sync(RT_WARMUP_STEPS, RT_SUBFRAMES_NEW)  # also starts the orchestrator; materials + textures load
+        log.info(
+            "camera %s: render product %s ready in %.2fs (%d total)",
+            camera_id,
+            rp.path,
+            time.monotonic() - t0,
+            len(self._cams),
+        )
         return made
 
     def _drop_camera(self, camera_id: str) -> None:
@@ -573,40 +641,67 @@ class IsaacBackend:
         try:
             cam.rp.hydra_texture.set_updates_enabled(active)
             cam.active = active
+            if active:
+                cam.dirty = cam.resumed = True
         except Exception:  # noqa: BLE001 - older replicator: keep rendering
             cam.active = True
 
-    def render(self, camera_id: str, store_id: str, cam: CameraPose) -> tuple[bytes, int, int] | None:
+    def _pose_camera(self, camera_id: str, store_id: str, cam: CameraPose) -> _IsaacCamera:
         from pxr import Gf  # type: ignore[import-not-found]
 
         c = self._camera(camera_id, store_id, cam)
-        fresh = c.last_rows is None
         rows = cam.usd_matrix_rows()
-        moved = rows != c.last_rows
-        c.op.Set(Gf.Matrix4d(*[v for row in rows for v in row]))
-        c.last_rows = rows
-        now = time.monotonic()
-        c.last_used = now
+        if rows != c.last_rows:
+            c.op.Set(Gf.Matrix4d(*[v for row in rows for v in row]))
+            c.last_rows = rows
+            c.dirty = True
+        c.last_used = time.monotonic()
         self._set_active(c, True)
-        for other in self._cams.values():
-            if other is not c and now - other.last_used > CAMERA_IDLE_PAUSE_S:
+        return c
+
+    def prepare(self, jobs: list[tuple[str, str, CameraPose]]) -> None:
+        """Pose several cameras before rendering them (stream frames due in the same tick): the first ``render``
+        then runs one synchronous step that serves all of them."""
+        for camera_id, store_id, cam in jobs:
+            try:
+                self._pose_camera(camera_id, store_id, cam)
+            except Exception as exc:  # noqa: BLE001 - render() reports per camera
+                log.warning("camera %s: prepare failed: %s", camera_id, exc)
+
+    def render(self, camera_id: str, store_id: str, cam: CameraPose) -> tuple[bytes, int, int] | None:
+        t0 = time.monotonic()
+        for other in self._cams.values():  # pause before stepping: idle render products make every step slower
+            if other.active and t0 - other.last_used > CAMERA_IDLE_PAUSE_S:
                 self._set_active(other, False)
-        # replicator annotators lag a frame behind the stage: update twice when the view changed
-        for _ in range(3 if fresh else (2 if (moved or self._dirty) else 1)):
-            self.app.update()
-        self._dirty = False
+        c = self._pose_camera(camera_id, store_id, cam)
+        if c.dirty or self._scene_dirty:
+            self._sync(2 if c.resumed else 1)
         data = c.annotator.get_data()
         if data is None or getattr(data, "size", 0) == 0:
+            log.warning("camera %s: empty annotator frame", camera_id)
             return None
         jpeg = encode_jpeg(data)
         if jpeg is None:
             log.error("no JPEG encoder: pip install pillow (or opencv-python-headless) into the worker's deps dir")
             return None
+        self._stats_n += 1
+        self._stats_s += time.monotonic() - t0
+        if self._stats_n % 200 == 0:
+            active = sum(1 for x in self._cams.values() if x.active)
+            log.info(
+                "isaac render: %d frames, avg %.0f ms/frame over the last 200 (%d render products, %d active)",
+                self._stats_n,
+                5 * self._stats_s,
+                len(self._cams),
+                active,
+            )
+            self._stats_s = 0.0
         return jpeg, c.w, c.h
 
     def step(self) -> None:
-        self.app.update()
-        self._dirty = False
+        """Idle tick (no frame rendered this loop): pump Kit at IDLE_UPDATE_S (frames come from ``_sync``)."""
+        if time.monotonic() - self._last_update >= IDLE_UPDATE_S:
+            self._update()
 
 
 # --------------------------------------------------------------------------------------------------------------------
@@ -624,6 +719,7 @@ def run(
     last = time.monotonic()
     started = last
     step = getattr(backend, "step", None)
+    prepare = getattr(backend, "prepare", None)
     while is_running():
         now = time.monotonic()
         if max_seconds is not None and now - started > max_seconds:
@@ -644,7 +740,16 @@ def run(
         core.tick(dt)
         rendered = False
         if link is not None and link.connected.is_set():
-            for camera_id in core.stream_due():
+            due = core.stream_due()
+            if prepare is not None and len(due) > 1:
+                jobs = []
+                for camera_id in due:
+                    try:
+                        jobs.append((camera_id, core.resolve_camera(camera_id)[1], core.camera_pose(camera_id)))
+                    except Exception:  # noqa: BLE001 - core.capture below reports it
+                        pass
+                prepare(jobs)
+            for camera_id in due:
                 try:
                     frame = core.capture(camera_id, stream=True)
                 except Exception as exc:  # noqa: BLE001 - a broken camera must not kill the loop
@@ -660,11 +765,26 @@ def run(
             time.sleep(period - spent)
 
 
+def _quiet_kit_logging() -> None:
+    """Kit sets the root logger to DEBUG, so picky's root handler would echo every library's DEBUG line (AutoNode,
+    websockets frame dumps, ...) into Kit's log as ``[Error] [py stderr]``. Keep the handler at picky's level."""
+    import logging
+
+    from utils.log import log_level
+
+    for handler in logging.getLogger().handlers:
+        if getattr(handler, "name", None) == "picky":
+            handler.setLevel(log_level())
+    for name in ("websockets", "asyncio", "AutoNode"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def make_backend(kind: str, args: argparse.Namespace) -> tuple[Any, SimBackend]:
     """(SimulationApp or None, backend). Raises IsaacUnavailable for 'isaac' without Isaac."""
     if kind == "isaac":
         SimulationApp = require_isaac()
         sim_app = SimulationApp({"headless": not args.no_headless, "width": args.width, "height": args.height})
+        _quiet_kit_logging()
         return sim_app, IsaacBackend(sim_app, label_dir=args.label_dir, so101_urdf=args.so101_urdf)
     if kind in ("sketch", "kinematic"):
         from arms.sim.sketch import SketchBackend
