@@ -30,7 +30,15 @@ OUT = ROOT / "data/ingredients.yaml"
 UA = "PickyHackathon/0.1 (+https://github.com/adsdemaybe/picky)"
 SEARCH = "https://search.openfoodfacts.org/search?q={q}&page_size=12&fields=code,product_name,brands"
 PRODUCT = "https://world.openfoodfacts.org/api/v2/product/{code}?fields=product_name,brands,ingredients_text_en,allergens_tags"
-FRESH_CATEGORIES = {"produce"}
+FRESH_CATEGORIES = {"produce", "meat"}  # plain produce / raw meat & fish: the item is its own ingredient
+QUERY_OVERRIDES = {  # names our fictional catalog words differently from real labels
+    "CHEESE-COTIJA": "cotija cheese",
+    "BUTTER": "salted butter",
+    "POPCORN": "microwave butter popcorn",
+    "COLA-CANE": "mexican cola cane sugar",
+    "LAGER-6PK": "mexican lager beer",
+    "GUAC-KIT": "guacamole",
+}
 NONFOOD_CATEGORIES = {"wireless", "household", "personal_care"}  # no food label to match
 MIN_OVERLAP = 0.5  # share of the query's words the matched product's name must contain
 FRESH_WORDS = re.compile(
@@ -88,7 +96,7 @@ def _close(want: set[str], name: str) -> bool:
 
 
 def match(product, pause: float) -> dict | None:
-    q = _query(product.name)
+    q = QUERY_OVERRIDES.get(product.sku) or _query(product.name)
     found = _get(SEARCH.format(q=urllib.parse.quote(q)))
     time.sleep(pause)
     if not found:
@@ -134,7 +142,10 @@ def main() -> int:
             for s, e in entries.items()
             if s not in products
             or products[s].category in NONFOOD_CATEGORIES
-            or (e.get("matched_product") and not _close(_words(_query(products[s].name)), e["matched_product"]))
+            or (
+                e.get("matched_product")
+                and not _close(_words(QUERY_OVERRIDES.get(s) or _query(products[s].name)), e["matched_product"])
+            )
         ]
         for s in drop:
             print(f"pruned {s}: {entries[s].get('matched_product')}")
@@ -150,7 +161,7 @@ def main() -> int:
             continue  # resume
         if p.category in NONFOOD_CATEGORIES:
             continue
-        single = (
+        single = p.category == "meat" or (
             (p.category in FRESH_CATEGORIES or p.perishable) and FRESH_WORDS.search(p.name) and len(_words(p.name)) <= 3
         )
         hit = None if single else match(p, args.pause)
