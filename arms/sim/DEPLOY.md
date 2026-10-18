@@ -233,3 +233,18 @@ tmux -L picky-pvla ls        # picky-pvla-db (Postgres :5433), picky-pvla-gw (:8
 - **Shared GPU:** when other jobs load vhagar (a SmolVLA fine-tune at ~90 % GPU and load ~28 on 16 cores during this
   test) the worker's replicator steps go from ~15-30 ms to 150-560 ms. Keep live streams off (`record.py` does not ask
   for `/ws/frames` unless `--live-frames`): every streamed camera is one more render product in every step.
+
+## 10. Judges' demo: checkout unload by the arm (contracts 0.2.4)
+
+The worker now implements `pick_from_basket` / `place_on_counter` and advertises the `basket_unload` capability in its
+hello: at the checkout counter the SO-101 (joint mode, IK on the rover model) lowers the lift to 0.32 m, swings back
+over the basket, attaches one unit (magic grasp, decided by code), lifts it out, then raises the lift and lays the
+unit on the counter spot the plan chose (`planogram.counter_spots`: bays of 3 on the checkout fixture's top,
+left → right). The unit stays in the scene (`on_counter`) until the handoff's `unload_basket` (staff bag it).
+
+- **Redeploy the worker** from this branch (`git pull` on vhagar, restart the tmux session as in section 5). A worker
+  started from an older checkout still connects (0.2.x), but its hello lacks `basket_unload`: the gateway then skips
+  the per-unit unload and the handoff unloads the basket at once (the 0.2.3 behaviour). `GET /api/sim/status` shows the
+  worker's capabilities.
+- Nothing else to configure; `PICKY_UNLOAD_BY_ARM=false` on the gateway turns the unload sequence off.
+- Smoke test without a GPU: `uv run pytest arms/sim/tests/test_worker_unload.py` (NullBackend).

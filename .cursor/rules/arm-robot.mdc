@@ -167,6 +167,15 @@ Isaac side: `make sim` on the GPU box (see arms/sim/README.md); `PICKY_SO101_DIR
   `instance_id` / `unit_freshness` / `BASKET_OFFSET_LOCAL`; `arms/gateway/tests/test_ground_truth.py`)
 - [x] Tests green; no secrets; README current
 
+## Judges' demo (contracts 0.2.4)
+
+- Optional RobotService extension for the checkout unload: `can_unload_to_counter`, `pick_from_basket`,
+  `place_on_counter`, `counter_units` on the 2D fake (always) and `SimRobot` (Isaac when the worker advertises
+  `basket_unload`, else not available there). Counter units are `ItemInstance.on_counter` (excluded from shelves in
+  truth) and are bagged by `unload_basket`.
+- T0: grasp `source=basket` → `pick_from_basket`; place `destination=counter` → reach check (`slot_reachable` on the
+  spot) + `place_on_counter`. Learned tiers fall back to T0 for the unload (they are trained on shelf grasps).
+
 ## Known limitations
 
 - Fake frames are schematic (flat label boxes, orthographic shelf face), not photoreal; no people are ever drawn.

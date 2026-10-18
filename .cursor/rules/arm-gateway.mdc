@@ -133,6 +133,15 @@ Several workers may connect at once; `GET /api/sim/status` shows which stores / 
 - [ ] Frontend consumes `/ws` + schemas (frontend arm)
 - [x] README up to date
 
+## Judges' demo (contracts 0.2.4)
+
+- REST: `GET /api/users/{id}/purchases`, `GET /api/verifications`, `POST /api/verifications/{id}`,
+  `GET /api/trips/{id}/payment` (see `contracts/api.md`, "Judges' demo"); `JudgesIndex` keeps the verification
+  cards and payment timelines from the event stream and feeds the photos into the purchase rows.
+- Checkout runs through `arms.trust.run_payment_agent` (`payment.agent_step` events) when `PICKY_PAYMENT_AGENT` is on.
+- `make demo` prints the unload lines, the photo cards and the payment timeline, and fails when a completed plan did
+  not unload at the counter.
+
 ## Known limitations
 
 - Trips, approvals and the event ring (last 1000 events) live in memory.
