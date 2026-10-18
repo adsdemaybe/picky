@@ -1,41 +1,56 @@
 "use client";
+import { Eye, Lock, Sparkles } from "lucide-react";
 import { useLayoutEffect } from "react";
 import { Conversation } from "@/components/AskPanel";
-import { Card, PageHead } from "@/components/ui";
+import { Panel } from "@/components/picky";
 import { useAsk } from "@/lib/assistant/store";
 import { maya } from "@/lib/data";
 import { fmt } from "@/lib/money";
 
 export default function AskPage() {
   const setOpen = useAsk((s) => s.setOpen);
-  // the full page replaces the drawer
+  // the full page replaces the sheet
   useLayoutEffect(() => {
     setOpen(false);
   }, [setOpen]);
   return (
-    <>
-      <PageHead kicker="Ask Picky" title="Your shopping and money assistant" />
-      <div className="grid grid-cols-12 gap-6">
-        <div className="col-span-12 flex h-[calc(100dvh-220px)] min-h-[520px] flex-col border border-ink bg-card lg:col-span-8">
-          <Conversation wide />
+    <div className="grid gap-6 lg:grid-cols-[1fr_340px]">
+      <Panel className="flex h-[calc(100dvh-180px)] min-h-[540px] animate-rise flex-col overflow-hidden">
+        <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+          <span className="grid size-10 place-items-center rounded-full bg-sky text-white">
+            <Sparkles className="size-5" aria-hidden />
+          </span>
+          <div>
+            <h1 className="text-[22px] leading-tight font-bold">Ask Picky</h1>
+            <p className="text-[13.5px] text-muted-foreground">Your shopping and money assistant</p>
+          </div>
         </div>
-        <aside className="col-span-12 flex flex-col gap-4 lg:col-span-4">
-          <Card variant="inset" accent="basil" className="p-4 text-[13.5px]">
-            <div className="label-caps mb-2">What Picky can see</div>
-            <ul className="flex flex-col gap-1.5 text-ink-2">
-              <li>Every purchase since July (107 lines, 15 trips)</li>
-              <li>Prices at 2 Picky stores, a T-Mobile store, Picky Online, a warehouse club, an open-box shop and a delivery app</li>
-              <li>13 weeks of price history and announced sales</li>
-              <li>Your budget ({fmt(32000)}/month) and rules (asks above {fmt(maya.mandate.ask_above_cents)})</li>
-            </ul>
-          </Card>
-          <Card variant="flat" className="p-4 text-[13px] text-ink-2">
-            <div className="label-caps mb-2">How answers work</div>
-            Claude chooses which lookups to run; the prices, totals and savings come from deterministic code over your data. It can&apos;t buy anything or move
-            money. Purchases still go through your rules and an explicit approval.
-          </Card>
-        </aside>
-      </div>
-    </>
+        <Conversation wide />
+      </Panel>
+      <aside className="flex flex-col gap-4">
+        <Panel className="p-5">
+          <div className="flex items-center gap-2 font-semibold">
+            <Eye className="size-4 text-sky" aria-hidden /> What Picky looks at
+          </div>
+          <ul className="mt-3 flex flex-col gap-2 text-[14px] text-muted-foreground">
+            <li>Your purchases since July</li>
+            <li>Prices at Picky Market, Picky Express, T-Mobile, Picky Online, a warehouse club, an open-box shop and a delivery app</li>
+            <li>13 weeks of price history and announced sales</li>
+            <li>
+              Your {fmt(32000)} monthly grocery budget and your rule to ask before anything over {fmt(maya.mandate.ask_above_cents)}
+            </li>
+          </ul>
+        </Panel>
+        <Panel className="bg-sky-wash p-5 ring-0">
+          <div className="flex items-center gap-2 font-semibold text-sky">
+            <Lock className="size-4" aria-hidden /> How answers work
+          </div>
+          <p className="mt-2 text-[14px]">
+            Claude decides which lookups to run. The prices, totals and savings come from plain code over your data, never from the AI&apos;s memory. Picky can&apos;t
+            buy anything or move money.
+          </p>
+        </Panel>
+      </aside>
+    </div>
   );
 }

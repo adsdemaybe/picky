@@ -191,7 +191,7 @@ export const useTrip = create<TripStore>((set, get) => {
       set((s) => ({ activeStop: stop.id, stopStatus: { ...s.stopStatus, [stop.id]: "active" } }));
       emit("robot.command", `goto ${stop.label}`);
       await drive(leg.path, token);
-      emit("robot.arrived", `${stop.label} · (${stop.pose.x.toFixed(1)}, ${stop.pose.y.toFixed(1)})`);
+      emit("robot.arrived", `${stop.label}, (${stop.pose.x.toFixed(1)}, ${stop.pose.y.toFixed(1)})`);
 
       if (stop.kind === "end") break;
       const p = productBySku[stop.sku!];
@@ -213,7 +213,7 @@ export const useTrip = create<TripStore>((set, get) => {
       set((s) => ({ robot: { ...s.robot, status: "scanning" } }));
       await sleep(1200, token);
       const slot = slotsOf(get().storeId)[stop.sku!];
-      emit("scan.result", `${slot.slot_id}: ${p.name} · ${slot.qty} on shelf${slot.deal ? ` · deal ${slot.deal.percent_off ?? ""}% off` : ""}`);
+      emit("scan.result", `${slot.slot_id}: ${p.name}, ${slot.qty} on shelf${slot.deal ? `, deal ${slot.deal.percent_off ?? ""}% off` : ""}`);
 
       let lot: string | undefined;
       const firstFreshPick = p.category === "produce" && slot.lots.length >= 3 && !get().approvalsLog.some((a) => a.kind === "pick");
@@ -258,7 +258,7 @@ export const useTrip = create<TripStore>((set, get) => {
       cart.map((c) => ({ sku: c.sku, unit_cents: c.unit_cents })),
       get().storeId,
     );
-    emit("mandate.decision", `${decision.verdict} · ${decision.reasons.map((r) => r.code).join(", ")}`);
+    emit("mandate.decision", `${decision.verdict}, ${decision.reasons.map((r) => r.code).join(", ")}`);
     const hash = cartHash(cart);
     const ans = await ask({ id: "ap_checkout", kind: "checkout", total_cents: total, cart_hash: hash, reasons: decision.reasons }, token, "approve");
     if (ans !== "approve") {
@@ -291,7 +291,7 @@ export const useTrip = create<TripStore>((set, get) => {
       rating: null,
       synthetic: false,
     }));
-    emit("checkout.completed", `${receipt.receipt_id} · $${(total / 100).toFixed(2)} · test mode`);
+    emit("checkout.completed", `${receipt.receipt_id}, $${(total / 100).toFixed(2)}, test mode`);
     set((s) => ({
       phase: "done",
       receipt,
@@ -378,12 +378,12 @@ export const useTrip = create<TripStore>((set, get) => {
         cart: onlineLines,
         startedAt: Date.now(),
       });
-      emit("trip.created", `${draft.title} · ${draft.lines.length} items · budget $${draft.budget_cents / 100}`);
+      emit("trip.created", `${draft.title}, ${draft.lines.length} items, budget $${draft.budget_cents / 100}`);
       emit("list.ready", draft.lines.map((l) => `${l.qty}× ${l.sku}`).join(", "));
       const nOnline = onlineLines.length;
-      emit("sourcing.split", `${draft.lines.length - nOnline} in store at ${store.name} · ${nOnline} online (${online.name})`);
-      emit("recs.ready", `${draft.recs.length} suggestions · ${accepted.length} kept · 0 sponsored`);
-      emit("route.planned", `${route.order.length - 2} stops · ${route.total_m.toFixed(1)} m (list-only ${base.total_m.toFixed(1)} m)`);
+      emit("sourcing.split", `${draft.lines.length - nOnline} in store at ${store.name}, ${nOnline} online (${online.name})`);
+      emit("recs.ready", `${draft.recs.length} suggestions, ${accepted.length} kept, 0 sponsored`);
+      emit("route.planned", `${route.order.length - 2} stops, ${route.total_m.toFixed(1)} m (list-only ${base.total_m.toFixed(1)} m)`);
       if (mode === "pickup") {
         const t = runToken;
         run(t).catch(() => {});

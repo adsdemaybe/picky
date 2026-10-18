@@ -36,13 +36,13 @@ function wirelessOffers(p: Product): Offer[] {
   const base = p.price_cents;
   if (p.category === "home_internet")
     return [
-      { retailer_id: "store_tmobile", retailer: "T-Mobile · University Way", kind: "store", price_cents: 0, regular_cents: 0, pack: 1, fee_cents: 0, fee_note: "$50/mo plan, $0 gateway", eta: "take home today", in_stock: true, note: "Free with a home internet plan" },
+      { retailer_id: "store_tmobile", retailer: "T-Mobile, University Way", kind: "store", price_cents: 0, regular_cents: 0, pack: 1, fee_cents: 0, fee_note: "$50/mo plan, $0 gateway", eta: "take home today", in_stock: true, note: "Free with a home internet plan" },
     ];
   const r = hash(p.sku);
   const out: Offer[] = [
     {
       retailer_id: "store_tmobile",
-      retailer: "T-Mobile · University Way",
+      retailer: "T-Mobile, University Way",
       kind: "store",
       price_cents: slot?.deal?.price_cents ?? base,
       regular_cents: base,
@@ -75,7 +75,7 @@ function wirelessOffers(p: Product): Offer[] {
       regular_cents: base,
       pack: 1,
       fee_cents: 599,
-      fee_note: "$5.99 shipping · 1-yr warranty",
+      fee_note: "$5.99 shipping, 1-year warranty",
       eta: "3–5 days",
       in_stock: true,
       note: null,

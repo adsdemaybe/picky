@@ -1,23 +1,28 @@
 "use client";
+import { Bot, ChevronRight, Search, Sparkles } from "lucide-react";
+import { motion } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
-import { OffersTable, Sparkline, VerdictBadge } from "@/components/PriceBits";
-import { Badge, Button, Card, CardHead, PageHead, Swatch, cx } from "@/components/ui";
+import { Suspense, useState } from "react";
+import { CountUp } from "@/components/motion";
+import { Money, Panel, ProductTile, SectionTitle, VerdictChip, categoryIcon } from "@/components/picky";
+import { OffersTable, Sparkline } from "@/components/PriceBits";
+import { Button } from "@/components/ui/button";
 import { useAsk } from "@/lib/assistant/store";
 import { TODAY, allProducts, mostBought, productBySku, type Product } from "@/lib/data";
 import { fmt } from "@/lib/money";
 import { alternativesFor, effective, historyFor, offersFor, robotStoreFor, searchProducts, upcomingFor, verdictFor } from "@/lib/prices";
 import { usePurchases } from "@/lib/usePurchases";
+import { cn } from "@/lib/utils";
 
 const CHIPS = [
-  { label: "Coffee", q: "coffee" },
-  { label: "Salsa", q: "salsa" },
-  { label: "Olive oil", q: "olive oil" },
-  { label: "Phone cases", q: "case" },
-  { label: "Earbuds", q: "earbuds" },
-  { label: "Chargers", q: "charger" },
-  { label: "Phones", q: "phone" },
+  { label: "Coffee", q: "coffee", cat: "pantry" },
+  { label: "Salsa", q: "salsa", cat: "pantry" },
+  { label: "Avocados", q: "avocado", cat: "produce" },
+  { label: "Olive oil", q: "olive oil", cat: "pantry" },
+  { label: "Phone cases", q: "case", cat: "case" },
+  { label: "Earbuds", q: "earbuds", cat: "audio" },
+  { label: "Chargers", q: "charger", cat: "charger" },
 ];
 
 export default function FindPage() {
@@ -31,97 +36,133 @@ export default function FindPage() {
 function Find() {
   const params = useSearchParams();
   const router = useRouter();
-  const [q, setQ] = useState(params.get("q") ?? "");
+  const query = params.get("q") ?? "";
+  const [q, setQ] = useState(query);
   const sku = params.get("sku");
-  const results = useMemo(() => searchProducts(params.get("q") ?? "", 16), [params]);
+  const results = searchProducts(query, 16);
 
   const go = (next: { q?: string; sku?: string }) => {
     const u = new URLSearchParams();
-    if (next.q ?? params.get("q")) u.set("q", next.q ?? params.get("q")!);
+    const nq = next.q ?? query;
+    if (nq) u.set("q", nq);
     if (next.sku) u.set("sku", next.sku);
-    router.push(`/find?${u.toString()}`);
+    router.push(`/find?${u.toString()}`, { scroll: false });
   };
 
   return (
-    <>
-      <PageHead kicker="Find & compare" title="Is it a good price, and where is it cheapest?" />
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          go({ q, sku: undefined });
-        }}
-        className="mb-3 flex border border-ink bg-card focus-within:outline-2 focus-within:outline-tomato"
-      >
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search groceries, phones, accessories…"
-          className="min-w-0 flex-1 bg-transparent px-4 py-3.5 font-display text-[21px] tracking-tight outline-none placeholder:text-muted"
-          aria-label="Search products"
-        />
-        <button className="border-l border-ink bg-ink px-5 text-[14px] font-medium text-paper hover:bg-night">Compare</button>
-      </form>
-      <div className="mb-7 flex flex-wrap items-center gap-2 text-[13px] text-muted">
-        Popular:
-        {CHIPS.map((c) => (
-          <button
-            key={c.q}
-            onClick={() => {
-              setQ(c.q);
-              go({ q: c.q });
-            }}
-            className="border border-line px-2 py-0.5 text-ink-2 hover:border-ink hover:text-ink"
-          >
-            {c.label}
-          </button>
-        ))}
-        <span className="ml-auto">Compares 7 retailers incl. open-box and warehouse.</span>
-      </div>
+    <div className="flex flex-col gap-8">
+      <section className="animate-rise">
+        <h1 className="text-[36px] leading-[1.05] font-bold md:text-[46px]">Is it a good price?</h1>
+        <p className="mt-2 max-w-[60ch] text-[16px] text-muted-foreground">
+          Picky checks seven stores, including open-box and warehouse prices, and 13 weeks of price history before you buy.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            go({ q, sku: undefined });
+          }}
+          className="mt-5 flex items-center gap-2 rounded-full bg-card p-2 pl-5 shadow-md ring-1 ring-foreground/[0.06] focus-within:ring-2 focus-within:ring-ring"
+        >
+          <Search className="size-5 text-muted-foreground" aria-hidden />
+          <input
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Coffee, salsa, a Pixel 9 case…"
+            aria-label="Search products"
+            className="min-w-0 flex-1 bg-transparent text-[18px] outline-none placeholder:text-muted-foreground"
+          />
+          <Button type="submit" size="lg">
+            Compare prices
+          </Button>
+        </form>
+        <div className="mt-4 flex flex-wrap gap-2">
+          {CHIPS.map((c) => {
+            const Icon = categoryIcon(c.cat, c.label);
+            const on = query === c.q;
+            return (
+              <button
+                key={c.q}
+                onClick={() => {
+                  setQ(c.q);
+                  go({ q: c.q });
+                }}
+                aria-pressed={on}
+                className={cn(
+                  "flex h-10 cursor-pointer items-center gap-2 rounded-full px-4 text-[14px] font-medium transition-colors",
+                  on ? "bg-foreground text-background" : "bg-card text-foreground ring-1 ring-foreground/[0.08] hover:bg-muted",
+                )}
+              >
+                <Icon className="size-4" aria-hidden />
+                {c.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
 
-      <div className="grid grid-cols-12 gap-6">
-        <div className={cx("col-span-12", sku ? "lg:col-span-5" : "")}>
-          {params.get("q") ? (
-            <ResultList products={results} selected={sku} onPick={(s) => go({ sku: s })} title={`${results.length} result${results.length === 1 ? "" : "s"} for "${params.get("q")}"`} />
+      <div className="grid gap-6 lg:grid-cols-12">
+        <div className={cn(sku ? "lg:col-span-5" : "lg:col-span-12")}>
+          {query ? (
+            <ResultList products={results} selected={sku} onPick={(s) => go({ sku: s })} title={`${results.length} result${results.length === 1 ? "" : "s"} for “${query}”`} />
           ) : (
             <ForYou onPick={(s) => go({ sku: s })} selected={sku} wide={!sku} />
           )}
         </div>
         {sku && productBySku[sku] && (
-          <div className="col-span-12 lg:col-span-7">
-            <Detail sku={sku} onPick={(s) => go({ sku: s })} />
+          <div className="lg:col-span-7">
+            <motion.div key={sku} initial={{ opacity: 0, y: 16, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: "spring", stiffness: 300, damping: 28 }}>
+              <Detail sku={sku} onPick={(s) => go({ sku: s })} />
+            </motion.div>
           </div>
         )}
       </div>
-    </>
+    </div>
+  );
+}
+
+function Row({ p, selected, onPick }: { p: Product; selected: boolean; onPick: () => void }) {
+  const best = offersFor(p.sku).find((o) => o.in_stock) ?? offersFor(p.sku)[0];
+  return (
+    <motion.button
+      onClick={onPick}
+      aria-current={selected}
+      variants={{ hidden: { opacity: 0, y: 10 }, show: { opacity: 1, y: 0 } }}
+      whileTap={{ scale: 0.98 }}
+      className={cn("relative flex w-full cursor-pointer items-center gap-3 rounded-xl p-3 text-left transition-colors", !selected && "hover:bg-muted")}
+    >
+      {selected && <motion.span layoutId="find-selected" className="absolute inset-0 rounded-xl bg-lime/50" transition={{ type: "spring", stiffness: 500, damping: 40 }} />}
+      <ProductTile color={p.label_color} category={p.category} name={p.name} size={44} className="relative" />
+      <div className="relative min-w-0 flex-1">
+        <div className="truncate font-semibold">{p.name}</div>
+        <div className="truncate text-[13px] text-muted-foreground">Cheapest at {best?.retailer.split(",")[0]}</div>
+      </div>
+      <div className="relative flex flex-col items-end gap-1">
+        {best && <Money cents={effective(best)} className="font-heading text-[17px] font-semibold" />}
+        <VerdictChip verdict={verdictFor(p.sku)} />
+      </div>
+    </motion.button>
   );
 }
 
 function ResultList({ products, selected, onPick, title }: { products: Product[]; selected: string | null; onPick: (s: string) => void; title: string }) {
-  if (!products.length) return <Card variant="flat" className="p-5 text-ink-2">Nothing matched. Try a broader word, like &ldquo;salsa&rdquo; or &ldquo;case&rdquo;.</Card>;
+  if (!products.length)
+    return (
+      <Panel className="p-6 text-center">
+        <p className="font-semibold">Nothing matched that.</p>
+        <p className="mt-1 text-muted-foreground">Try a simpler word, like “salsa” or “case”.</p>
+      </Panel>
+    );
   return (
-    <Card>
-      <CardHead title={title} meta="best price incl. fees" />
-      <ul className="divide-y divide-line">
-        {products.map((p) => {
-          const best = offersFor(p.sku).find((o) => o.in_stock) ?? offersFor(p.sku)[0];
-          return (
-            <li key={p.sku}>
-              <button onClick={() => onPick(p.sku)} className={cx("flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-paper", selected === p.sku && "bg-paper")}>
-                <Swatch color={p.label_color} className="size-3.5" />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[14px] font-medium">{p.name}</div>
-                  <div className="text-[12px] text-muted">
-                    {p.brand} · best at {best?.retailer}
-                  </div>
-                </div>
-                <VerdictBadge sku={p.sku} />
-                <span className="num w-[78px] text-right text-[14px]">{best ? fmt(effective(best)) : "·"}</span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-    </Card>
+    <div>
+      <SectionTitle>{title}</SectionTitle>
+      <Panel className="p-2">
+        <motion.div initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04 } } }}>
+        {products.map((p) => (
+          <Row key={p.sku} p={p} selected={selected === p.sku} onPick={() => onPick(p.sku)} />
+        ))}
+        </motion.div>
+      </Panel>
+    </div>
   );
 }
 
@@ -134,29 +175,42 @@ function ForYou({ onPick, selected, wide }: { onPick: (s: string) => void; selec
   const good = staples.filter((s) => verdictFor(s).label === "Good price" || offersFor(s).some((o) => o.note));
   const wait = [...staples, ...allProducts.map((p) => p.sku)].filter((s, i, a) => a.indexOf(s) === i && upcomingFor(s)).slice(0, 5);
   return (
-    <div className={cx("grid gap-6", wide && "lg:grid-cols-2")}>
-      <ResultList products={good.map((s) => productBySku[s])} selected={selected} onPick={onPick} title="Good buys on things you already get" />
-      <Card>
-        <CardHead title="Worth waiting for" meta="announced sales" />
-        <ul className="divide-y divide-line">
+    <div className={cn("grid gap-8", wide && "lg:grid-cols-2")}>
+      <div>
+        <SectionTitle>Good buys on your usual</SectionTitle>
+        <Panel className="p-2">
+          <motion.div initial="hidden" animate="show" variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}>
+            {good.map((s) => (
+              <Row key={s} p={productBySku[s]} selected={selected === s} onPick={() => onPick(s)} />
+            ))}
+          </motion.div>
+        </Panel>
+      </div>
+      <div>
+        <SectionTitle>Worth waiting for</SectionTitle>
+        <Panel className="p-2">
           {wait.map((s) => {
             const up = upcomingFor(s)!;
             const p = productBySku[s];
             return (
-              <li key={s}>
-                <button onClick={() => onPick(s)} className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-paper">
-                  <Swatch color={p.label_color} className="size-3.5" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[14px] font-medium">{p.name}</div>
-                    <div className="text-[12px] text-muted">{up.reason}</div>
-                  </div>
-                  <span className="num text-[13px] text-basil">{fmt(up.price_cents)}</span>
-                </button>
-              </li>
+              <button
+                key={s}
+                onClick={() => onPick(s)}
+                className={cn("flex w-full cursor-pointer items-center gap-3 rounded-xl p-3 text-left hover:bg-muted", selected === s && "bg-lime/50")}
+              >
+                <ProductTile color={p.label_color} category={p.category} name={p.name} size={44} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-semibold">{p.name}</div>
+                  <div className="truncate text-[13px] text-muted-foreground">{up.reason}</div>
+                </div>
+                <span className="rounded-full bg-amber-wash px-2.5 py-1 text-[13px] font-semibold text-amber-ink">
+                  <Money cents={up.price_cents} />
+                </span>
+              </button>
             );
           })}
-        </ul>
-      </Card>
+        </Panel>
+      </div>
     </div>
   );
 }
@@ -172,77 +226,73 @@ function Detail({ sku, onPick }: { sku: string; onPick: (s: string) => void }) {
   const ask = useAsk((s) => s.ask);
   const h = historyFor(sku);
   return (
-    <Card className="lg:sticky lg:top-6">
-      <div className="border-b border-line px-5 pt-4 pb-4">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="label-caps">
-              {p.brand} · {p.category.replace("_", " ")}
-            </div>
-            <h2 className="mt-1 font-display text-[26px] leading-tight font-semibold tracking-tight">{p.name}</h2>
-          </div>
-          <VerdictBadge sku={sku} big />
+    <Panel className="overflow-hidden lg:sticky lg:top-24">
+      <div className="flex items-start gap-4 p-5 pb-4">
+        <ProductTile color={p.label_color} category={p.category} name={p.name} size={64} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] text-muted-foreground">{p.brand}</div>
+          <h2 className="text-[26px] leading-tight font-bold">{p.name}</h2>
         </div>
-        <p className="mt-2 max-w-[56ch] text-[14.5px] text-ink-2">{v.why}</p>
-        <div className="mt-4 flex flex-wrap items-end gap-8">
+      </div>
+
+      <div className="mx-5 rounded-2xl bg-muted p-4">
+        <VerdictChip verdict={v} size="lg" />
+        <p className="mt-2 text-[17px] font-medium">{v.why}</p>
+        <div className="mt-4 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="label-caps">Best price</div>
-            <div className="num text-[32px] leading-none font-medium">{fmt(effective(best))}</div>
-            <div className="mt-1 text-[12.5px] text-muted">{best.retailer}</div>
+            <div className="text-[13px] text-muted-foreground">Best price today</div>
+            <CountUp cents={effective(best)} className="font-heading text-[40px] leading-none font-bold" />
+            <div className="mt-1 text-[13.5px] font-medium">at {best.retailer}</div>
+            {effective(worst) > effective(best) && (
+              <div className="mt-0.5 text-[13px] text-muted-foreground">
+                {fmt(effective(worst) - effective(best))} less than {worst.retailer.split(",")[0]}
+              </div>
+            )}
           </div>
-          {worst !== best && effective(worst) > effective(best) && (
-            <div>
-              <div className="label-caps">Spread</div>
-              <div className="num text-[20px]">{fmt(effective(worst) - effective(best))}</div>
-              <div className="mt-1 text-[12.5px] text-muted">vs {worst.retailer}</div>
-            </div>
-          )}
-          <div className="ml-auto">
-            <div className="label-caps mb-1">The Ave, 13 weeks</div>
-            <Sparkline sku={sku} w={240} h={56} />
-            <div className="font-mono text-[10.5px] text-muted">
-              low {fmt(Math.min(...h))} · high {fmt(Math.max(...h))}
+          <div>
+            <Sparkline sku={sku} w={240} h={70} />
+            <div className="tabular text-right text-[12px] text-muted-foreground">
+              Low {fmt(Math.min(...h))}, high {fmt(Math.max(...h))}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="px-5 py-2">
+      <div className="p-5">
+        <h3 className="mb-2 text-[16px] font-semibold">Every store we checked</h3>
         <OffersTable sku={sku} />
       </div>
 
       {alts.length > 0 && (
-        <div className="border-t border-line px-5 py-3">
-          <div className="label-caps mb-2">Cheaper swaps that do the same job</div>
-          <ul className="flex flex-col gap-1.5">
+        <div className="border-t border-border p-5">
+          <h3 className="mb-2 text-[16px] font-semibold">Cheaper swaps that do the same job</h3>
+          <div className="flex flex-col gap-1">
             {alts.map((a) => (
-              <li key={a.product.sku}>
-                <button onClick={() => onPick(a.product.sku)} className="flex w-full items-center gap-2 text-left text-[13.5px] hover:underline">
-                  <Swatch color={a.product.label_color} />
-                  <span className="flex-1">{a.product.name}</span>
-                  <span className="num text-basil">
-                    {fmt(effective(a.best))} <span className="text-muted">at {a.best.retailer.split(" ·")[0]}</span>
-                  </span>
-                </button>
-              </li>
+              <button key={a.product.sku} onClick={() => onPick(a.product.sku)} className="flex cursor-pointer items-center gap-3 rounded-xl p-2 text-left hover:bg-muted">
+                <ProductTile color={a.product.label_color} category={a.product.category} name={a.product.name} size={36} />
+                <span className="min-w-0 flex-1 truncate font-medium">{a.product.name}</span>
+                <span className="text-[13px] text-muted-foreground">{a.best.retailer.split(",")[0]}</span>
+                <Money cents={effective(a.best)} className="font-semibold text-leaf" />
+                <ChevronRight className="size-4 text-muted-foreground" aria-hidden />
+              </button>
             ))}
-          </ul>
+          </div>
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2 border-t border-ink px-5 py-3">
+      <div className="flex flex-wrap items-center gap-2 border-t border-border bg-muted/50 p-4">
         {robot ? (
-          <Link href={`/order?store=${robot.store_id}&add=${sku}`}>
-            <Button variant="primary">Add to a robot order · {robot.short}</Button>
-          </Link>
-        ) : (
-          <Badge>not stocked in a robot store</Badge>
-        )}
-        <Button variant="ghost" onClick={() => ask(`Is the ${p.name} a good price, and can I afford it?`)}>
-          Ask Picky about this
+          <Button asChild size="lg">
+            <Link href={`/order?store=${robot.store_id}&add=${sku}`}>
+              <Bot /> Have the robot grab it
+            </Link>
+          </Button>
+        ) : null}
+        <Button size="lg" variant="outline" onClick={() => ask(`Is the ${p.name} a good price, and can I afford it?`)}>
+          <Sparkles className="text-sky" /> Ask Picky
         </Button>
-        <span className="ml-auto font-mono text-[10.5px] text-muted">NO AFFILIATE OR SPONSORED RANKING</span>
+        <p className="w-full pt-1 text-[12.5px] text-muted-foreground">Ranked by price only. No store pays to appear here.</p>
       </div>
-    </Card>
+    </Panel>
   );
 }

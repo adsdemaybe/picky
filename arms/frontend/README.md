@@ -109,6 +109,7 @@ Commit `schemas/` and `src/lib/*types*.ts`; on merge conflicts regenerate, never
 ## How to run
 
 ### Demo app (works today, no backend)
+UI: shadcn/ui (radix) + Lucide on a custom token set; design direction and rules in [`DESIGN.md`](DESIGN.md).
 The shopper app in `src/` runs entirely on generated demo data plus a client-side trip replay. See
 [`APP_PLAN.md`](APP_PLAN.md) for the screens, data flow and task list.
 ```bash
@@ -117,9 +118,12 @@ npx pnpm@10.18.3 install         # or `pnpm install` if pnpm is on PATH
 npx pnpm@10.18.3 gen-data        # data/*.yaml → src/data/generated/*.json (gitignored; also runs before dev/build)
 npx pnpm@10.18.3 dev             # http://localhost:3000 : Overview, Purchases, New order, Live trip, Permissions
 ```
-- **Live view sources:** the feed's "source" menu switches between the simulated camera (default), a direct stream URL
-  (MJPEG `<img>` or MP4/WebM `<video>`; preset with `NEXT_PUBLIC_STREAM_URL`) and gateway frames
-  (`NEXT_PUBLIC_GATEWAY_URL` → `WS /ws/frames`, only `blurred=true` frames are drawn).
+- **Live feed (`/live`, connecting the real robot):** one connection layer in `src/lib/feed.ts`, three sources picked
+  on the Live page (saved per browser): **Simulated** (in-browser trip, no backend), **Robot gateway**
+  (`WS /ws/frames?trip_id=` → `frame` events per camera `head|wrist|basket|overview`, only `blurred=true` drawn, plus
+  `robot.state` for pose/status/basket; `GET /health` for the status box; auto-reconnect with backoff), and **Direct
+  streams** (an MJPEG/MP4 URL per camera). Preset with `NEXT_PUBLIC_GATEWAY_URL` / `NEXT_PUBLIC_STREAM_URL`. The
+  gateway must allow CORS from the app origin. The trip page's camera panel uses the same source.
 - **Ask Picky (Claude):** `cp .env.example .env.local` and set `ANTHROPIC_API_KEY`. The `/api/chat` route runs Claude
   (`claude-opus-5-5`, low effort, server-side refusal fallback) over deterministic tools in `src/lib/assistant/tools.ts`;
   with no key or on any API error it answers offline from the same tools. Stand-in until the agent arm is reachable

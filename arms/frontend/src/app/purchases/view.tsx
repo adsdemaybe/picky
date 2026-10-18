@@ -1,166 +1,169 @@
 "use client";
-import { Fragment, useMemo, useState } from "react";
+import { ChevronDown, Star } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Money, Panel, ProductTile, SectionTitle } from "@/components/picky";
 import { SpendChart } from "@/components/SpendChart";
-import { Badge, Card, CardHead, Money, PageHead, Stars, cx } from "@/components/ui";
+import { Badge } from "@/components/ui/badge";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MONTHLY_BUDGET_CENTS, fmtDate, mostBought, productBySku, storeName, weeklyByCategory } from "@/lib/data";
 import { fmt } from "@/lib/money";
 import { usePurchases } from "@/lib/usePurchases";
+import { cn } from "@/lib/utils";
 
-export default function PurchasesPage() {
+export default function SpendingPage() {
   const { purchases, trips } = usePurchases();
   const [open, setOpen] = useState<string | null>(trips[0]?.trip_id ?? null);
-  const [filter, setFilter] = useState<"all" | "store_ave" | "online">("all");
+  const [filter, setFilter] = useState("all");
   const [ratings, setRatings] = useState<Record<string, number>>({});
   const rows = useMemo(() => weeklyByCategory(purchases, 12), [purchases]);
   const top = useMemo(() => mostBought(purchases, 8), [purchases]);
   const total12 = rows.reduce((s, r) => s + r.total, 0);
-  const shown = trips.filter((t) => filter === "all" || t.store_id === filter);
+  const shown = trips.filter((t) => filter === "all" || (filter === "online" ? t.store_id === "online" : t.store_id !== "online"));
+  const rated = Object.keys(ratings).length;
 
   return (
-    <>
-      <PageHead kicker="Spending" title="Everything you've bought since July">
-        <div className="text-right">
-          <div className="label-caps">Last 12 weeks</div>
-          <div className="num text-[26px] font-medium">{fmt(total12)}</div>
+    <div className="flex flex-col gap-8">
+      <section className="flex animate-rise flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-[36px] leading-[1.05] font-bold md:text-[46px]">Where your money went</h1>
+          <p className="mt-2 text-[16px] text-muted-foreground">Every grocery and tech purchase since July, by week and by trip.</p>
         </div>
-      </PageHead>
+        <div className="rounded-2xl bg-sky px-5 py-3 text-white">
+          <div className="text-[13px] text-white/80">Last 12 weeks</div>
+          <Money cents={total12} className="font-heading text-[30px] leading-tight font-bold" />
+          <div className="text-[13px] text-white/80">about {fmt(Math.round(total12 / 12))} a week</div>
+        </div>
+      </section>
 
-      <Card className="mb-8 p-5">
-        <div className="mb-4 flex items-baseline justify-between">
-          <h2 className="font-display text-[19px] font-semibold">Weekly spend by category</h2>
-          <span className="text-[13px] text-muted">avg {fmt(Math.round(total12 / 12))} / week</span>
-        </div>
+      <Panel className="p-5 md:p-6">
+        <SectionTitle>Spending by week</SectionTitle>
         <SpendChart rows={rows} budgetPerWeek={Math.round((MONTHLY_BUDGET_CENTS * 12) / 52)} />
-      </Card>
+      </Panel>
 
-      <div className="grid grid-cols-12 gap-6">
-        <section className="col-span-12 xl:col-span-8">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="font-display text-[19px] font-semibold">Trips</h2>
-            <div className="flex border border-line text-[12.5px]">
-              {(["all", "store_ave", "online"] as const).map((f) => (
-                <button
-                  key={f}
-                  onClick={() => setFilter(f)}
-                  className={cx("px-3 py-1", filter === f ? "bg-ink text-paper" : "text-ink-2 hover:bg-card", f !== "all" && "border-l border-line")}
-                >
-                  {f === "all" ? "All" : storeName(f)}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="border border-line bg-card">
-            <table className="w-full text-[14px]">
-              <thead>
-                <tr className="label-caps border-b border-line text-left">
-                  <th className="py-2 pl-4 font-normal">Date</th>
-                  <th className="py-2 font-normal">Where</th>
-                  <th className="py-2 font-normal">Items</th>
-                  <th className="py-2 pr-4 text-right font-normal">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((t) => (
-                  <Fragment key={t.trip_id}>
-                    <tr
-                      className={cx("cursor-pointer border-b border-line hover:bg-paper", open === t.trip_id && "bg-paper")}
-                      onClick={() => setOpen(open === t.trip_id ? null : t.trip_id)}
-                    >
-                      <td className="py-2.5 pl-4">
-                        <span className="mr-2 inline-block w-3 font-mono text-muted">{open === t.trip_id ? "−" : "+"}</span>
-                        {fmtDate(t.ts, { weekday: "short", month: "short", day: "numeric" })}
-                        {t.trip_id === "trip_maya_1017" && <Badge tone="tomato" className="ml-2">today · robot</Badge>}
-                      </td>
-                      <td>
-                        <Badge tone={t.store_id === "online" ? "plum" : "basil"}>{storeName(t.store_id)}</Badge>
-                      </td>
-                      <td className="num text-ink-2">
-                        {t.items} items · {t.lines.length} lines
-                      </td>
-                      <td className="num pr-4 text-right font-medium">{fmt(t.total_cents)}</td>
-                    </tr>
-                    {open === t.trip_id && (
-                      <tr className="border-b border-line bg-paper">
-                        <td colSpan={4} className="px-4 pt-1 pb-3">
-                          <table className="w-full text-[13px]">
-                            <tbody>
-                              {t.lines.map((l) => {
-                                const p = productBySku[l.sku];
-                                const r = ratings[l.purchase_id] ?? l.rating;
-                                const base = p.price_cents;
-                                return (
-                                  <tr key={l.purchase_id} className="border-b border-line/50 last:border-0">
-                                    <td className="py-1.5 pl-5">
-                                      <span className="num mr-2 text-muted">{l.qty}×</span>
-                                      {p.name}
-                                    </td>
-                                    <td className="num text-right text-ink-2">
-                                      {fmt(l.unit_price_cents)}
-                                      {l.unit_price_cents < base && <span className="ml-1.5 text-basil">−{Math.round((1 - l.unit_price_cents / base) * 100)}%</span>}
-                                    </td>
-                                    <td className="w-[150px] pl-4 text-right">
-                                      <RateInput value={r} onChange={(n) => setRatings((x) => ({ ...x, [l.purchase_id]: n }))} />
-                                    </td>
-                                  </tr>
-                                );
-                              })}
-                            </tbody>
-                          </table>
-                          {t.synthetic && <div className="mt-2 font-mono text-[10.5px] text-muted">DEMO HISTORY · generated from the fixture profile</div>}
-                        </td>
-                      </tr>
-                    )}
-                  </Fragment>
+      <div className="grid gap-8 lg:grid-cols-12">
+        <section className="lg:col-span-8">
+          <SectionTitle
+            action={
+              <ToggleGroup type="single" value={filter} onValueChange={(v) => v && setFilter(v)} className="rounded-full bg-muted p-1" aria-label="Filter trips">
+                {[
+                  ["all", "All"],
+                  ["store", "In store"],
+                  ["online", "Online"],
+                ].map(([v, l]) => (
+                  <ToggleGroupItem key={v} value={v} className="h-8 rounded-full px-3.5 text-[13px] data-[state=on]:bg-card data-[state=on]:shadow-sm">
+                    {l}
+                  </ToggleGroupItem>
                 ))}
-              </tbody>
-            </table>
+              </ToggleGroup>
+            }
+          >
+            Trips
+          </SectionTitle>
+          <div className="flex flex-col gap-2">
+            {shown.map((t) => {
+              const isOpen = open === t.trip_id;
+              return (
+                <Panel key={t.trip_id} className="overflow-hidden">
+                  <button
+                    onClick={() => setOpen(isOpen ? null : t.trip_id)}
+                    aria-expanded={isOpen}
+                    className="flex w-full cursor-pointer items-center gap-3 p-4 text-left hover:bg-muted/60"
+                  >
+                    <div className="flex -space-x-2">
+                      {t.lines.slice(0, 3).map((l) => {
+                        const p = productBySku[l.sku];
+                        return <ProductTile key={l.purchase_id} color={p.label_color} category={p.category} name={p.name} size={34} className="ring-2 ring-card" />;
+                      })}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2 font-semibold">
+                        {fmtDate(t.ts, { weekday: "long", month: "short", day: "numeric" })}
+                        {t.trip_id.startsWith("trip_maya_1017") && <Badge variant="lime">Today, by robot</Badge>}
+                      </div>
+                      <div className="text-[13px] text-muted-foreground">
+                        {t.items} items at {storeName(t.store_id)}
+                      </div>
+                    </div>
+                    <Money cents={t.total_cents} className="font-heading text-[18px] font-semibold" />
+                    <ChevronDown className={cn("size-5 text-muted-foreground transition-transform", isOpen && "rotate-180")} aria-hidden />
+                  </button>
+                  {isOpen && (
+                    <ul className="animate-rise border-t border-border px-4 py-2">
+                      {t.lines.map((l) => {
+                        const p = productBySku[l.sku];
+                        const r = ratings[l.purchase_id] ?? l.rating;
+                        const off = l.unit_price_cents < p.price_cents ? Math.round((1 - l.unit_price_cents / p.price_cents) * 100) : 0;
+                        return (
+                          <li key={l.purchase_id} className="flex items-center gap-3 py-2">
+                            <ProductTile color={p.label_color} category={p.category} name={p.name} size={32} />
+                            <span className="min-w-0 flex-1 truncate text-[14px]">
+                              <span className="text-muted-foreground">{l.qty} × </span>
+                              {p.name}
+                            </span>
+                            {off > 0 && <Badge variant="lime">{off}% off</Badge>}
+                            <Money cents={l.unit_price_cents} className="w-16 text-right text-[14px]" />
+                            <RateInput name={p.name} value={r} onChange={(n) => setRatings((x) => ({ ...x, [l.purchase_id]: n }))} />
+                          </li>
+                        );
+                      })}
+                      {t.synthetic && <li className="pt-1 pb-2 text-[12px] text-muted-foreground">Demo history generated from Maya&apos;s profile.</li>}
+                    </ul>
+                  )}
+                </Panel>
+              );
+            })}
           </div>
-          {Object.keys(ratings).length > 0 && (
-            <p className="mt-2 text-[13px] text-basil">
-              {Object.keys(ratings).length} new rating{Object.keys(ratings).length > 1 ? "s" : ""}. Your next order&apos;s suggestions will use them.
+          {rated > 0 && (
+            <p className="mt-3 rounded-xl bg-lime px-4 py-3 text-[14px] font-medium text-lime-ink" role="status">
+              Thanks. Picky will use {rated === 1 ? "that rating" : `those ${rated} ratings`} the next time it suggests something.
             </p>
           )}
         </section>
 
-        <Card className="col-span-12 self-start xl:col-span-4">
-          <CardHead title="What you buy most" meta="avg price paid" />
-          <ol className="divide-y divide-line">
-            {top.map((r, i) => (
-              <li key={r.sku} className="grid grid-cols-[22px_1fr_auto] items-center gap-2 px-4 py-2.5">
-                <span className="num text-[12px] text-muted">{i + 1}</span>
-                <div className="min-w-0">
-                  <div className="truncate text-[14px]">{productBySku[r.sku].name}</div>
-                  <div className="text-[12px] text-muted">
-                    {r.times} trips · {r.qty} units {r.avg_rating ? <>· <Stars n={Math.round(r.avg_rating)} /></> : null}
+        <section className="lg:col-span-4">
+          <SectionTitle>What you buy most</SectionTitle>
+          <Panel className="p-2">
+            {top.map((r) => {
+              const p = productBySku[r.sku];
+              return (
+                <div key={r.sku} className="flex items-center gap-3 rounded-xl p-2.5">
+                  <ProductTile color={p.label_color} category={p.category} name={p.name} size={40} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-[14px] font-semibold">{p.name}</div>
+                    <div className="text-[12.5px] text-muted-foreground">
+                      {r.times} trips{r.avg_rating ? `, rated ${r.avg_rating.toFixed(1)}` : ""}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <Money cents={r.avg_unit_cents} className="font-semibold" />
+                    <div className="text-[11.5px] text-muted-foreground">usual price</div>
                   </div>
                 </div>
-                <Money cents={r.avg_unit_cents} className="text-[13.5px]" />
-              </li>
-            ))}
-          </ol>
-        </Card>
+              );
+            })}
+          </Panel>
+        </section>
       </div>
-    </>
+    </div>
   );
 }
 
-function RateInput({ value, onChange }: { value: number | null; onChange: (n: number) => void }) {
+function RateInput({ name, value, onChange }: { name: string; value: number | null; onChange: (n: number) => void }) {
   const [h, setH] = useState(0);
   const v = h || value || 0;
   return (
-    <span className="inline-flex" onMouseLeave={() => setH(0)} role="radiogroup" aria-label="Rate">
+    <span className="inline-flex" onMouseLeave={() => setH(0)} role="radiogroup" aria-label={`Rate ${name}`}>
       {[1, 2, 3, 4, 5].map((n) => (
         <button
           key={n}
-          onClick={(e) => {
-            e.stopPropagation();
-            onChange(n);
-          }}
+          role="radio"
+          aria-checked={value === n}
+          onClick={() => onChange(n)}
           onMouseEnter={() => setH(n)}
-          className={cx("px-[1px] text-[14px] leading-none", n <= v ? "text-turmeric" : "text-line-strong hover:text-turmeric")}
-          aria-label={`${n} stars`}
+          className="cursor-pointer p-0.5"
+          aria-label={`${n} star${n > 1 ? "s" : ""}`}
         >
-          ★
+          <Star className={cn("size-4 transition-colors", n <= v ? "fill-amber text-amber" : "text-input")} strokeWidth={1.8} />
         </button>
       ))}
     </span>

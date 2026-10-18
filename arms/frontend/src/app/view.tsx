@@ -1,198 +1,281 @@
 "use client";
+import { Bot, ChevronRight, Plus, Check } from "lucide-react";
 import Link from "next/link";
-import { SUGGESTIONS } from "@/components/AskPanel";
-import { Badge, Button, Card, CardHead, Meter, Money, PageHead } from "@/components/ui";
+import { useState } from "react";
+import { motion } from "motion/react";
+import { HowItWorks, RobotArt } from "@/components/art";
+import { LottieSlot } from "@/components/media";
+import { CountUp, Reveal, itemVariants, listVariants } from "@/components/motion";
+import { Meter, Money, Panel, ProductTile, SectionTitle, VerdictChip } from "@/components/picky";
+import { Button } from "@/components/ui/button";
 import { useAsk } from "@/lib/assistant/store";
-import { MONTHLY_BUDGET_CENTS, TODAY, fmtDate, productBySku, runningLow, storeName } from "@/lib/data";
+import { MONTHLY_BUDGET_CENTS, TODAY, fmtDate, mostBought, productBySku, runningLow, storeName } from "@/lib/data";
 import { fmt } from "@/lib/money";
+import { effective, offersFor, upcomingFor, verdictFor } from "@/lib/prices";
 import { cartTotal, useTrip } from "@/lib/trip";
 import { savedCents, usePurchases } from "@/lib/usePurchases";
+import { cn } from "@/lib/utils";
 
-export default function Overview() {
+export default function Home() {
   const { purchases, trips } = usePurchases();
   const month = trips.filter((t) => new Date(t.ts).getMonth() === TODAY.getMonth());
   const spent = month.reduce((s, t) => s + t.total_cents, 0);
-  const daysInMonth = 31;
-  const pace = Math.round((MONTHLY_BUDGET_CENTS * TODAY.getDate()) / daysInMonth);
-  const projected = Math.round((spent / TODAY.getDate()) * daysInMonth);
-  const low = runningLow(purchases).slice(0, 6);
+  const pace = Math.round((MONTHLY_BUDGET_CENTS * TODAY.getDate()) / 31);
+  const projected = Math.round((spent / TODAY.getDate()) * 31);
   const saved = savedCents(purchases.filter((p) => new Date(p.ts).getMonth() === TODAY.getMonth()));
-  const avgTrip = Math.round(trips.slice(0, 8).reduce((s, t) => s + t.total_cents, 0) / Math.min(8, trips.length));
+  const low = runningLow(purchases).slice(0, 5);
+  const staples = mostBought(purchases.filter((p) => TODAY.getTime() - Date.parse(p.ts) < 84 * 86_400_000), 14).map((m) => m.sku);
+  const goodBuys = staples.filter((s) => ["Good price", "Wait"].includes(verdictFor(s).label) || offersFor(s).some((o) => o.note)).slice(0, 4);
+  const coffee = upcomingFor("COFFEE");
+  const ask = useAsk((s) => s.ask);
 
   return (
-    <>
-      <PageHead kicker="Saturday, October 17" title="Good afternoon, Maya.">
-        <div className="flex gap-2">
-          <Link href="/find">
-            <Button variant="ghost">Compare prices</Button>
-          </Link>
-          <Link href="/order">
-            <Button variant="primary">Send the robot</Button>
-          </Link>
+    <div className="flex flex-col gap-10">
+      <LiveBanner />
+
+      <section className="relative overflow-hidden rounded-[28px] bg-leaf text-white">
+        <div className="pointer-events-none absolute -top-24 -right-24 size-[420px] rounded-full bg-lime/20 blur-3xl" aria-hidden />
+        <div className="relative grid items-center gap-2 p-6 md:grid-cols-[1.25fr_1fr] md:p-10">
+          <motion.div initial="hidden" animate="show" variants={listVariants}>
+            <motion.p variants={itemVariants} className="text-[15px] font-medium text-white/75">
+              Saturday, October 17
+            </motion.p>
+            <motion.h1 variants={itemVariants} className="mt-1 text-[40px] leading-[1.02] font-bold md:text-[56px]">
+              Good afternoon, Maya.
+            </motion.h1>
+            <motion.p variants={itemVariants} className="mt-3 max-w-[46ch] text-[17px] text-white/85">
+              You&apos;re <span className="rounded-md bg-lime px-1.5 font-semibold text-lime-ink">{fmt(pace - spent)} under</span> your grocery pace, and{" "}
+              {low.length} things you buy regularly are probably running low.{coffee ? " Hold off on coffee: it's $2 off from Friday." : ""}
+            </motion.p>
+            <motion.div variants={itemVariants} className="mt-6 flex flex-wrap gap-2">
+              <Button asChild size="lg" variant="lime">
+                <Link href="/order">
+                  <Bot /> Send the robot
+                </Link>
+              </Button>
+              <Button size="lg" variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white" onClick={() => ask("How can I save on groceries?")}>
+                How can I save this month?
+              </Button>
+            </motion.div>
+          </motion.div>
+          <motion.div initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }} transition={{ type: "spring", stiffness: 120, damping: 18, delay: 0.2 }}>
+            <LottieSlot slot="robotHero" className="mx-auto aspect-[8/7] w-full max-w-[380px]" fallback={<RobotArt />} />
+          </motion.div>
         </div>
-      </PageHead>
+      </section>
 
-      <LiveStrip />
-      <AskBar />
+      <section className="grid gap-6 lg:grid-cols-[380px_1fr]">
+        <Reveal>
+          <Panel className="h-full p-5">
+            <div className="flex items-baseline justify-between">
+              <span className="font-semibold">October groceries</span>
+              <Link href="/purchases" className="text-[13.5px] font-semibold text-sky hover:underline">
+                Details
+              </Link>
+            </div>
+            <div className="mt-2 flex items-baseline gap-2">
+              <CountUp cents={spent} className="font-heading text-[40px] leading-none font-bold" />
+              <span className="text-muted-foreground">
+                of <Money cents={MONTHLY_BUDGET_CENTS} />
+              </span>
+            </div>
+            <Meter value={spent} max={MONTHLY_BUDGET_CENTS} pace={pace} tone="sky" className="mt-4" />
+            <div className="mt-2 text-[12.5px] text-muted-foreground">The line marks where you&apos;d be on budget today</div>
+            <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
+              {(
+                [
+                  ["Trips", null, month.length],
+                  ["On track for", projected, null],
+                  ["Saved on deals", saved, null],
+                ] as const
+              ).map(([k, cents, n]) => (
+                <div key={k} className="rounded-xl bg-muted px-2 py-2.5">
+                  <dd className="font-heading text-[18px] font-semibold">{cents !== null ? <CountUp cents={cents} /> : n}</dd>
+                  <dt className="text-[12px] text-muted-foreground">{k}</dt>
+                </div>
+              ))}
+            </dl>
+          </Panel>
+        </Reveal>
+        <Reveal delay={0.08}>
+          <Panel className="h-full p-6 md:p-8">
+            <h2 className="mb-6 text-[20px] font-semibold">How Picky works</h2>
+            <HowItWorks />
+          </Panel>
+        </Reveal>
+      </section>
 
-      <div className="grid grid-cols-12 gap-6">
-        {/* the one big number */}
-        <section className="col-span-12 lg:col-span-7">
-          <div className="label-caps">Groceries in October</div>
-          <div className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <span className="num font-display text-[72px] leading-none font-semibold tracking-[-0.04em]">{fmt(spent)}</span>
-            <span className="text-[17px] text-ink-2">
-              of <Money cents={MONTHLY_BUDGET_CENTS} /> budget
-            </span>
-          </div>
-          <Meter value={spent} max={MONTHLY_BUDGET_CENTS} marks={[pace]} className="mt-5" />
-          <div className="mt-2 flex justify-between font-mono text-[11.5px] text-muted">
-            <span>Oct 1</span>
-            <span>│ today&apos;s pace {fmt(pace)}</span>
-            <span>Oct 31</span>
-          </div>
-          <p className="mt-4 max-w-[52ch] text-[15px] text-ink-2">
-            {spent <= pace ? (
-              <>
-                You&apos;re <strong className="text-basil">{fmt(pace - spent)} under pace</strong> after {month.length} trips. At this rate October
-                lands near <span className="num">{fmt(projected)}</span>.
-              </>
-            ) : (
-              <>
-                You&apos;re <strong className="text-tomato">{fmt(spent - pace)} over pace</strong>. At this rate October lands near{" "}
-                <span className="num">{fmt(projected)}</span>.
-              </>
-            )}
-          </p>
+      <section>
+        <SectionTitle
+          action={
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/order?preset=basics">
+                Restock with the robot <ChevronRight />
+              </Link>
+            </Button>
+          }
+        >
+          Probably running low
+        </SectionTitle>
+        <RunningLow items={low} />
+      </section>
 
-          <dl className="mt-7 grid grid-cols-3 border-y border-line">
-            {[
-              ["Trips this month", String(month.length)],
-              ["Average basket", fmt(avgTrip)],
-              ["Saved on deals", fmt(saved)],
-            ].map(([k, v], i) => (
-              <div key={k} className={i ? "border-l border-line px-4 py-3" : "py-3 pr-4"}>
-                <dt className="label-caps">{k}</dt>
-                <dd className="num mt-1 text-[22px] font-medium">{v}</dd>
-              </div>
-            ))}
-          </dl>
-        </section>
-
-        {/* running low */}
-        <Card className="col-span-12 self-start lg:col-span-5 lg:mt-[-8px]">
-          <CardHead title="Probably running low" meta="from your purchase rhythm" />
-          <ul className="divide-y divide-line">
-            {low.map((r) => {
-              const p = productBySku[r.sku];
+      <section className="grid gap-8 lg:grid-cols-2">
+        <div>
+          <SectionTitle
+            action={
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/find">
+                  Compare anything <ChevronRight />
+                </Link>
+              </Button>
+            }
+          >
+            Prices on things you buy
+          </SectionTitle>
+          <Panel className="p-2">
+            {goodBuys.map((s) => {
+              const p = productBySku[s];
+              const best = offersFor(s).find((o) => o.in_stock) ?? offersFor(s)[0];
+              const v = verdictFor(s);
               return (
-                <li key={r.sku} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                  <div className="min-w-0">
-                    <div className="truncate text-[14px] font-medium">{p.name}</div>
-                    <div className="text-[12.5px] text-muted">
-                      every ~{r.every_days} days · last bought {r.since_days} days ago
-                    </div>
+                <Link key={s} href={`/find?sku=${s}`} className="flex items-center gap-3 rounded-xl p-3 transition-colors hover:bg-muted">
+                  <ProductTile color={p.label_color} category={p.category} name={p.name} size={44} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate font-semibold">{p.name}</div>
+                    <div className="truncate text-[13px] text-muted-foreground">{v.why}</div>
                   </div>
-                  {r.due_in_days <= 0 ? <Badge tone="tomato">due</Badge> : <Badge tone="turmeric">in {r.due_in_days}d</Badge>}
-                </li>
+                  <div className="flex flex-col items-end gap-1">
+                    <Money cents={effective(best)} className="font-heading text-[17px] font-semibold" />
+                    <VerdictChip verdict={v} />
+                  </div>
+                </Link>
               );
             })}
-          </ul>
-          <div className="border-t border-line px-4 py-3">
-            <Link href="/order?preset=basics" className="text-[13.5px] font-medium text-tomato hover:underline">
-              Add these to a basics order →
-            </Link>
-          </div>
-        </Card>
+          </Panel>
+        </div>
 
-        {/* recent trips */}
-        <section className="col-span-12">
-          <div className="mb-2 flex items-baseline justify-between">
-            <h2 className="font-display text-[19px] font-semibold">Recent trips</h2>
-            <Link href="/purchases" className="text-[13.5px] text-ink-2 hover:text-ink hover:underline">
-              All {trips.length} trips →
-            </Link>
-          </div>
-          <div className="grid gap-px border border-line bg-line sm:grid-cols-3">
-            {trips.slice(0, 3).map((t) => (
-              <div key={t.trip_id} className="bg-card px-4 py-3.5">
-                <div className="flex items-center justify-between">
-                  <span className="font-mono text-[12px] text-muted">{fmtDate(t.ts, { weekday: "short", month: "short", day: "numeric" })}</span>
-                  <Badge tone={t.store_id === "online" ? "plum" : "basil"}>{storeName(t.store_id)}</Badge>
+        <div>
+          <SectionTitle
+            action={
+              <Button asChild variant="ghost" size="sm">
+                <Link href="/purchases">
+                  All {trips.length} trips <ChevronRight />
+                </Link>
+              </Button>
+            }
+          >
+            Recent trips
+          </SectionTitle>
+          <Panel className="p-2">
+            {trips.slice(0, 4).map((t) => (
+              <Link key={t.trip_id} href="/purchases" className="flex items-center gap-3 rounded-xl p-3 transition-colors hover:bg-muted">
+                <div className="flex -space-x-2">
+                  {t.lines.slice(0, 4).map((l) => {
+                    const p = productBySku[l.sku];
+                    return <ProductTile key={l.purchase_id} color={p.label_color} category={p.category} name={p.name} size={36} className="ring-2 ring-card" />;
+                  })}
                 </div>
-                <div className="num mt-2 text-[24px] font-medium">{fmt(t.total_cents)}</div>
-                <div className="mt-1 line-clamp-2 text-[13px] text-ink-2">
-                  {t.lines
-                    .slice(0, 4)
-                    .map((l) => productBySku[l.sku]?.name.split(" ").slice(0, 2).join(" "))
-                    .join(", ")}
-                  {t.lines.length > 4 ? ` +${t.lines.length - 4} more` : ""}
+                <div className="min-w-0 flex-1">
+                  <div className="font-semibold">{fmtDate(t.ts, { weekday: "long", month: "short", day: "numeric" })}</div>
+                  <div className="text-[13px] text-muted-foreground">
+                    {t.items} items at {storeName(t.store_id)}
+                  </div>
                 </div>
-              </div>
+                <Money cents={t.total_cents} className="font-heading text-[17px] font-semibold" />
+              </Link>
             ))}
-          </div>
-        </section>
-      </div>
-    </>
+          </Panel>
+        </div>
+      </section>
+    </div>
   );
 }
 
-function LiveStrip() {
-  const { phase, draft, cart, robot, mode, activeStop, stops } = useTrip();
+function RunningLow({ items }: { items: ReturnType<typeof runningLow> }) {
+  const [added, setAdded] = useState<Set<string>>(new Set());
+  return (
+    <motion.div
+      className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-3 md:overflow-visible md:px-0 lg:grid-cols-5"
+      variants={listVariants}
+      initial="hidden"
+      whileInView="show"
+      viewport={{ once: true, margin: "-60px" }}
+    >
+      {items.map((r) => {
+        const p = productBySku[r.sku];
+        const on = added.has(r.sku);
+        const best = offersFor(r.sku).find((o) => o.in_stock);
+        return (
+          <motion.div
+            key={r.sku}
+            variants={itemVariants}
+            whileHover={{ y: -4 }}
+            className="flex w-[160px] shrink-0 snap-start flex-col rounded-2xl bg-card p-3 ring-1 ring-foreground/[0.07] transition-shadow hover:shadow-md md:w-auto"
+          >
+            <div className="grid aspect-[4/3] place-items-center rounded-xl" style={{ background: `${p.label_color}33` }}>
+              <motion.div whileHover={{ rotate: -6, scale: 1.08 }} transition={{ type: "spring", stiffness: 400, damping: 12 }}>
+                <ProductTile color={p.label_color} category={p.category} name={p.name} size={56} />
+              </motion.div>
+            </div>
+            <div className="mt-3 line-clamp-2 min-h-[2.6em] text-[14px] leading-tight font-semibold">{p.name}</div>
+            <div className={cn("mt-1 text-[12.5px]", r.due_in_days <= 0 ? "font-semibold text-tomato" : "text-muted-foreground")}>
+              {r.due_in_days <= 0 ? `Due, bought ${r.since_days} days ago` : `Due in ${r.due_in_days} days`}
+            </div>
+            <div className="mt-3 flex items-center justify-between">
+              {best && <Money cents={effective(best)} className="font-semibold" />}
+              <Button
+                size="icon-sm"
+                variant={on ? "default" : "outline"}
+                className="size-9 rounded-full"
+                aria-label={on ? `Remove ${p.name}` : `Add ${p.name} to the next robot order`}
+                aria-pressed={on}
+                onClick={() =>
+                  setAdded((s) => {
+                    const n = new Set(s);
+                    if (n.has(r.sku)) n.delete(r.sku);
+                    else n.add(r.sku);
+                    return n;
+                  })
+                }
+              >
+                {on ? <Check className="animate-pop" /> : <Plus />}
+              </Button>
+            </div>
+          </motion.div>
+        );
+      })}
+    </motion.div>
+  );
+}
+
+function LiveBanner() {
+  const { phase, draft, cart, robot, activeStop, stops } = useTrip();
   if (phase === "idle" || !draft) return null;
   const label =
     phase === "waiting_login"
-      ? "Waiting for you to log in at the robot"
+      ? "Waiting for you at the entrance"
       : phase === "done"
-        ? "Trip finished · receipt ready"
+        ? "All done. Your receipt is ready."
         : robot.status === "waiting"
-          ? "Robot is waiting on you"
-          : `Robot heading to ${activeStop ? stops[activeStop]?.label : "…"}`;
+          ? "The robot has a question for you"
+          : `Heading to ${activeStop ? stops[activeStop]?.label : "the next stop"}`;
   return (
-    <Link href="/trip" className="mb-7 flex items-center gap-4 border border-ink bg-ink px-4 py-3 text-paper hover:bg-night">
-      <span className="flex items-center gap-2 font-mono text-[11px] tracking-wider text-tomato uppercase">
-        <span className={phase === "done" ? "size-2 rounded-full bg-basil" : "live-dot size-2 rounded-full bg-tomato"} />
-        {phase === "done" ? "done" : "live"}
+    <Link href="/trip" className="flex items-center gap-4 rounded-2xl bg-foreground p-4 text-background transition-transform hover:scale-[1.005]">
+      <span className="grid size-11 place-items-center rounded-xl bg-lime text-lime-ink">
+        <Bot className="size-6" />
       </span>
-      <span className="font-semibold">{draft.title}</span>
-      <span className="text-paper/70">{label}</span>
-      <span className="num ml-auto text-paper/80">
-        {cart.length} lines · {fmt(cartTotal(cart))} {mode === "pickup" ? "· pickup" : ""}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 font-semibold">
+          {phase !== "done" && <span className="live-dot size-2 rounded-full bg-lime" />}
+          {draft.title}
+        </div>
+        <div className="truncate text-[14px] text-background/70">{label}</div>
+      </div>
+      <span className="tabular hidden text-[14px] text-background/80 sm:block">
+        {cart.length} items, {fmt(cartTotal(cart))}
       </span>
-      <span aria-hidden>→</span>
+      <ChevronRight className="size-5" />
     </Link>
-  );
-}
-
-function AskBar() {
-  const ask = useAsk((s) => s.ask);
-  return (
-    <form
-      className="mb-8"
-      onSubmit={(e) => {
-        e.preventDefault();
-        const f = new FormData(e.currentTarget);
-        ask(String(f.get("q") ?? ""));
-        e.currentTarget.reset();
-      }}
-    >
-      <div className="flex border border-ink bg-card focus-within:outline-2 focus-within:outline-tomato">
-        <span className="grid w-12 shrink-0 place-items-center border-r border-ink bg-tomato font-display text-[18px] font-bold text-white">?</span>
-        <input
-          name="q"
-          placeholder="Ask Picky: “is coffee a good price?”, “where did my money go?”, “can I afford the Pixel Buds?”"
-          className="min-w-0 flex-1 bg-transparent px-4 py-3 text-[15.5px] outline-none placeholder:text-muted"
-          aria-label="Ask Picky"
-        />
-        <button className="border-l border-ink bg-ink px-5 text-[14px] font-medium text-paper hover:bg-night">Ask</button>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        {SUGGESTIONS.slice(0, 4).map((s) => (
-          <button key={s} type="button" onClick={() => ask(s)} className="border border-line px-2 py-0.5 text-[12.5px] text-ink-2 hover:border-ink hover:text-ink">
-            {s}
-          </button>
-        ))}
-      </div>
-    </form>
   );
 }

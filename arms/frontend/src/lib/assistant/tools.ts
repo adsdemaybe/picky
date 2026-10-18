@@ -41,7 +41,7 @@ export function spendingSummary(purchases: Purchase[], period = "this_month"): T
   const top = mostBought(ps, 3).map((m) => `${productBySku[m.sku].name} (${fmt(m.spend)})`);
   return {
     summary: `Spending in ${PERIOD_LABEL[period]}: ${fmt(total)} over ${trips} trips. By category: ${rows.map((r) => `${r.label} ${fmt(r.cents)}`).join(", ")}. Biggest line items: ${top.join(", ")}.`,
-    card: { type: "spend", title: `Spending · ${PERIOD_LABEL[period]}`, rows, total },
+    card: { type: "spend", title: `Spending in ${PERIOD_LABEL[period]}`, rows, total },
   };
 }
 
@@ -91,7 +91,7 @@ export function findSavings(purchases: Purchase[]): ToolResult {
     const save = Math.round((m.avg_unit_cents - effective(cheapest)) * perMonth);
     if (save >= 50 && cheapest.retailer_id !== "store_ave")
       items.push({
-        text: `${productBySku[m.sku].name}: ${cheapest.retailer} is ${fmt(effective(cheapest))} vs the ${fmt(m.avg_unit_cents)} you usually pay${cheapest.pack > 1 ? ` (${cheapest.pack}-pack)` : ""}${cheapest.fee_note?.includes("membership") ? " · needs the $60/yr membership" : ""}`,
+        text: `${productBySku[m.sku].name}: ${cheapest.retailer} is ${fmt(effective(cheapest))} vs the ${fmt(m.avg_unit_cents)} you usually pay${cheapest.pack > 1 ? ` (${cheapest.pack}-pack)` : ""}${cheapest.fee_note?.includes("membership") ? " (needs the $60 a year membership)" : ""}`,
         save_cents: save,
         sku: m.sku,
       });

@@ -1,147 +1,266 @@
 "use client";
-// Robot camera panel with a source ladder (APP_PLAN.md §1):
-//   gateway frames (WS /ws/frames, blurred JPEGs) → direct stream URL (MJPEG / MP4) → simulated camera (canvas).
-// The header always says which source is showing. Unblurred gateway frames are never rendered.
-import { useEffect, useRef, useState } from "react";
+// Robot camera views. Every camera can come from three sources (see lib/feed.ts):
+//   sim      drawn in the browser from the trip replay + store layout
+//   gateway  latest face-blurred JPEG per camera from WS /ws/frames
+//   stream   a direct URL per camera (MJPEG in <img>, MP4/WebM in <video>)
+import { ExternalLink, Radio, VideoOff } from "lucide-react";
+import Link from "next/link";
+import { useEffect, useRef } from "react";
 import { STORES, productBySku, slotsOf, type Slot, type StoreId } from "@/lib/data";
+import { CAMERA_LABEL, useFeed, type Camera } from "@/lib/feed";
 import { useTrip } from "@/lib/trip";
-import { cx } from "./ui";
+import { cn as cx } from "@/lib/utils";
+import { StoreMap } from "./StoreMap";
 
-type Source = "sim" | "url" | "gateway";
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL ?? "";
-const ENV_STREAM = process.env.NEXT_PUBLIC_STREAM_URL ?? "";
+const MODE_LABEL = { sim: "Simulated", gateway: "Robot gateway", stream: "Direct stream" } as const;
 
-function readSaved(key: string) {
-  try {
-    return window.localStorage.getItem(key) ?? "";
-  } catch {
-    return "";
-  }
-}
-function save(key: string, v: string) {
-  try {
-    window.localStorage.setItem(key, v);
-  } catch {
-    /* storage blocked: keep in memory only */
-  }
-}
+/** One camera, whatever the source. Fills its parent (give the parent an aspect ratio). */
+export function CameraView({ camera, inset = false, compact = false }: { camera: Camera; inset?: boolean; compact?: boolean }) {
+  const mode = useFeed((s) => s.mode);
+  const frame = useFeed((s) => s.frames[camera]);
+  const url = useFeed((s) => s.streams[camera]);
+  const conn = useFeed((s) => s.conn);
+  const telemetry = useFeed((s) => s.telemetry);
 
-export function LiveFeed({ tripId, className }: { tripId: string | null; className?: string }) {
-  const [source, setSource] = useState<Source>(ENV_STREAM ? "url" : "sim");
-  const [url, setUrl] = useState(ENV_STREAM);
-  const [menu, setMenu] = useState(false);
-  const status = useTrip((s) => s.robot.status);
-  const paused = useTrip((s) => s.paused);
-
-  const openMenu = () => {
-    if (!menu && !url) setUrl(readSaved("picky.streamUrl"));
-    setMenu((m) => !m);
-  };
-
-  const label = source === "sim" ? "Simulated camera · rendered from the planogram" : source === "url" ? "Robot stream" : "Isaac sim · gateway frames";
-  return (
-    <div className={cx("relative flex flex-col overflow-hidden border border-ink bg-night text-paper", className)}>
-      <div className="flex items-center gap-3 border-b border-white/10 px-3 py-2 font-mono text-[11px]">
-        <span className="flex items-center gap-1.5 tracking-wider text-tomato uppercase">
-          <span className={cx("size-1.5 rounded-full bg-tomato", !paused && "live-dot")} />
-          {paused ? "paused" : "live"}
-        </span>
-        <span className="text-paper/70">{label}</span>
-        {source === "gateway" && <span className="border border-basil/60 px-1 text-[10px] text-[#9fd3ad]">FACES BLURRED</span>}
-        <span className="ml-auto text-paper/50 uppercase">{status}</span>
-        <div className="relative">
-          <button onClick={openMenu} className="border border-white/20 px-2 py-0.5 text-paper/80 hover:border-white/50">
-            source ▾
-          </button>
-          {menu && (
-            <div className="absolute right-0 z-20 mt-1 w-[300px] border border-ink bg-card p-2 text-[12.5px] text-ink">
-              <SourceOpt on={source === "sim"} onClick={() => (setSource("sim"), setMenu(false))} title="Simulated camera" note="Always available. Drawn from store_ave.yaml." />
-              <SourceOpt
-                on={source === "gateway"}
-                disabled={!GATEWAY}
-                onClick={() => (setSource("gateway"), setMenu(false))}
-                title="Gateway frames (Isaac Sim)"
-                note={GATEWAY ? `${GATEWAY}/ws/frames` : "Set NEXT_PUBLIC_GATEWAY_URL to enable"}
-              />
-              <div className="mt-1 border-t border-line pt-2">
-                <div className="mb-1 font-medium">Stream URL (MJPEG, MP4, WebM)</div>
-                <form
-                  className="flex gap-1"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    save("picky.streamUrl", url);
-                    setSource("url");
-                    setMenu(false);
-                  }}
-                >
-                  <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://robot.lan:8080/stream.mjpg" className="min-w-0 flex-1 border border-line bg-paper px-2 py-1 font-mono text-[11.5px]" />
-                  <button className="border border-ink px-2">use</button>
-                </form>
-              </div>
-            </div>
-          )}
-        </div>
+  if (mode === "sim") {
+    if (camera === "head") return <SimCamera basketInset={inset} />;
+    if (camera === "wrist") return <WristCamera />;
+    if (camera === "basket") return <BasketCamera />;
+    return (
+      <div className="absolute inset-0 grid place-items-center bg-[#f7f8f6] p-3">
+        <StoreMap compact />
       </div>
-      <div className="relative aspect-video w-full">
-        {source === "sim" && <SimCamera />}
-        {source === "url" && url && <UrlStream url={url} onFail={() => setSource("sim")} />}
-        {source === "gateway" && <GatewayFrames tripId={tripId} />}
+    );
+  }
+  if (mode === "stream") {
+    if (url) return <UrlStream url={url} />;
+    return <NoSignal compact={compact} title={`No URL for the ${CAMERA_LABEL[camera].toLowerCase()}`} body="Add one in the connection panel on the Live page." />;
+  }
+  // gateway
+  if (frame) {
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={frame.src} alt={`${CAMERA_LABEL[camera]} (faces blurred)`} className="absolute inset-0 h-full w-full object-cover" />;
+  }
+  if (camera === "overview" && telemetry)
+    return (
+      <div className="absolute inset-0 grid place-items-center bg-[#f7f8f6] p-3">
+        <StoreMap compact poseOverride={telemetry.pose} />
+      </div>
+    );
+  return (
+    <NoSignal
+      compact={compact}
+      title={conn === "live" || conn === "connecting" ? `Waiting for ${CAMERA_LABEL[camera].toLowerCase()} frames` : "Robot not connected"}
+      body={conn === "idle" ? "Connect to the gateway on the Live page." : "Frames appear here as soon as the robot sends them."}
+      pulse={conn === "connecting" || conn === "live"}
+    />
+  );
+}
+
+function NoSignal({ title, body, pulse, compact }: { title: string; body: string; pulse?: boolean; compact?: boolean }) {
+  if (compact)
+    return (
+      <div className="absolute inset-0 grid place-items-center bg-[#16181a] text-white" title={title}>
+        <span className={cx("grid size-9 place-items-center rounded-full bg-white/10", pulse && "live-dot")}>
+          {pulse ? <Radio className="size-4" /> : <VideoOff className="size-4" />}
+        </span>
+      </div>
+    );
+  return (
+    <div className="absolute inset-0 grid place-items-center bg-[#16181a] p-6 text-center text-white">
+      <div>
+        <span className={cx("mx-auto grid size-12 place-items-center rounded-full bg-white/10", pulse && "live-dot")}>
+          {pulse ? <Radio className="size-6" /> : <VideoOff className="size-6" />}
+        </span>
+        <div className="mt-3 font-semibold">{title}</div>
+        <div className="mt-1 text-[13px] text-white/60">{body}</div>
       </div>
     </div>
   );
 }
 
-function SourceOpt({ on, disabled, onClick, title, note }: { on: boolean; disabled?: boolean; onClick: () => void; title: string; note: string }) {
-  return (
-    <button disabled={disabled} onClick={onClick} className={cx("block w-full px-2 py-1.5 text-left disabled:opacity-45", on ? "bg-paper" : "hover:bg-paper")}>
-      <span className="font-medium">
-        {on ? "● " : "○ "}
-        {title}
-      </span>
-      <span className="block pl-4 font-mono text-[10.5px] text-muted">{note}</span>
-    </button>
-  );
-}
-
-function UrlStream({ url, onFail }: { url: string; onFail: () => void }) {
-  const isVideo = /\.(mp4|webm|mov)(\?|$)/i.test(url);
-  if (isVideo) return <video src={url} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover" onError={onFail} />;
+function UrlStream({ url }: { url: string }) {
+  const isVideo = /\.(mp4|webm|mov|m3u8)(\?|$)/i.test(url);
+  if (isVideo) return <video src={url} autoPlay muted loop playsInline className="absolute inset-0 h-full w-full object-cover" />;
   // MJPEG streams render natively in <img>
   // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt="Robot camera stream" className="absolute inset-0 h-full w-full object-cover" onError={onFail} />;
+  return <img src={url} alt="Robot camera stream" className="absolute inset-0 h-full w-full object-cover" />;
 }
 
-function GatewayFrames({ tripId }: { tripId: string | null }) {
-  const [src, setSrc] = useState<string | null>(null);
-  const [state, setState] = useState("connecting");
-  useEffect(() => {
-    if (!GATEWAY) return;
-    const ws = new WebSocket(`${GATEWAY.replace(/^http/, "ws")}/ws/frames${tripId ? `?trip_id=${tripId}` : ""}`);
-    ws.onopen = () => setState("waiting for frames");
-    ws.onerror = () => setState("offline");
-    ws.onclose = () => setState("offline");
-    ws.onmessage = (m) => {
-      try {
-        const ev = JSON.parse(m.data);
-        if (ev.type === "frame" && ev.frame?.blurred === true) {
-          setSrc(`data:image/jpeg;base64,${ev.frame.jpeg_b64}`);
-          setState("live");
-        }
-      } catch {
-        /* ignore non-JSON */
-      }
-    };
-    return () => ws.close();
-  }, [tripId]);
-  return src ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img src={src} alt="Robot camera (faces blurred)" className="absolute inset-0 h-full w-full object-cover" />
-  ) : (
-    <div className="absolute inset-0 grid place-items-center font-mono text-[12px] text-paper/60">sim {state} · switch source to keep watching</div>
+/** The trip page's camera panel: head camera plus a link to the full Live section. */
+export function LiveFeed({ className }: { className?: string }) {
+  const mode = useFeed((s) => s.mode);
+  const status = useTrip((s) => s.robot.status);
+  const paused = useTrip((s) => s.paused);
+  return (
+    <div className={cx("relative flex flex-col overflow-hidden rounded-2xl bg-black text-white shadow-md", className)}>
+      <div className="flex items-center gap-3 border-b border-white/10 px-4 py-2.5 text-[13px]">
+        <span className="flex items-center gap-1.5 rounded-full bg-tomato px-2.5 py-0.5 text-[12px] font-bold">
+          <span className={cx("size-1.5 rounded-full bg-white", !paused && "live-dot")} />
+          {paused ? "Paused" : "Live"}
+        </span>
+        <span className="hidden text-white/75 sm:inline">Head camera, {MODE_LABEL[mode].toLowerCase()}</span>
+        {mode === "gateway" && <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11.5px]">Faces blurred</span>}
+        <span className="ml-auto text-white/60 capitalize">{status}</span>
+        <Link href="/live" className="flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-white/90 hover:bg-white/20">
+          All cameras <ExternalLink className="size-3.5" aria-hidden />
+        </Link>
+      </div>
+      <div className="relative aspect-video w-full">
+        <CameraView camera="head" inset />
+      </div>
+    </div>
   );
 }
 
-// ---------------------------------------------------------------- simulated camera
+// ---------------------------------------------------------------- simulated cameras
+
+/** Shared canvas loop: (ctx, W, H, now) → draws one frame. */
+function useCanvas(draw: (ctx: CanvasRenderingContext2D, W: number, H: number, now: number) => void, W = 960, H = 540) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const drawRef = useRef(draw);
+  useEffect(() => {
+    drawRef.current = draw;
+  });
+  useEffect(() => {
+    const cv = ref.current!;
+    const ctx = cv.getContext("2d")!;
+    cv.width = W;
+    cv.height = H;
+    let raf = 0;
+    const loop = (now: number) => {
+      drawRef.current(ctx, W, H, now);
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [W, H]);
+  return ref;
+}
+
+/** Wrist camera: close-up of whatever the gripper is working on. */
+function WristCamera() {
+  const ref = useCanvas((ctx, W, H, now) => {
+    const s = useTrip.getState();
+    const stop = s.activeStop ? s.stops[s.activeStop] : null;
+    const working = stop?.sku && ["scanning", "picking", "waiting"].includes(s.robot.status);
+    ctx.fillStyle = "#1d2124";
+    ctx.fillRect(0, 0, W, H);
+    if (!working || !stop?.sku) {
+      ctx.fillStyle = "#2a2f33";
+      for (let i = 0; i < 9; i++) ctx.fillRect(0, i * 64 + ((now / 40) % 64), W, 2);
+      ctx.fillStyle = "rgba(255,255,255,0.75)";
+      ctx.font = "600 26px ui-sans-serif, system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText(s.phase === "idle" ? "Arm parked" : "Arm stowed while driving", W / 2, H / 2);
+      ctx.textAlign = "left";
+      drawHudLine(ctx, W, H, "WRIST", "stowed");
+      return;
+    }
+    const p = productBySku[stop.sku];
+    const t = (now % 4000) / 4000;
+    const zoom = s.robot.status === "picking" ? 1.15 : 1 + 0.03 * Math.sin(t * Math.PI * 2);
+    const bw = 420 * zoom,
+      bh = 380 * zoom;
+    const x = W / 2 - bw / 2,
+      y = H / 2 - bh / 2 + 10;
+    ctx.fillStyle = "#2c3236";
+    ctx.fillRect(0, H * 0.78, W, H);
+    ctx.fillStyle = p.label_color;
+    ctx.beginPath();
+    ctx.roundRect(x, y, bw, bh, 18);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.9)";
+    ctx.fillRect(x + 24, y + bh * 0.32, bw - 48, 64 * zoom);
+    ctx.fillStyle = "#111";
+    ctx.font = `700 ${Math.round(30 * zoom)}px ui-sans-serif, system-ui`;
+    ctx.fillText(p.name.slice(0, 22), x + 40, y + bh * 0.32 + 42 * zoom);
+    // barcode
+    for (let i = 0; i < 46; i++) {
+      ctx.fillStyle = i % 3 === 0 ? "#111" : i % 2 ? "#111" : "transparent";
+      ctx.fillRect(x + 40 + i * 6, y + bh - 90 * zoom, i % 4 === 0 ? 4 : 2, 56 * zoom);
+    }
+    // gripper fingers
+    const close = s.robot.status === "picking" ? Math.min(1, ((now % 1500) / 1500) * 2) : 0;
+    ctx.fillStyle = "#0f1214";
+    ctx.fillRect(x - 70 + close * 40, 0, 60, H);
+    ctx.fillRect(x + bw + 10 - close * 40, 0, 60, H);
+    // scan line
+    if (s.robot.status === "scanning") {
+      ctx.fillStyle = "rgba(217,242,107,0.85)";
+      ctx.fillRect(x, y + ((now / 6) % bh), bw, 3);
+    }
+    drawHudLine(ctx, W, H, "WRIST", s.robot.status === "picking" ? "grip closing" : s.robot.status);
+  });
+  return <canvas ref={ref} className="absolute inset-0 h-full w-full" aria-label="Simulated wrist camera" />;
+}
+
+/** Basket camera: top-down view of what's been picked, newest item checked. */
+function BasketCamera() {
+  const ref = useCanvas((ctx, W, H, now) => {
+    const { cart } = useTrip.getState();
+    const lines = cart.filter((c) => c.source === "in_store");
+    ctx.fillStyle = "#24292c";
+    ctx.fillRect(0, 0, W, H);
+    // basket walls
+    ctx.fillStyle = "#33393d";
+    ctx.beginPath();
+    ctx.roundRect(70, 50, W - 140, H - 100, 26);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.lineWidth = 3;
+    for (let i = 1; i < 12; i++) {
+      ctx.beginPath();
+      ctx.moveTo(70 + ((W - 140) / 12) * i, 50);
+      ctx.lineTo(70 + ((W - 140) / 12) * i, H - 50);
+      ctx.stroke();
+    }
+    const items = lines.flatMap((c) => Array.from({ length: Math.min(c.qty, 3) }, (_, k) => ({ c, k })));
+    items.slice(-18).forEach(({ c }, i) => {
+      const p = productBySku[c.sku];
+      const col = i % 6,
+        row = Math.floor(i / 6);
+      const x = 110 + col * 125,
+        y = H - 160 - row * 120;
+      ctx.fillStyle = p.label_color;
+      ctx.beginPath();
+      ctx.roundRect(x, y, 108, 100, 12);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.fillRect(x + 8, y + 36, 92, 22);
+      ctx.fillStyle = "#111";
+      ctx.font = "600 12px ui-sans-serif, system-ui";
+      ctx.fillText(p.name.slice(0, 13), x + 12, y + 51);
+    });
+    const newest = lines[lines.length - 1];
+    if (newest) {
+      ctx.fillStyle = newest.verified ? "rgba(15,122,74,0.95)" : `rgba(242,165,22,${0.65 + 0.3 * Math.sin(now / 150)})`;
+      ctx.beginPath();
+      ctx.roundRect(90, 66, 360, 40, 20);
+      ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = "700 17px ui-sans-serif, system-ui";
+      ctx.fillText(`${newest.verified ? "Checked" : "Checking"}: ${productBySku[newest.sku].name.slice(0, 24)}`, 110, 92);
+    } else {
+      ctx.fillStyle = "rgba(255,255,255,0.7)";
+      ctx.font = "600 24px ui-sans-serif, system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText("Basket is empty", W / 2, H / 2);
+      ctx.textAlign = "left";
+    }
+    drawHudLine(ctx, W, H, "BASKET", `${lines.reduce((s, c) => s + c.qty, 0)} items`);
+  });
+  return <canvas ref={ref} className="absolute inset-0 h-full w-full" aria-label="Simulated basket camera" />;
+}
+
+function drawHudLine(ctx: CanvasRenderingContext2D, W: number, H: number, cam: string, state: string) {
+  ctx.font = "12px ui-monospace, monospace";
+  const text = `CAM ${cam}  ${state.toUpperCase()}`;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(10, H - 32, ctx.measureText(text).width + 16, 22);
+  ctx.fillStyle = "#f4f4f2";
+  ctx.fillText(text, 18, H - 17);
+}
 
 type Face = { fixture: string; face: string };
 function faceOf(slot: Slot): Face {
@@ -150,7 +269,7 @@ function faceOf(slot: Slot): Face {
   return { fixture: slot.fixture_id, face: tag[0] };
 }
 
-function SimCamera() {
+export function SimCamera({ basketInset = true }: { basketInset?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current!;
@@ -183,14 +302,14 @@ function SimCamera() {
       if (phase === "idle" || phase === "waiting_login") drawDock(ctx, W, H, now, s.storeId);
       else if (atShelf && stop?.sku) drawShelf(ctx, W, H, s.storeId, stop.sku, robot.status, t * s.speed, now);
       else drawCorridor(ctx, W, H, odo, robot, now);
-      if (phase !== "idle" && phase !== "waiting_login") drawBasketCam(ctx, W, H, s.cart, now);
+      if (basketInset && phase !== "idle" && phase !== "waiting_login") drawBasketCam(ctx, W, H, s.cart, now);
 
       drawHud(ctx, W, H, robot, stop?.label ?? "", now);
       raf = requestAnimationFrame(draw);
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [basketInset]);
   return <canvas ref={ref} className="absolute inset-0 h-full w-full" aria-label="Simulated robot camera view" />;
 }
 
@@ -210,7 +329,7 @@ function drawDock(ctx: CanvasRenderingContext2D, W: number, H: number, now: numb
   ctx.moveTo(W / 2, H * 0.18);
   ctx.lineTo(W / 2, H * 0.73);
   ctx.stroke();
-  ctx.fillStyle = "#c4472b";
+  ctx.fillStyle = "#d93a30";
   ctx.font = "600 22px ui-monospace, monospace";
   ctx.textAlign = "center";
   ctx.fillText(STORES[storeId].name.toUpperCase(), W / 2, H * 0.13);
@@ -253,7 +372,7 @@ function drawCorridor(ctx: CanvasRenderingContext2D, W: number, H: number, odo: 
     ctx.stroke();
   }
   // shelves both sides with colored product blocks
-  const colors = ["#e8c15a", "#c4472b", "#2f6b45", "#f0a830", "#6d3f74", "#3c6e9a", "#d9d2c2", "#8a6d00"];
+  const colors = ["#e8c15a", "#d93a30", "#2f6b45", "#f0a830", "#6d3f74", "#3c6e9a", "#d9d2c2", "#8a6d00"];
   for (const side of [-1, 1]) {
     for (let level = 0; level < 4; level++) {
       for (let k = 0; k < 18; k++) {
@@ -378,7 +497,7 @@ function drawShelf(ctx: CanvasRenderingContext2D, W: number, H: number, storeId:
     if (status === "picking") drawPick(ctx, W, H, b, productBySku[sku], t);
     // reticle
     const pulse = 0.6 + 0.4 * Math.sin(now / 180);
-    ctx.strokeStyle = status === "waiting" ? `rgba(176,122,16,${pulse})` : `rgba(196,71,43,${pulse})`;
+    ctx.strokeStyle = status === "waiting" ? `rgba(201,132,0,${pulse})` : `rgba(217,58,48,${pulse})`;
     ctx.lineWidth = 3;
     const L = 22;
     const corners: [number, number, number, number][] = [
@@ -396,7 +515,7 @@ function drawShelf(ctx: CanvasRenderingContext2D, W: number, H: number, storeId:
     }
     if (status === "scanning") {
       const sy = b.y + ((t * 0.9) % 1) * b.h;
-      ctx.fillStyle = "rgba(196,71,43,0.55)";
+      ctx.fillStyle = "rgba(217,58,48,0.55)";
       ctx.fillRect(b.x, sy, b.w, 2);
     }
     // label chip
@@ -411,7 +530,7 @@ function drawShelf(ctx: CanvasRenderingContext2D, W: number, H: number, storeId:
     const tw = ctx.measureText(txt).width + 16;
     const lx = Math.min(W - tw - 10, Math.max(10, b.x));
     const ly = Math.max(44, b.y - 28);
-    ctx.fillStyle = status === "waiting" ? "#b07a10" : "#c4472b";
+    ctx.fillStyle = status === "waiting" ? "#c98400" : "#d93a30";
     ctx.fillRect(lx, ly, tw, 22);
     ctx.fillStyle = "#fff";
     ctx.fillText(txt, lx + 8, ly + 15);
@@ -505,7 +624,7 @@ function drawPick(
   ctx.lineTo(elbow.x, elbow.y);
   ctx.lineTo(hand.x, hand.y);
   ctx.stroke();
-  ctx.fillStyle = "#c4472b";
+  ctx.fillStyle = "#d93a30";
   ctx.beginPath();
   ctx.arc(elbow.x, elbow.y, 13, 0, Math.PI * 2);
   ctx.fill();
@@ -582,7 +701,7 @@ function drawBasketCam(
   const newest = lines[lines.length - 1];
   if (newest) {
     const ok = newest.verified;
-    ctx.fillStyle = ok ? "rgba(47,107,69,0.95)" : `rgba(176,122,16,${0.6 + 0.3 * Math.sin(now / 150)})`;
+    ctx.fillStyle = ok ? "rgba(15,122,74,0.95)" : `rgba(201,132,0,${0.6 + 0.3 * Math.sin(now / 150)})`;
     ctx.font = "600 11px ui-monospace, monospace";
     const label = `${ok ? "✓ VERIFIED" : "… CHECKING"} ${productBySku[newest.sku]?.name.toUpperCase().slice(0, 16) ?? ""}`;
     const tw = ctx.measureText(label).width + 12;

@@ -200,7 +200,7 @@ for (const p of products) {
   if (a)
     list.push({
       retailer_id: "store_ave",
-      retailer: "Picky Market · The Ave",
+      retailer: "Picky Market, The Ave",
       kind: "store",
       price_cents: a.deal?.price_cents ?? a.price_cents ?? p.price_cents,
       regular_cents: a.deal ? (a.deal.original_cents ?? p.price_cents) : (a.price_cents ?? p.price_cents),
@@ -214,7 +214,7 @@ for (const p of products) {
   if (h)
     list.push({
       retailer_id: "store_hill",
-      retailer: "Picky Express · Capitol Hill",
+      retailer: "Picky Express, Capitol Hill",
       kind: "store",
       price_cents: h.deal?.price_cents ?? h.price_cents ?? p.price_cents,
       regular_cents: h.price_cents ?? p.price_cents,
@@ -249,7 +249,7 @@ for (const p of products) {
       regular_cents: unit * 2,
       pack: 2,
       fee_cents: 0,
-      fee_note: "2-pack · $60/yr membership",
+      fee_note: "Sold as a 2-pack, $60 a year membership",
       eta: "8 km away",
       in_stock: true,
       note: null,

@@ -66,7 +66,7 @@ const N = Math.PI / 2; // facing +y
 
 export const tmobileStore: Store = {
   store_id: "store_tmobile",
-  name: "T-Mobile · University Way",
+  name: "T-Mobile, University Way",
   address: "4300 University Way NE, Seattle, WA (demo layout)",
   bounds: { x: 0, y: 0, w: 10, h: 8 },
   entrance: { x: 1.2, y: 0.6, theta: N },

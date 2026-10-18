@@ -1,30 +1,33 @@
-import type { Metadata } from "next";
-import { Bricolage_Grotesque, IBM_Plex_Mono, IBM_Plex_Sans } from "next/font/google";
-import { AskPanel } from "@/components/AskPanel";
-import { MobileBar, Rail } from "@/components/Rail";
+import type { Metadata, Viewport } from "next";
+import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
+import { AskSheet } from "@/components/AskPanel";
+import { MotionProvider } from "@/components/motion";
+import { BottomTabs, TopBar } from "@/components/Shell";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
-const display = Bricolage_Grotesque({ variable: "--font-bricolage", subsets: ["latin"], weight: ["500", "600", "700"] });
-const sans = IBM_Plex_Sans({ variable: "--font-plex-sans", subsets: ["latin"], weight: ["400", "500", "600"] });
-const mono = IBM_Plex_Mono({ variable: "--font-plex-mono", subsets: ["latin"], weight: ["400", "500"] });
+const display = Bricolage_Grotesque({ variable: "--font-bricolage", subsets: ["latin"], weight: ["500", "600", "700", "800"] });
+const sans = Plus_Jakarta_Sans({ variable: "--font-jakarta", subsets: ["latin"], weight: ["400", "500", "600", "700"] });
 
 export const metadata: Metadata = {
-  title: "Picky · shopping assistant",
-  description: "Find the best price, track your spending, and send a robot to shop for you.",
+  title: "Picky",
+  description: "Find the best price, keep your spending in check, and send a robot to shop for you.",
 };
+
+export const viewport: Viewport = { themeColor: "#f3f5f2" };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${display.variable} ${sans.variable} ${mono.variable} h-full antialiased`}>
+    <html lang="en" className={`${display.variable} ${sans.variable} h-full antialiased`}>
       <body className="min-h-full">
-        <div className="flex min-h-dvh">
-          <Rail />
-          <div className="min-w-0 flex-1">
-            <MobileBar />
-            <main className="mx-auto max-w-[1360px] px-4 py-7 md:px-9">{children}</main>
-          </div>
-        </div>
-        <AskPanel />
+        <MotionProvider>
+          <TooltipProvider delayDuration={200}>
+            <TopBar />
+            <main className="mx-auto max-w-[1240px] px-4 pt-6 pb-28 md:px-8 md:pt-8 md:pb-16">{children}</main>
+            <BottomTabs />
+            <AskSheet />
+          </TooltipProvider>
+        </MotionProvider>
       </body>
     </html>
   );

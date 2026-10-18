@@ -66,7 +66,7 @@ function line(sku: string, qty: number, extra: Partial<ListLine> = {}): ListLine
     qty,
     unit_cents: sourcing === "online" && onlineItem ? onlineItem.price_cents : priceOf(sku),
     sourcing,
-    note: sourcing === "online" ? `Out of stock at ${STORES[cur].short} · arrives in ${onlineItem?.eta_hours ?? 24} h` : undefined,
+    note: sourcing === "online" ? `Out of stock at ${STORES[cur].short}, so it comes from Picky Online in ${onlineItem?.eta_hours ?? 24} h` : undefined,
     ...extra,
   };
 }
@@ -92,7 +92,7 @@ function expandWireless(text: string): Draft {
       intent: text,
       title: "Running earbuds",
       budget_cents: budget,
-      lines: [line("BUDS-RUN", 1, { note: "Sweat-proof, secure fit · 4.5★ from runners" })],
+      lines: [line("BUDS-RUN", 1, { note: "Sweat-proof with a secure fit, 4.5 stars from runners" })],
       recs: [],
       advice: up
         ? [{ kind: "wait", sku: "BUDS-RUN", text: `${up.reason}: $${(up.price_cents / 100).toFixed(2)} instead of $79.99. Picky can text you Friday morning.`, save_cents: 7999 - up.price_cents }]
@@ -105,7 +105,7 @@ function expandWireless(text: string): Draft {
     title: "Pixel 9 setup",
     budget_cents: budget,
     lines: [
-      line("CASE-PX9-CLR", 1, { note: "Fits Pixel 9 · clear, slim" }),
+      line("CASE-PX9-CLR", 1, { note: "Fits the Pixel 9, clear and slim" }),
       line("GLASS-PX9", 1, { note: "20% off with a Pixel 9 case" }),
     ],
     recs: [
@@ -163,7 +163,7 @@ function expandGrocery(text: string): Draft {
         line("BEEF-GROUND", Math.max(1, Math.round(2 * k))),
         line("BEANS-BLACK", Math.max(1, Math.round(2 * k)), { vegetarian: true, note: "Protein for the vegetarian guest" }),
         line("CHEESE-MEX", 1),
-        line("SALSA-MILD", 1, { note: "Your usual · rated 3★ last time" }),
+        line("SALSA-MILD", 1, { note: "Your usual, though you rated it 3 stars" }),
         line("AVOCADO", Math.max(2, Math.round(3 * k)), { note: "Robot picks the ripest 3 of 22" }),
         line("LIMES", 4),
         line("ONION-WHITE", 1),
@@ -218,7 +218,7 @@ function expandGrocery(text: string): Draft {
     title: "Weekly basics",
     budget_cents: budget,
     lines: [
-      line("OAT-MILK", 1, { note: "Every ~10 days · last bought Oct 8" }),
+      line("OAT-MILK", 1, { note: "You buy it about every 10 days, last on Oct 8" }),
       line("EGGS", 1),
       line("BANANAS", 1),
       line("LIMES", 4, { note: "You buy limes every ~9 days" }),
