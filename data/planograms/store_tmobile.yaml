@@ -1,10 +1,10 @@
 # Picky demo data (DubHacks 2026). Schema: contracts/planogram.py. Validate: uv run python -m utils.data
-# Third store: T-Mobile-style wireless store (T-Mobile side track), 10 m x 8 m. Fictional demo layout; mirrors
-# arms/frontend/src/data/stores/tmobile.ts (same floor + SKUs). Entrance bottom-left, accessory wall on the left,
-# audio + power on the right, two phone display tables in the middle (produce_bin = table geometry until a
-# display_table kind exists), wearables + home internet endcap at the back, counter bottom-right.
-# Slot ids are store-prefixed (TMO-...). Approach poses sit 0.375 m off the pick face.
-# Hooks: CASE-PX7-BLK clearance + GLASS-PX9 bundle deal (cart suggestions), CASE-PX7-BLK low stock.
+# Third store: T-Mobile-style wireless store (T-Mobile side track), 10 m x 8 m, stocked with T-Mobile's real
+# lineup (full retail prices from t-mobile.com, 2026-10-17). Same floor as arms/frontend/src/data/stores/tmobile.ts.
+# Entrance bottom-left, accessory wall left, audio & power wall right, two phone display tables in the middle
+# (produce_bin = flat-topped fixture until a display_table kind exists; arms/sim styles them as tables),
+# wearables / tablets / home internet endcap at the back, counter bottom-right. Slot ids are store-prefixed (TMO-).
+# Approach poses sit 0.375 m off the pick face. Hooks: CASE-PX7-BLK clearance + low stock, GLASS-PX9 bundle deal.
 schema_version: 1
 store_id: store_tmobile
 name: T-Mobile - University Way
@@ -17,7 +17,7 @@ obstacles: []
 fixtures:
 - fixture_id: ACC-WALL
   kind: shelf
-  label: 'Accessory wall: cases, screen protection, chargers'
+  label: 'Accessory wall: cases, screen protection, charging'
   aisle_id: accessories
   rect: {x: 0, y: 2.4, w: 0.6, h: 5}
   yaw: 0
@@ -37,7 +37,7 @@ fixtures:
   level_z_m: [0.15, 0.6, 1.05, 1.5]
 - fixture_id: TABLE-A
   kind: produce_bin
-  label: 'Phone table A'
+  label: 'Phone table A: Apple + value phones'
   aisle_id: phones
   rect: {x: 3, y: 3.2, w: 1.4, h: 2.6}
   yaw: 3.142
@@ -47,7 +47,7 @@ fixtures:
   level_z_m: [0.9]
 - fixture_id: TABLE-B
   kind: produce_bin
-  label: 'Phone table B'
+  label: 'Phone table B: Samsung + Google'
   aisle_id: phones
   rect: {x: 5.6, y: 3.2, w: 1.4, h: 2.6}
   yaw: 0
@@ -57,12 +57,12 @@ fixtures:
   level_z_m: [0.9]
 - fixture_id: WEAR-CASE
   kind: endcap
-  label: 'Wearables & home internet'
+  label: 'Wearables, tablets & home internet'
   aisle_id: wearables
   rect: {x: 3.6, y: 7.2, w: 2.8, h: 0.6}
   yaw: -1.571
   double_sided: false
-  height_m: 1.4
+  height_m: 1.6
   levels: 3
   level_z_m: [0.3, 0.75, 1.2]
 - fixture_id: COUNTER
@@ -91,234 +91,640 @@ aisles:
   categories: [wireless, audio, chargers]
   fixture_ids: [AUDIO-WALL]
 - aisle_id: wearables
-  label: Wearables & home internet
+  label: Wearables, tablets & home internet
   rect: {x: 3, y: 6.4, w: 4, h: 0.8}
-  categories: [wireless, wearables, home_internet]
+  categories: [wireless, wearables, tablets, home_internet]
   fixture_ids: [WEAR-CASE]
 slots:
 - slot_id: TMO-ACC-WALL-E3-00
   fixture_id: ACC-WALL
   aisle_id: accessories
-  sku: CASE-PX9-CLR
+  sku: CASE-IP17P-PEL
   level: 3
   index: 0
-  item_position: {x: 0.6, y: 3, z: 1.5}
-  approach_pose: {x: 0.975, y: 3, theta: 3.142}
-  facings: 2
-  capacity: 16
-  qty: 14
-  low_threshold: 4
+  item_position: {x: 0.6, y: 2.9, z: 1.5}
+  approach_pose: {x: 0.975, y: 2.9, theta: 3.142}
+  facings: 3
+  capacity: 12
+  qty: 9
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-CASE-PX9-CLR-L1, qty: 14}
+  - {lot_id: tmo-CASE-IP17P-PEL-L1, qty: 9}
 - slot_id: TMO-ACC-WALL-E3-01
   fixture_id: ACC-WALL
   aisle_id: accessories
-  sku: CASE-PX9-RUG
+  sku: CASE-IP17-ZAG
   level: 3
   index: 1
   item_position: {x: 0.6, y: 3.8, z: 1.5}
   approach_pose: {x: 0.975, y: 3.8, theta: 3.142}
-  facings: 2
+  facings: 3
+  capacity: 12
+  qty: 9
+  low_threshold: 3
+  lots:
+  - {lot_id: tmo-CASE-IP17-ZAG-L1, qty: 9}
+- slot_id: TMO-ACC-WALL-E3-02
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CASE-IP16-MAG
+  level: 3
+  index: 2
+  item_position: {x: 0.6, y: 4.7, z: 1.5}
+  approach_pose: {x: 0.975, y: 4.7, theta: 3.142}
+  facings: 3
+  capacity: 12
+  qty: 9
+  low_threshold: 3
+  lots:
+  - {lot_id: tmo-CASE-IP16-MAG-L1, qty: 9}
+- slot_id: TMO-ACC-WALL-E3-03
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CASE-GS26-CM
+  level: 3
+  index: 3
+  item_position: {x: 0.6, y: 5.6, z: 1.5}
+  approach_pose: {x: 0.975, y: 5.6, theta: 3.142}
+  facings: 3
+  capacity: 12
+  qty: 9
+  low_threshold: 3
+  lots:
+  - {lot_id: tmo-CASE-GS26-CM-L1, qty: 9}
+- slot_id: TMO-ACC-WALL-E3-04
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CASE-GS26-GOTO
+  level: 3
+  index: 4
+  item_position: {x: 0.6, y: 6.5, z: 1.5}
+  approach_pose: {x: 0.975, y: 6.5, theta: 3.142}
+  facings: 3
+  capacity: 12
+  qty: 9
+  low_threshold: 3
+  lots:
+  - {lot_id: tmo-CASE-GS26-GOTO-L1, qty: 9}
+- slot_id: TMO-ACC-WALL-E2-00
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CASE-PX9-CLR
+  level: 2
+  index: 0
+  item_position: {x: 0.6, y: 2.9, z: 1.05}
+  approach_pose: {x: 0.975, y: 2.9, theta: 3.142}
+  facings: 3
+  capacity: 15
+  qty: 12
+  low_threshold: 3
+  lots:
+  - {lot_id: tmo-CASE-PX9-CLR-L1, qty: 12}
+- slot_id: TMO-ACC-WALL-E2-01
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CASE-PX9-RUG
+  level: 2
+  index: 1
+  item_position: {x: 0.6, y: 3.8, z: 1.05}
+  approach_pose: {x: 0.975, y: 3.8, theta: 3.142}
+  facings: 3
   capacity: 12
   qty: 6
   low_threshold: 3
   lots:
   - {lot_id: tmo-CASE-PX9-RUG-L1, qty: 6}
-- slot_id: TMO-ACC-WALL-E2-00
-  fixture_id: ACC-WALL
-  aisle_id: accessories
-  sku: CASE-IP16-MAG
-  level: 2
-  index: 0
-  item_position: {x: 0.6, y: 3, z: 1.05}
-  approach_pose: {x: 0.975, y: 3, theta: 3.142}
-  facings: 2
-  capacity: 16
-  qty: 9
-  low_threshold: 4
-  lots:
-  - {lot_id: tmo-CASE-IP16-MAG-L1, qty: 9}
-- slot_id: TMO-ACC-WALL-E2-01
+- slot_id: TMO-ACC-WALL-E2-02
   fixture_id: ACC-WALL
   aisle_id: accessories
   sku: CASE-PX7-BLK
   level: 2
-  index: 1
-  item_position: {x: 0.6, y: 3.8, z: 1.05}
-  approach_pose: {x: 0.975, y: 3.8, theta: 3.142}
-  facings: 2
+  index: 2
+  item_position: {x: 0.6, y: 4.7, z: 1.05}
+  approach_pose: {x: 0.975, y: 4.7, theta: 3.142}
+  facings: 3
   capacity: 12
   qty: 3
   low_threshold: 3
   lots:
   - {lot_id: tmo-CASE-PX7-BLK-L1, qty: 3}
   deal: {kind: markdown, price_cents: 999, original_cents: 1999, percent_off: 50, reason: 'Clearance: last-gen case'}
-- slot_id: TMO-ACC-WALL-E1-02
+- slot_id: TMO-ACC-WALL-E2-03
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: GLASS-IP18P-ZAG
+  level: 2
+  index: 3
+  item_position: {x: 0.6, y: 5.6, z: 1.05}
+  approach_pose: {x: 0.975, y: 5.6, theta: 3.142}
+  facings: 3
+  capacity: 18
+  qty: 12
+  low_threshold: 4
+  lots:
+  - {lot_id: tmo-GLASS-IP18P-ZAG-L1, qty: 12}
+- slot_id: TMO-ACC-WALL-E2-04
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: GLASS-GS25-GOTO
+  level: 2
+  index: 4
+  item_position: {x: 0.6, y: 6.5, z: 1.05}
+  approach_pose: {x: 0.975, y: 6.5, theta: 3.142}
+  facings: 3
+  capacity: 18
+  qty: 12
+  low_threshold: 4
+  lots:
+  - {lot_id: tmo-GLASS-GS25-GOTO-L1, qty: 12}
+- slot_id: TMO-ACC-WALL-E1-00
   fixture_id: ACC-WALL
   aisle_id: accessories
   sku: GLASS-PX9
   level: 1
-  index: 2
-  item_position: {x: 0.6, y: 4.8, z: 0.6}
-  approach_pose: {x: 0.975, y: 4.8, theta: 3.142}
-  facings: 2
-  capacity: 24
-  qty: 20
-  low_threshold: 6
+  index: 0
+  item_position: {x: 0.6, y: 2.9, z: 0.6}
+  approach_pose: {x: 0.975, y: 2.9, theta: 3.142}
+  facings: 3
+  capacity: 18
+  qty: 15
+  low_threshold: 4
   lots:
-  - {lot_id: tmo-GLASS-PX9-L1, qty: 20}
-  deal: {kind: percent_off, price_cents: 2399, original_cents: 2999, percent_off: 20, reason: '20% off glass with any Pixel 9 case'}
-- slot_id: TMO-ACC-WALL-E1-03
+  - {lot_id: tmo-GLASS-PX9-L1, qty: 15}
+  deal: {kind: percent_off, price_cents: 3199, original_cents: 3999, percent_off: 20, reason: '20% off glass with any Pixel 9 case'}
+- slot_id: TMO-ACC-WALL-E1-01
   fixture_id: ACC-WALL
   aisle_id: accessories
   sku: CBL-USBC-2M
   level: 1
-  index: 3
-  item_position: {x: 0.6, y: 5.8, z: 0.6}
-  approach_pose: {x: 0.975, y: 5.8, theta: 3.142}
-  facings: 2
-  capacity: 30
-  qty: 25
-  low_threshold: 7
-  lots:
-  - {lot_id: tmo-CBL-USBC-2M-L1, qty: 25}
-- slot_id: TMO-ACC-WALL-E0-02
-  fixture_id: ACC-WALL
-  aisle_id: accessories
-  sku: CHG-45W
-  level: 0
-  index: 2
-  item_position: {x: 0.6, y: 4.8, z: 0.15}
-  approach_pose: {x: 0.975, y: 4.8, theta: 3.142}
-  facings: 2
-  capacity: 12
-  qty: 8
-  low_threshold: 3
-  lots:
-  - {lot_id: tmo-CHG-45W-L1, qty: 8}
-- slot_id: TMO-ACC-WALL-E0-03
-  fixture_id: ACC-WALL
-  aisle_id: accessories
-  sku: CHG-20W
-  level: 0
-  index: 3
-  item_position: {x: 0.6, y: 5.8, z: 0.15}
-  approach_pose: {x: 0.975, y: 5.8, theta: 3.142}
-  facings: 2
-  capacity: 16
+  index: 1
+  item_position: {x: 0.6, y: 3.8, z: 0.6}
+  approach_pose: {x: 0.975, y: 3.8, theta: 3.142}
+  facings: 3
+  capacity: 18
   qty: 12
   low_threshold: 4
   lots:
-  - {lot_id: tmo-CHG-20W-L1, qty: 12}
-- slot_id: TMO-AUDIO-WALL-W2-00
-  fixture_id: AUDIO-WALL
-  aisle_id: audio
-  sku: BUDS-PRO
-  level: 2
-  index: 0
-  item_position: {x: 9.4, y: 3.2, z: 1.05}
-  approach_pose: {x: 9.025, y: 3.2, theta: 0}
-  facings: 2
-  capacity: 8
-  qty: 5
-  low_threshold: 2
+  - {lot_id: tmo-CBL-USBC-2M-L1, qty: 12}
+- slot_id: TMO-ACC-WALL-E1-02
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CBL-APPLE-1M
+  level: 1
+  index: 2
+  item_position: {x: 0.6, y: 4.7, z: 0.6}
+  approach_pose: {x: 0.975, y: 4.7, theta: 3.142}
+  facings: 3
+  capacity: 18
+  qty: 12
+  low_threshold: 4
   lots:
-  - {lot_id: tmo-BUDS-PRO-L1, qty: 5}
-- slot_id: TMO-AUDIO-WALL-W2-01
-  fixture_id: AUDIO-WALL
-  aisle_id: audio
-  sku: BUDS-RUN
-  level: 2
-  index: 1
-  item_position: {x: 9.4, y: 4.2, z: 1.05}
-  approach_pose: {x: 9.025, y: 4.2, theta: 0}
-  facings: 2
+  - {lot_id: tmo-CBL-APPLE-1M-L1, qty: 12}
+- slot_id: TMO-ACC-WALL-E1-03
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CBL-USBC-GOTO
+  level: 1
+  index: 3
+  item_position: {x: 0.6, y: 5.6, z: 0.6}
+  approach_pose: {x: 0.975, y: 5.6, theta: 3.142}
+  facings: 3
+  capacity: 18
+  qty: 15
+  low_threshold: 4
+  lots:
+  - {lot_id: tmo-CBL-USBC-GOTO-L1, qty: 15}
+- slot_id: TMO-ACC-WALL-E1-04
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CHG-AW
+  level: 1
+  index: 4
+  item_position: {x: 0.6, y: 6.5, z: 0.6}
+  approach_pose: {x: 0.975, y: 6.5, theta: 3.142}
+  facings: 3
   capacity: 12
   qty: 9
   low_threshold: 3
   lots:
-  - {lot_id: tmo-BUDS-RUN-L1, qty: 9}
-- slot_id: TMO-AUDIO-WALL-W1-02
+  - {lot_id: tmo-CHG-AW-L1, qty: 9}
+- slot_id: TMO-ACC-WALL-E0-00
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CHG-20W
+  level: 0
+  index: 0
+  item_position: {x: 0.6, y: 2.9, z: 0.15}
+  approach_pose: {x: 0.975, y: 2.9, theta: 3.142}
+  facings: 3
+  capacity: 18
+  qty: 12
+  low_threshold: 4
+  lots:
+  - {lot_id: tmo-CHG-20W-L1, qty: 12}
+- slot_id: TMO-ACC-WALL-E0-01
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CHG-45W
+  level: 0
+  index: 1
+  item_position: {x: 0.6, y: 3.8, z: 0.15}
+  approach_pose: {x: 0.975, y: 3.8, theta: 3.142}
+  facings: 3
+  capacity: 12
+  qty: 9
+  low_threshold: 3
+  lots:
+  - {lot_id: tmo-CHG-45W-L1, qty: 9}
+- slot_id: TMO-ACC-WALL-E0-02
+  fixture_id: ACC-WALL
+  aisle_id: accessories
+  sku: CHG-PXSNAP
+  level: 0
+  index: 2
+  item_position: {x: 0.6, y: 4.7, z: 0.15}
+  approach_pose: {x: 0.975, y: 4.7, theta: 3.142}
+  facings: 3
+  capacity: 12
+  qty: 9
+  low_threshold: 3
+  lots:
+  - {lot_id: tmo-CHG-PXSNAP-L1, qty: 9}
+- slot_id: TMO-AUDIO-WALL-W2-00
+  fixture_id: AUDIO-WALL
+  aisle_id: audio
+  sku: APP3
+  level: 2
+  index: 0
+  item_position: {x: 9.4, y: 3.2, z: 1.05}
+  approach_pose: {x: 9.025, y: 3.2, theta: 0}
+  facings: 3
+  capacity: 9
+  qty: 6
+  low_threshold: 2
+  lots:
+  - {lot_id: tmo-APP3-L1, qty: 6}
+- slot_id: TMO-AUDIO-WALL-W2-01
+  fixture_id: AUDIO-WALL
+  aisle_id: audio
+  sku: AP4
+  level: 2
+  index: 1
+  item_position: {x: 9.4, y: 4.6, z: 1.05}
+  approach_pose: {x: 9.025, y: 4.6, theta: 0}
+  facings: 3
+  capacity: 9
+  qty: 6
+  low_threshold: 2
+  lots:
+  - {lot_id: tmo-AP4-L1, qty: 6}
+- slot_id: TMO-AUDIO-WALL-W2-02
+  fixture_id: AUDIO-WALL
+  aisle_id: audio
+  sku: BUDS-PRO
+  level: 2
+  index: 2
+  item_position: {x: 9.4, y: 6, z: 1.05}
+  approach_pose: {x: 9.025, y: 6, theta: 0}
+  facings: 3
+  capacity: 9
+  qty: 6
+  low_threshold: 2
+  lots:
+  - {lot_id: tmo-BUDS-PRO-L1, qty: 6}
+- slot_id: TMO-AUDIO-WALL-W1-00
+  fixture_id: AUDIO-WALL
+  aisle_id: audio
+  sku: GBUDS4PRO
+  level: 1
+  index: 0
+  item_position: {x: 9.4, y: 3.2, z: 0.6}
+  approach_pose: {x: 9.025, y: 3.2, theta: 0}
+  facings: 3
+  capacity: 9
+  qty: 6
+  low_threshold: 2
+  lots:
+  - {lot_id: tmo-GBUDS4PRO-L1, qty: 6}
+- slot_id: TMO-AUDIO-WALL-W1-01
+  fixture_id: AUDIO-WALL
+  aisle_id: audio
+  sku: BUDS-RUN
+  level: 1
+  index: 1
+  item_position: {x: 9.4, y: 4.6, z: 0.6}
+  approach_pose: {x: 9.025, y: 4.6, theta: 0}
+  facings: 3
+  capacity: 9
+  qty: 6
+  low_threshold: 2
+  lots:
+  - {lot_id: tmo-BUDS-RUN-L1, qty: 6}
+- slot_id: TMO-AUDIO-WALL-W0-00
   fixture_id: AUDIO-WALL
   aisle_id: audio
   sku: PB-10K
-  level: 1
-  index: 2
-  item_position: {x: 9.4, y: 5.2, z: 0.6}
-  approach_pose: {x: 9.025, y: 5.2, theta: 0}
-  facings: 2
-  capacity: 16
-  qty: 11
-  low_threshold: 4
+  level: 0
+  index: 0
+  item_position: {x: 9.4, y: 3.2, z: 0.15}
+  approach_pose: {x: 9.025, y: 3.2, theta: 0}
+  facings: 3
+  capacity: 12
+  qty: 9
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-PB-10K-L1, qty: 11}
+  - {lot_id: tmo-PB-10K-L1, qty: 9}
+- slot_id: TMO-AUDIO-WALL-W0-01
+  fixture_id: AUDIO-WALL
+  aisle_id: audio
+  sku: PB-MOPHIE
+  level: 0
+  index: 1
+  item_position: {x: 9.4, y: 4.6, z: 0.15}
+  approach_pose: {x: 9.025, y: 4.6, theta: 0}
+  facings: 3
+  capacity: 9
+  qty: 6
+  low_threshold: 2
+  lots:
+  - {lot_id: tmo-PB-MOPHIE-L1, qty: 6}
 - slot_id: TMO-TABLE-A-W0-00
   fixture_id: TABLE-A
   aisle_id: phones
-  sku: PX9-128
+  sku: IP18PRO-256
   level: 0
   index: 0
-  item_position: {x: 3, y: 4.5, z: 0.9}
-  approach_pose: {x: 2.625, y: 4.5, theta: 0}
-  facings: 2
-  capacity: 6
-  qty: 4
+  item_position: {x: 3, y: 3.7, z: 0.9}
+  approach_pose: {x: 2.625, y: 3.7, theta: 0}
+  facings: 1
+  capacity: 4
+  qty: 3
   low_threshold: 1
   lots:
-  - {lot_id: tmo-PX9-128-L1, qty: 4}
+  - {lot_id: tmo-IP18PRO-256-L1, qty: 3}
 - slot_id: TMO-TABLE-A-W0-01
+  fixture_id: TABLE-A
+  aisle_id: phones
+  sku: IP17PRO-256
+  level: 0
+  index: 1
+  item_position: {x: 3, y: 4.5, z: 0.9}
+  approach_pose: {x: 2.625, y: 4.5, theta: 0}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-IP17PRO-256-L1, qty: 3}
+- slot_id: TMO-TABLE-A-W0-02
+  fixture_id: TABLE-A
+  aisle_id: phones
+  sku: IP17-256
+  level: 0
+  index: 2
+  item_position: {x: 3, y: 5.3, z: 0.9}
+  approach_pose: {x: 2.625, y: 5.3, theta: 0}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-IP17-256-L1, qty: 3}
+- slot_id: TMO-TABLE-A-E0-00
   fixture_id: TABLE-A
   aisle_id: phones
   sku: IP16-128
   level: 0
-  index: 1
-  item_position: {x: 3, y: 4, z: 0.9}
-  approach_pose: {x: 2.625, y: 4, theta: 0}
-  facings: 2
-  capacity: 6
-  qty: 4
+  index: 0
+  item_position: {x: 4.4, y: 3.7, z: 0.9}
+  approach_pose: {x: 4.775, y: 3.7, theta: 3.142}
+  facings: 1
+  capacity: 4
+  qty: 3
   low_threshold: 1
   lots:
-  - {lot_id: tmo-IP16-128-L1, qty: 4}
-- slot_id: TMO-TABLE-B-E0-00
+  - {lot_id: tmo-IP16-128-L1, qty: 3}
+- slot_id: TMO-TABLE-A-E0-01
+  fixture_id: TABLE-A
+  aisle_id: phones
+  sku: REVVL8P-256
+  level: 0
+  index: 1
+  item_position: {x: 4.4, y: 4.5, z: 0.9}
+  approach_pose: {x: 4.775, y: 4.5, theta: 3.142}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-REVVL8P-256-L1, qty: 3}
+- slot_id: TMO-TABLE-A-E0-02
+  fixture_id: TABLE-A
+  aisle_id: phones
+  sku: MOTOG26-128
+  level: 0
+  index: 2
+  item_position: {x: 4.4, y: 5.3, z: 0.9}
+  approach_pose: {x: 4.775, y: 5.3, theta: 3.142}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-MOTOG26-128-L1, qty: 3}
+- slot_id: TMO-TABLE-B-W0-00
+  fixture_id: TABLE-B
+  aisle_id: phones
+  sku: GS26U-256
+  level: 0
+  index: 0
+  item_position: {x: 5.6, y: 3.5, z: 0.9}
+  approach_pose: {x: 5.225, y: 3.5, theta: 0}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-GS26U-256-L1, qty: 3}
+- slot_id: TMO-TABLE-B-W0-01
+  fixture_id: TABLE-B
+  aisle_id: phones
+  sku: GS26-256
+  level: 0
+  index: 1
+  item_position: {x: 5.6, y: 4.2, z: 0.9}
+  approach_pose: {x: 5.225, y: 4.2, theta: 0}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-GS26-256-L1, qty: 3}
+- slot_id: TMO-TABLE-B-W0-02
   fixture_id: TABLE-B
   aisle_id: phones
   sku: GS25-128
   level: 0
+  index: 2
+  item_position: {x: 5.6, y: 4.9, z: 0.9}
+  approach_pose: {x: 5.225, y: 4.9, theta: 0}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-GS25-128-L1, qty: 3}
+- slot_id: TMO-TABLE-B-W0-03
+  fixture_id: TABLE-B
+  aisle_id: phones
+  sku: GZF8-256
+  level: 0
+  index: 3
+  item_position: {x: 5.6, y: 5.6, z: 0.9}
+  approach_pose: {x: 5.225, y: 5.6, theta: 0}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-GZF8-256-L1, qty: 3}
+- slot_id: TMO-TABLE-B-E0-00
+  fixture_id: TABLE-B
+  aisle_id: phones
+  sku: PX11P-256
+  level: 0
   index: 0
+  item_position: {x: 7, y: 3.7, z: 0.9}
+  approach_pose: {x: 7.375, y: 3.7, theta: 3.142}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-PX11P-256-L1, qty: 3}
+- slot_id: TMO-TABLE-B-E0-01
+  fixture_id: TABLE-B
+  aisle_id: phones
+  sku: PX10-128
+  level: 0
+  index: 1
   item_position: {x: 7, y: 4.5, z: 0.9}
   approach_pose: {x: 7.375, y: 4.5, theta: 3.142}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-PX10-128-L1, qty: 3}
+- slot_id: TMO-TABLE-B-E0-02
+  fixture_id: TABLE-B
+  aisle_id: phones
+  sku: PX9-128
+  level: 0
+  index: 2
+  item_position: {x: 7, y: 5.3, z: 0.9}
+  approach_pose: {x: 7.375, y: 5.3, theta: 3.142}
+  facings: 1
+  capacity: 4
+  qty: 3
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-PX9-128-L1, qty: 3}
+- slot_id: TMO-WEAR-CASE-S2-00
+  fixture_id: WEAR-CASE
+  aisle_id: wearables
+  sku: AW12-42
+  level: 2
+  index: 0
+  item_position: {x: 4.1, y: 7.2, z: 1.2}
+  approach_pose: {x: 4.1, y: 6.825, theta: 1.571}
   facings: 2
   capacity: 6
   qty: 4
   low_threshold: 1
   lots:
-  - {lot_id: tmo-GS25-128-L1, qty: 4}
-- slot_id: TMO-WEAR-CASE-S1-00
+  - {lot_id: tmo-AW12-42-L1, qty: 4}
+- slot_id: TMO-WEAR-CASE-S2-01
+  fixture_id: WEAR-CASE
+  aisle_id: wearables
+  sku: AWSE3-40
+  level: 2
+  index: 1
+  item_position: {x: 5, y: 7.2, z: 1.2}
+  approach_pose: {x: 5, y: 6.825, theta: 1.571}
+  facings: 2
+  capacity: 6
+  qty: 4
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-AWSE3-40-L1, qty: 4}
+- slot_id: TMO-WEAR-CASE-S2-02
   fixture_id: WEAR-CASE
   aisle_id: wearables
   sku: WATCH-PX3
-  level: 1
-  index: 0
-  item_position: {x: 4.4, y: 7.2, z: 0.75}
-  approach_pose: {x: 4.4, y: 6.825, theta: 1.571}
+  level: 2
+  index: 2
+  item_position: {x: 5.9, y: 7.2, z: 1.2}
+  approach_pose: {x: 5.9, y: 6.825, theta: 1.571}
   facings: 2
   capacity: 6
+  qty: 4
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-WATCH-PX3-L1, qty: 4}
+- slot_id: TMO-WEAR-CASE-S1-00
+  fixture_id: WEAR-CASE
+  aisle_id: wearables
+  sku: GW8-40
+  level: 1
+  index: 0
+  item_position: {x: 4.1, y: 7.2, z: 0.75}
+  approach_pose: {x: 4.1, y: 6.825, theta: 1.571}
+  facings: 2
+  capacity: 6
+  qty: 4
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-GW8-40-L1, qty: 4}
+- slot_id: TMO-WEAR-CASE-S1-01
+  fixture_id: WEAR-CASE
+  aisle_id: wearables
+  sku: IPAD-A16
+  level: 1
+  index: 1
+  item_position: {x: 5, y: 7.2, z: 0.75}
+  approach_pose: {x: 5, y: 6.825, theta: 1.571}
+  facings: 1
+  capacity: 4
   qty: 3
   low_threshold: 1
   lots:
-  - {lot_id: tmo-WATCH-PX3-L1, qty: 3}
+  - {lot_id: tmo-IPAD-A16-L1, qty: 3}
 - slot_id: TMO-WEAR-CASE-S0-01
   fixture_id: WEAR-CASE
   aisle_id: wearables
   sku: GW-5G
   level: 0
   index: 1
-  item_position: {x: 5.6, y: 7.2, z: 0.3}
-  approach_pose: {x: 5.6, y: 6.825, theta: 1.571}
+  item_position: {x: 5, y: 7.2, z: 0.3}
+  approach_pose: {x: 5, y: 6.825, theta: 1.571}
   facings: 2
   capacity: 6
-  qty: 6
+  qty: 4
   low_threshold: 1
   lots:
-  - {lot_id: tmo-GW-5G-L1, qty: 6}
+  - {lot_id: tmo-GW-5G-L1, qty: 4}
+- slot_id: TMO-WEAR-CASE-S0-02
+  fixture_id: WEAR-CASE
+  aisle_id: wearables
+  sku: ANT-5G
+  level: 0
+  index: 2
+  item_position: {x: 5.9, y: 7.2, z: 0.3}
+  approach_pose: {x: 5.9, y: 6.825, theta: 1.571}
+  facings: 2
+  capacity: 6
+  qty: 4
+  low_threshold: 1
+  lots:
+  - {lot_id: tmo-ANT-5G-L1, qty: 4}
