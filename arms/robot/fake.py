@@ -931,6 +931,7 @@ class FakeRobot:
             holding=self._held_instance(rv) if rv.holding else None,
             basket=self._basket_instances(rv),
             capacity=rv.spec.basket_capacity,
+            counter=[u.model_copy() for u in rv.counter],
         )
 
     def _scene_view(self, world: StoreWorld) -> SceneView:

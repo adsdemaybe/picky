@@ -52,6 +52,8 @@ class RoverView:
     holding: ItemInstance | None = None
     basket: list[ItemInstance] = field(default_factory=list)
     capacity: int = 12
+    counter: list[ItemInstance] = field(default_factory=list)
+    """0.2.4: units this rover unloaded onto the checkout counter (drawn on the top-down views)."""
 
 
 @dataclass
@@ -645,6 +647,12 @@ def render_ceiling(
         x, y = P(pose.x, pose.y)
         draw.rectangle((x - 5, y - 5, x + 5, y + 5), fill=col)
         draw.text((x + 7, y - 6), label, fill=col, font=small)
+    # 0.2.4: units the arm put on the checkout counter
+    for rv in rovers:
+        for unit in rv.counter:
+            x, y = P(unit.position.x, unit.position.y)
+            half = max(2.5, 0.045 * s)
+            draw.rectangle((x - half, y - half, x + half, y + half), fill=(234, 88, 12), outline=(67, 20, 7))
     # docks + routes + robots
     for rv in rovers:
         c = rgb(rv.color, (37, 99, 235))
@@ -691,7 +699,9 @@ def render_ceiling(
             draw,
             w,
             h,
-            f"{holding}basket {len(focus.basket)}/{focus.capacity}" + (f" · {focus.task}" if focus.task else ""),
+            f"{holding}basket {len(focus.basket)}/{focus.capacity}"
+            + (f" · counter {len(focus.counter)}" if focus.counter else "")
+            + (f" · {focus.task}" if focus.task else ""),
         )
         watermark(draw, w, h)
         return Rendered(encode(img), w, h, [], None)
