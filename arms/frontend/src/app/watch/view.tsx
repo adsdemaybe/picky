@@ -13,7 +13,7 @@ import { BindTripFromUrl } from "@/components/GatewayBits";
 import { HandoffPanel } from "@/components/Handoff";
 import { LottieSlot } from "@/components/media";
 import { Panel, ProductTile } from "@/components/picky";
-import { CameraInset, CameraPanel, directorRungs, perceivedRungs, useSimNames, wristRungs, type Rung } from "@/components/StageCamera";
+import { CameraInset, CameraPanel, directorRungs, overheadRungs, perceivedRungs, useCeilingCameras, useSimNames, wristRungs, type Rung } from "@/components/StageCamera";
 import { VerifyStack } from "@/components/TripReview";
 import { MapLegend, StoreMap } from "@/components/StoreMap";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +32,8 @@ export default function WatchPage() {
   const isaac = useGateway((s) => !!s.health?.sim_connected);
   const perceptron = useGateway((s) => !!s.health?.real_arms.includes("cameras"));
   const [mapOnStage, setMapOnStage] = useState(false);
+  const [view, setView] = useState("chase");
+  const ceilings = useCeilingCameras(t.storeId, t.source === "gateway" ? GATEWAY_URL : "", t.source === "gateway" && !!t.robotId);
   const simOf = useSimNames(t.source === "gateway" ? t.robotId : null, t.storeId, t.source === "gateway" ? GATEWAY_URL : "", isaac);
   const bind = (
     <Suspense fallback={null}>
@@ -61,6 +63,9 @@ export default function WatchPage() {
   const base = gateway ? GATEWAY_URL : "";
   const opts = { robotId, storeId: t.storeId, base, simOf, perceptron, waiting: gateway && !t.robotId };
   const store = STORES[t.storeId];
+  const overhead = ceilings.find((c) => c.id === view);
+  const stageRungs = overhead ? overheadRungs(opts, overhead.id, `Bird's-eye · ${overhead.name.replace(/^.*·\s*/, "")}`) : directorRungs(opts);
+  const views = [{ id: "chase", label: "Chase cam" }, ...ceilings.map((c, i) => ({ id: c.id, label: ceilings.length > 1 ? `Bird's-eye ${i + 1}` : "Bird's-eye" }))];
   const who = t.robotName ?? (gateway ? (t.robotId ?? "Assigning a robot") : "Demo robot");
   const phaseText =
     t.tripState === "failed" ? "Stopped" : t.phase === "done" ? "Done" : t.phase === "checkout" ? "At checkout" : t.mode === "pickup" ? "Shopping for pickup" : "Shopping with you";
@@ -89,9 +94,27 @@ export default function WatchPage() {
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.75fr)_minmax(340px,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
+          {views.length > 1 && (
+            <div role="tablist" aria-label="Camera view" className="-mb-2 flex flex-wrap items-center gap-1.5">
+              {views.map((v) => (
+                <button
+                  key={v.id}
+                  role="tab"
+                  aria-selected={(overhead?.id ?? "chase") === v.id}
+                  onClick={() => setView(v.id)}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-[13px] font-semibold transition-colors",
+                    (overhead?.id ?? "chase") === v.id ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+          )}
           <CameraPanel
-            rungs={directorRungs(opts)}
-            alt={`Isaac Sim chase camera following ${who}`}
+            rungs={stageRungs}
+            alt={overhead ? `Isaac Sim ceiling camera over ${store?.name ?? t.storeId}` : `Isaac Sim chase camera following ${who}`}
             onRung={(r: Rung) => setMapOnStage(r.kind === "node" && r.title === "Store map")}
           />
           <PlanStrip />
