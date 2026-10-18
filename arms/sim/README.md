@@ -100,6 +100,12 @@ matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop t
 - New env vars (`PICKY_SIM_STORES`, `PICKY_SIM_WORKER_ID`, `PICKY_SIM_LABEL_DIR`, `PICKY_SO101_URDF`) are read with
   `os.environ` in `app.py` (worker-host only). They still need lines in `.env.example`, which another PR owns.
 
+## Supermarket teleop scene (`supermarket/`)
+
+Standalone, keyboard-drivable Isaac Sim 6.x scene: AgiBot Genie Sim stocked supermarket (~500 pickable products) +
+DISCOVERSE rm2_car / AIRBOT Play robot with a basket, grab-to-basket, headless `--smoke` test and `--livestream`.
+Independent of the worker above; see [supermarket/README.md](supermarket/README.md).
+
 ## Contributing to this arm
 
 Follow CLAUDE.md §5. Work on `arm/sim` (after merge: `feat/sim-<slug>` / `fix/sim-<slug>`) and touch only `arms/sim/`.

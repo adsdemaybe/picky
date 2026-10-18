@@ -41,3 +41,6 @@ recordings/
 # Playwright e2e screenshots / traces (tests/e2e)
 tests/e2e/artifacts/
 test-results/
+
+# supermarket teleop scene: generated robot build
+arms/sim/supermarket/assets/build/
