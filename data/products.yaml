@@ -3110,7 +3110,7 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.062, 0.03, 0.05]
+    dims_m: [0.11, 0.045, 0.11]
     label_color: '#f7f7f7'
     mass_kg: 0.06
 - sku: AP4
@@ -3128,7 +3128,7 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.055, 0.03, 0.05]
+    dims_m: [0.1, 0.045, 0.1]
     label_color: '#f7f7f7'
     mass_kg: 0.05
 - sku: GBUDS4PRO
@@ -3146,9 +3146,9 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.05, 0.03, 0.05]
+    dims_m: [0.1, 0.045, 0.1]
     label_color: '#2b2d31'
-    mass_kg: 0.06
+    mass_kg: 0.2
 - sku: BUDS-RUN
   name: 'Samsung Galaxy Buds4'
   brand: Samsung
@@ -3164,7 +3164,7 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.05, 0.03, 0.05]
+    dims_m: [0.1, 0.045, 0.1]
     label_color: '#d9dbe0'
     mass_kg: 0.05
 - sku: BUDS-PRO
@@ -3182,7 +3182,7 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.063, 0.03, 0.05]
+    dims_m: [0.1, 0.045, 0.1]
     label_color: '#e9dfcf'
     mass_kg: 0.06
 - sku: AW12-42
@@ -3201,7 +3201,7 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.045, 0.04, 0.12]
+    dims_m: [0.11, 0.09, 0.13]
     label_color: '#e6e6e6'
     mass_kg: 0.05
 - sku: AWSE3-40
@@ -3220,7 +3220,7 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.042, 0.04, 0.115]
+    dims_m: [0.11, 0.09, 0.13]
     label_color: '#d9d4cc'
     mass_kg: 0.04
 - sku: WATCH-PX3
@@ -3239,7 +3239,7 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.045, 0.04, 0.12]
+    dims_m: [0.11, 0.09, 0.13]
     label_color: '#3a3d40'
     mass_kg: 0.05
 - sku: GW8-40
@@ -3258,7 +3258,7 @@ products:
   perishable: false
   asset:
     shape: box
-    dims_m: [0.045, 0.04, 0.12]
+    dims_m: [0.11, 0.09, 0.13]
     label_color: '#2c2f35'
     mass_kg: 0.05
 - sku: IPAD-A16

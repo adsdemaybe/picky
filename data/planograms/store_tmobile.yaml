@@ -358,12 +358,12 @@ slots:
   index: 0
   item_position: {x: 9.4, y: 3.2, z: 1.05}
   approach_pose: {x: 9.025, y: 3.2, theta: 0}
-  facings: 3
-  capacity: 9
-  qty: 6
-  low_threshold: 2
+  facings: 5
+  capacity: 15
+  qty: 10
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-APP3-L1, qty: 6}
+  - {lot_id: tmo-APP3-L1, qty: 10}
 - slot_id: TMO-AUDIO-WALL-W2-01
   fixture_id: AUDIO-WALL
   aisle_id: audio
@@ -372,12 +372,12 @@ slots:
   index: 1
   item_position: {x: 9.4, y: 4.6, z: 1.05}
   approach_pose: {x: 9.025, y: 4.6, theta: 0}
-  facings: 3
-  capacity: 9
-  qty: 6
-  low_threshold: 2
+  facings: 5
+  capacity: 15
+  qty: 10
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-AP4-L1, qty: 6}
+  - {lot_id: tmo-AP4-L1, qty: 10}
 - slot_id: TMO-AUDIO-WALL-W2-02
   fixture_id: AUDIO-WALL
   aisle_id: audio
@@ -386,12 +386,12 @@ slots:
   index: 2
   item_position: {x: 9.4, y: 6, z: 1.05}
   approach_pose: {x: 9.025, y: 6, theta: 0}
-  facings: 3
-  capacity: 9
-  qty: 6
-  low_threshold: 2
+  facings: 5
+  capacity: 15
+  qty: 10
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-BUDS-PRO-L1, qty: 6}
+  - {lot_id: tmo-BUDS-PRO-L1, qty: 10}
 - slot_id: TMO-AUDIO-WALL-W1-00
   fixture_id: AUDIO-WALL
   aisle_id: audio
@@ -400,12 +400,12 @@ slots:
   index: 0
   item_position: {x: 9.4, y: 3.2, z: 0.6}
   approach_pose: {x: 9.025, y: 3.2, theta: 0}
-  facings: 3
-  capacity: 9
-  qty: 6
-  low_threshold: 2
+  facings: 5
+  capacity: 15
+  qty: 10
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-GBUDS4PRO-L1, qty: 6}
+  - {lot_id: tmo-GBUDS4PRO-L1, qty: 10}
 - slot_id: TMO-AUDIO-WALL-W1-01
   fixture_id: AUDIO-WALL
   aisle_id: audio
@@ -414,12 +414,12 @@ slots:
   index: 1
   item_position: {x: 9.4, y: 4.6, z: 0.6}
   approach_pose: {x: 9.025, y: 4.6, theta: 0}
-  facings: 3
-  capacity: 9
-  qty: 6
-  low_threshold: 2
+  facings: 5
+  capacity: 15
+  qty: 10
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-BUDS-RUN-L1, qty: 6}
+  - {lot_id: tmo-BUDS-RUN-L1, qty: 10}
 - slot_id: TMO-AUDIO-WALL-W0-00
   fixture_id: AUDIO-WALL
   aisle_id: audio
@@ -428,12 +428,12 @@ slots:
   index: 0
   item_position: {x: 9.4, y: 3.2, z: 0.15}
   approach_pose: {x: 9.025, y: 3.2, theta: 0}
-  facings: 3
-  capacity: 12
-  qty: 9
-  low_threshold: 3
+  facings: 6
+  capacity: 18
+  qty: 12
+  low_threshold: 4
   lots:
-  - {lot_id: tmo-PB-10K-L1, qty: 9}
+  - {lot_id: tmo-PB-10K-L1, qty: 12}
 - slot_id: TMO-AUDIO-WALL-W0-01
   fixture_id: AUDIO-WALL
   aisle_id: audio
@@ -442,12 +442,12 @@ slots:
   index: 1
   item_position: {x: 9.4, y: 4.6, z: 0.15}
   approach_pose: {x: 9.025, y: 4.6, theta: 0}
-  facings: 3
-  capacity: 9
-  qty: 6
-  low_threshold: 2
+  facings: 6
+  capacity: 18
+  qty: 12
+  low_threshold: 4
   lots:
-  - {lot_id: tmo-PB-MOPHIE-L1, qty: 6}
+  - {lot_id: tmo-PB-MOPHIE-L1, qty: 12}
 - slot_id: TMO-TABLE-A-W0-00
   fixture_id: TABLE-A
   aisle_id: phones
@@ -638,12 +638,12 @@ slots:
   index: 0
   item_position: {x: 4.1, y: 7.2, z: 1.2}
   approach_pose: {x: 4.1, y: 6.825, theta: 1.571}
-  facings: 2
-  capacity: 6
-  qty: 4
-  low_threshold: 1
+  facings: 4
+  capacity: 12
+  qty: 8
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-AW12-42-L1, qty: 4}
+  - {lot_id: tmo-AW12-42-L1, qty: 8}
 - slot_id: TMO-WEAR-CASE-S2-01
   fixture_id: WEAR-CASE
   aisle_id: wearables
@@ -652,12 +652,12 @@ slots:
   index: 1
   item_position: {x: 5, y: 7.2, z: 1.2}
   approach_pose: {x: 5, y: 6.825, theta: 1.571}
-  facings: 2
-  capacity: 6
-  qty: 4
-  low_threshold: 1
+  facings: 4
+  capacity: 12
+  qty: 8
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-AWSE3-40-L1, qty: 4}
+  - {lot_id: tmo-AWSE3-40-L1, qty: 8}
 - slot_id: TMO-WEAR-CASE-S2-02
   fixture_id: WEAR-CASE
   aisle_id: wearables
@@ -666,12 +666,12 @@ slots:
   index: 2
   item_position: {x: 5.9, y: 7.2, z: 1.2}
   approach_pose: {x: 5.9, y: 6.825, theta: 1.571}
-  facings: 2
-  capacity: 6
-  qty: 4
-  low_threshold: 1
+  facings: 4
+  capacity: 12
+  qty: 8
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-WATCH-PX3-L1, qty: 4}
+  - {lot_id: tmo-WATCH-PX3-L1, qty: 8}
 - slot_id: TMO-WEAR-CASE-S1-00
   fixture_id: WEAR-CASE
   aisle_id: wearables
@@ -680,12 +680,12 @@ slots:
   index: 0
   item_position: {x: 4.1, y: 7.2, z: 0.75}
   approach_pose: {x: 4.1, y: 6.825, theta: 1.571}
-  facings: 2
-  capacity: 6
-  qty: 4
-  low_threshold: 1
+  facings: 4
+  capacity: 12
+  qty: 8
+  low_threshold: 3
   lots:
-  - {lot_id: tmo-GW8-40-L1, qty: 4}
+  - {lot_id: tmo-GW8-40-L1, qty: 8}
 - slot_id: TMO-WEAR-CASE-S1-01
   fixture_id: WEAR-CASE
   aisle_id: wearables
