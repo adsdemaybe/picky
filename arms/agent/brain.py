@@ -159,6 +159,7 @@ class _BrainBase:
     model_name: str = SCRIPTED
 
     def __init__(self, services: Services) -> None:
+        self._chat: dict[str, deque] = {}
         self._services = services
         self._rt: dict[RobotId, BrainRuntime] = {}
 
@@ -514,7 +515,133 @@ class _BrainBase:
             seen = await self._look(rt, goal, _see_clause(text) if wants_status else text, store_id)
             if seen:
                 return f"{await self._status_text(rt, goal)} {seen}" if wants_status else seen
+        if not _STATUS_RE.search(text):
+            talk = await self._converse(rt, goal, text, store_id)
+            if talk:
+                return talk
         return await self._status_text(rt, goal)
+
+    async def _converse(self, rt: BrainRuntime, goal: Goal | None, text: str, store_id: str | None) -> str | None:
+        """Free conversation with a shopper at the robot (recipes, ideas, comparisons, small talk), answered by the
+        configured LLM as a friendly store helper, grounded with this store's catalog through tools. None when no
+        LLM is configured or it fails / is slow (the caller falls back to the scripted reply)."""
+        from utils import llm
+
+        grok_key = _env("XAI_API_KEY")
+        if not store_id or not (llm.is_configured() or grok_key):
+            return None
+        catalog = self._services.catalog
+        name = rt.robot_id
+        store_name = store_id
+        with contextlib.suppress(Exception):
+            from utils.data import load_planogram, load_robot
+
+            name = load_robot(rt.robot_id).name
+            store_name = load_planogram(store_id).name
+        status = await self._status_text(rt, goal)
+
+        async def search_store(args: dict[str, Any]) -> Any:
+            from contracts.catalog import SearchQuery
+
+            q = SearchQuery(
+                text=str(args.get("query") or ""),
+                store_ids=[store_id],
+                in_stock_only=bool(args.get("in_stock_only", True)),
+                max_price_cents=args.get("max_price_cents"),
+                dietary=list(args.get("dietary") or []),
+                limit=8,
+            )
+            out = []
+            for h in await catalog.search(q):
+                o = h.offer_for(store_id)
+                info = _ingredients_of(h.product.sku) or {}
+                out.append(
+                    {
+                        "sku": h.product.sku,
+                        "name": _say(h.product.name),
+                        "price": _money(o.price_cents) if o else None,
+                        "on_shelf": o.qty if o else 0,
+                        "dietary": h.product.dietary,
+                        "allergens": sorted({*(h.product.allergens or []), *(info.get("allergens") or [])}),
+                        "ingredients": (info.get("ingredients") or [])[:10],
+                    }
+                )
+            return out
+
+        async def where_is(args: dict[str, Any]) -> Any:
+            sku = str(args.get("sku") or "")
+            locs = await catalog.get_locations(sku, store_id)
+            if not locs:
+                return {"error": "not stocked in this store"}
+            aisle, shelf = await self._shelf_words(locs[0], store_id)
+            return {"where": _aisle(aisle), "shelf": shelf}
+
+        tools = [
+            {
+                "name": "search_store",
+                "description": "Search THIS store's shelves. Returns products with price, units on the shelf, "
+                "dietary tags, allergens and ingredients. Use it before naming any product or price.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "What to look for, e.g. 'pasta sauce'."},
+                        "max_price_cents": {"type": "integer"},
+                        "dietary": {"type": "array", "items": {"type": "string"}},
+                        "in_stock_only": {"type": "boolean"},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "where_is",
+                "description": "Aisle and shelf of one product (sku from search_store) in this store.",
+                "input_schema": {"type": "object", "properties": {"sku": {"type": "string"}}, "required": ["sku"]},
+            },
+        ]
+        system = (
+            f"You are {name}, a friendly shopping-helper robot working in {store_name}, a grocery store. You're "
+            "talking out loud with a shopper standing at your screen, so sound like a warm, upbeat store associate: "
+            "natural and conversational, 1 to 3 short sentences, no lists, no markdown, no emoji. "
+            "Only mention products, prices and aisles you got from your tools; never invent them. If something isn't "
+            "in stock, say so kindly and suggest what is. Offer to walk them to the shelf or grab it for them "
+            "('Get it for me' on my screen). You can't take payment yourself; checkout is on my screen. "
+            f"Right now: {status}"
+        )
+        history = self._chat.setdefault(rt.robot_id, deque(maxlen=6))
+        messages = [*history, {"role": "user", "content": text}]
+        handlers = {"search_store": search_store, "where_is": where_is}
+
+        async def via_grok() -> str:
+            return await _grok_tool_loop(grok_key, system, messages, tools, handlers)
+
+        async def via_llm() -> str:
+            res = await llm.run_tool_loop(
+                messages, tools, handlers, system=system, kind="fast", max_iters=5, max_tokens=400
+            )
+            return res.text or ""
+
+        # fastest first for a person standing at the robot: Grok (~1 s/turn) then the configured LLM (Gemini/Claude)
+        order = []
+        if grok_key and (_env("PICKY_CHAT_LLM") or "grok").lower() == "grok":
+            order.append(("grok", via_grok))
+        if llm.is_configured():
+            order.append(("llm", via_llm))
+        if grok_key and ("grok", via_grok) not in order:
+            order.append(("grok", via_grok))
+        reply = ""
+        for label, run in order:
+            try:
+                reply = (await asyncio.wait_for(run(), timeout=20)).strip()
+            except Exception as exc:  # noqa: BLE001 - try the next model, then the scripted reply
+                log.warning("robot chat via %s failed (%s)", label, exc)
+                continue
+            if reply:
+                break
+        if not reply:
+            return None
+        history.append({"role": "user", "content": text})
+        history.append({"role": "assistant", "content": reply})
+        return reply
 
     def _queue_for_llm(self, rt: BrainRuntime, text: str) -> bool:
         return False
@@ -535,31 +662,49 @@ class _BrainBase:
 
         query = m.group("q").strip()
         try:
-            hits = await catalog.search(SearchQuery(text=query, store_ids=[store_id], limit=3))
+            hits = await catalog.search(SearchQuery(text=query, store_ids=[store_id], limit=6))
         except Exception:  # noqa: BLE001 - the shopper still gets an answer
             return None
         if not hits:
-            return f"Sorry, I couldn't find {query} in this store."
-        hit = hits[0]
+            return f"Hmm, I couldn't find any {query} here, sorry. Want me to look for something similar?"
+        words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2]
+
+        def fit(h: Any) -> tuple:
+            """'the honey' -> Wildflower Honey before Honey Oat Clusters Cereal: the thing asked for is the noun."""
+            name = _say(h.product.name)
+            covered = sum(w.rstrip("s") in name for w in words)
+            head = bool(words) and name.split()[-1].rstrip("s") == words[-1].rstrip("s")
+            sub = (h.product.subcategory or "").replace("_", " ")
+            return (covered, head or (bool(words) and words[-1].rstrip("s") in sub), -len(name))
+
+        hit = max(hits[:6], key=fit)
         p = hit.product
         offer = hit.offer_for(store_id)
-        words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2]
         exact = all(w.rstrip("s") in p.name.lower() for w in words)
-        lead = "" if exact else f"I don't see {query} exactly; the closest is "
+        if not exact:
+            from utils import llm
+
+            if llm.is_configured():
+                return None  # a fuzzy ask ('anything vegan under $3?') is a conversation: let the LLM handle it
+        lead = "" if exact else f"I don't think we carry {query}, but the closest thing is "
         if cheaper:
             return await self._cheaper(p, offer, store_id, lead)
         if ingr:
             return _ingredients_reply(p, lead, ingr.groupdict().get("ask") or "", text)
         locs = await catalog.get_locations(p.sku, store_id)
+        name = _say(p.name)
         if not locs:
-            return f"We don't carry {p.name} in this store."
+            return f"{lead or 'Sorry, '}we don't carry {name} at this store. I can check what else we have, though."
         loc = locs[0]
         where, shelf = await self._shelf_words(loc, store_id)
-        price = f" It's ${offer.price_cents / 100:.2f}" if offer is not None else ""
-        stock = ""
-        if offer is not None:
-            stock = f", {offer.qty} on the shelf" if offer.qty > 0 else ", but it's out of stock right now"
-        return f"{lead}{p.name} is in {where}, {shelf}.{price}{stock}. Want me to take you there?"
+        if offer is not None and offer.qty <= 0:
+            return f"{lead}{name} usually lives in {_aisle(where)}, {shelf}, but we're out right now, sorry about that."
+        price = f" It's {_money(offer.price_cents)}." if offer is not None else ""
+        spot = shelf if shelf.startswith("on ") else f"in {_aisle(where)}, {shelf}"
+        if lead:  # "I don't think we carry X, but the closest thing is the Y. It's on ..."
+            return f"{lead}the {name}. It's {spot}.{price} Want me to walk you over?"
+        opener = _pick(p.sku, ("Sure! ", "Of course! ", "Yes, we have it! ", "Good question! "))
+        return f"{opener}{_cap(f'the {name} {_is(name)} {spot}')}.{price} Want me to walk you over?"
 
     async def _shelf_words(self, loc: Any, store_id: str) -> tuple[str, str]:
         fx = None
@@ -590,19 +735,17 @@ class _BrainBase:
             alts.append((o.price_cents, h.product, o))
         alts.sort(key=lambda a: a[0])
         if not alts:
-            return f"{lead}{p.name} (${base / 100:.2f}) is already the cheapest of its kind here."
+            return f"{lead}Good news: at {_money(base)}, the {_say(p.name)} is already the best price for that here."
         cents, alt, _o = alts[0]
         locs = await catalog.get_locations(alt.sku, store_id)
         where = ""
         if locs:
             aisle, shelf = await self._shelf_words(locs[0], store_id)
-            where = f" It's in {aisle}, {shelf}."
-        more = (
-            f" I also see {len(alts) - 1} other cheaper option{'s' if len(alts) > 2 else ''}." if len(alts) > 1 else ""
-        )
+            where = f" You'll find it in {_aisle(aisle)}, {shelf}."
+        more = " There's another cheaper option too, if you'd like to hear it." if len(alts) > 1 else ""
         return (
-            f"{lead}{p.name} is ${base / 100:.2f}. {alt.name} is ${cents / 100:.2f}, "
-            f"saving ${(base - cents) / 100:.2f}.{where}{more} Want me to grab it or take you there?"
+            f"{lead}Smart thinking! The {_say(p.name)} is {_money(base)}, but the {_say(alt.name)} is {_money(cents)}, "
+            f"so you'd save {_money(base - cents)}.{where}{more} Want me to grab it, or walk you over?"
         )
 
     async def _look(self, rt: BrainRuntime, goal: Goal | None, question: str, store_id: str | None) -> str | None:
@@ -646,11 +789,11 @@ class _BrainBase:
         if robot is not None:
             with contextlib.suppress(Exception):
                 st = await robot.state(rt.robot_id)
-                batt = f", battery {st.battery_pct:.0f}%" if st.battery_pct is not None else ""
-                at = f"{st.status.value} at ({st.pose.x:.1f}, {st.pose.y:.1f})"
-                where = "charging on my dock" if st.charging else at
-                return f"I'm free: {where}{batt}. Send me a goal!"
-        return "I'm free right now. Send me a goal!"
+                charge = ""
+                if st.battery_pct is not None:
+                    charge = " and fully charged" if st.battery_pct >= 95 else f" with {st.battery_pct:.0f}% battery"
+                return f"Hi! I'm free right now{charge}. What can I help you find?"
+        return "Hi! I'm free right now. What can I help you find?"
 
 
 def _is_mirror(step: BrainStep) -> bool:
@@ -868,22 +1011,144 @@ def _ingredients_reply(p: Any, lead: str, ask: str, text: str) -> str:
     items = info.get("ingredients") or []
     allergens = sorted({*(p.allergens or []), *(info.get("allergens") or [])})
     diet = re.search(r"vegan|vegetarian|gluten[- ]free|dairy[- ]free|nut[- ]free|halal|kosher", text, re.I)
+    name = _say(p.name)
+    heads_up = f" Just so you know, it contains {_and(allergens)}." if allergens else ""
     if diet:
-        want = diet.group(0).lower().replace(" ", "_").replace("-", "_")
-        yes = want in (p.dietary or []) or want in (p.tags or [])
-        return f"{lead}{p.name} is {'' if yes else 'not marked '}{diet.group(0).lower()}." + (
-            f" Allergens: {', '.join(allergens)}." if allergens else ""
-        )
+        label = diet.group(0).lower().replace("-", " ")
+        want = label.replace(" ", "_")
+        if want in (p.dietary or []) or want in (p.tags or []):
+            return f"{lead}Yes, the {name} is {label}!{heads_up}"
+        return f"{lead}It isn't marked {label}, so I'd play it safe and skip the {name}.{heads_up}"
     if ask.strip():
         word = ask.strip().lower().rstrip("s")
         hay = " ".join(items + allergens).lower()
-        hit = word in hay or (word in ("nut", "peanut", "tree nut") and "nut" in hay)
-        return f"{lead}{p.name} {'does' if hit else 'does not'} list {ask.strip()}" + (
-            f" (allergens: {', '.join(allergens)})." if allergens else "."
-        )
+        if word in hay or (word in ("nut", "peanut", "tree nut") and "nut" in hay):
+            return f"{lead}Careful: the {name} does list {ask.strip()}."
+        return f"{lead}Good news, the {name} doesn't list any {ask.strip()}.{heads_up}"
     if not items:
-        return f"{lead}I don't have the ingredient list for {p.name} yet."
-    src = f" (from {info.get('matched_product')} on Open Food Facts)" if info.get("matched_product") else ""
-    shown = ", ".join(items[:12]) + (" and more" if len(items) > 12 else "")
-    extra = f" Allergens: {', '.join(allergens)}." if allergens else ""
-    return f"{lead}{p.name}: {shown}{src}.{extra}"
+        return f"{lead}Sorry, I don't have the ingredients for the {name} yet. The package label will list them."
+    if len(items) == 1:
+        return f"{lead}It's just {items[0].lower()}, nothing else added."
+    shown = [re.sub(r"^(and|or)\s+", "", i[:1].lower() + i[1:]) for i in items[:8]]
+    rest = " and a few other things" if len(items) > 8 else ""
+    return f"{lead}{_cap(f'the {name} {_is(name)} made with')} {_and(shown)}{rest}.{heads_up}"
+
+
+def _say(name: str) -> str:
+    """'Mild Chunky Salsa 16 oz' -> 'mild chunky salsa' (how a person says it)."""
+    s = re.sub(r"\(.*?\)", " ", name)
+    s = re.sub(r"\b\d+(\.\d+)?\s*(oz|fl oz|lb|lbs|ct|g|kg|ml|l|gal|pk|pack|count|sticks?)\b", " ", s, flags=re.I)
+    s = re.sub(r"\b(half gallon|1 gal|glass)\b", " ", s, flags=re.I)
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+def _is(name: str) -> str:
+    """'is' / 'are' for a spoken product name ('tortilla chips are', 'salsa is')."""
+    last = name.split()[-1] if name.split() else ""
+    plural = last.endswith("s") and not last.endswith(("ss", "us", "is")) and last not in ("hummus", "molasses")
+    return "are" if plural else "is"
+
+
+def _money(cents: int) -> str:
+    dollars, c = divmod(int(cents), 100)
+    if dollars == 0:
+        return f"{c} cents"
+    return f"${dollars}" if c == 0 else f"${dollars}.{c:02d}"
+
+
+def _and(items: list[str]) -> str:
+    items = [i for i in items if i]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + f" and {items[-1]}"
+
+
+def _aisle(where: str) -> str:
+    """'Aisle 3 - International & Mexican, Canned' -> 'aisle 3, with the international & Mexican food'."""
+    head, _, rest = where.partition(" - ")
+    if head.lower().startswith("aisle") and rest:
+        return f"{head.lower()}, with the {rest.split(',')[0].strip().lower().replace('mexican', 'Mexican')} items"
+    if head.lower().startswith("back wall") and rest:
+        return f"the {rest.strip().lower()} section along the back wall"
+    return where[:1].lower() + where[1:] if where else "the store"
+
+
+def _pick(key: str, options: tuple[str, ...]) -> str:
+    """A stable bit of variety: the same product always gets the same phrasing."""
+    import zlib
+
+    return options[zlib.crc32(key.encode()) % len(options)]
+
+
+def _env(name: str) -> str:
+    """A key from the process env or the repo's .env (keys that utils.config.Settings doesn't model, e.g. XAI)."""
+    import os
+
+    if name in os.environ:  # set, even blank (tests blank it to stay offline), wins over .env
+        return os.environ[name]
+    with contextlib.suppress(Exception):
+        from dotenv import dotenv_values
+
+        from utils.config import REPO_ROOT
+
+        return dotenv_values(REPO_ROOT / ".env").get(name) or ""
+    return ""
+
+
+async def _grok_tool_loop(
+    key: str,
+    system: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    handlers: dict[str, Any],
+    max_iters: int = 5,
+) -> str:
+    """xAI Grok (OpenAI-compatible chat completions) tool loop over the same Anthropic-shaped tool defs."""
+    import urllib.request
+
+    model = _env("PICKY_GROK_MODEL") or "grok-4.20-0309-non-reasoning"
+    defs = [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {"type": "object"}),
+            },
+        }
+        for t in tools
+    ]
+    convo: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    convo += [{"role": m["role"], "content": m["content"]} for m in messages]
+
+    def post(body: dict[str, Any]) -> dict[str, Any]:
+        req = urllib.request.Request(
+            "https://api.x.ai/v1/chat/completions",
+            data=json.dumps(body).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.load(r)
+
+    for _ in range(max_iters):
+        data = await asyncio.to_thread(post, {"model": model, "messages": convo, "tools": defs, "max_tokens": 400})
+        msg = data["choices"][0]["message"]
+        calls = msg.get("tool_calls") or []
+        if not calls:
+            return msg.get("content") or ""
+        convo.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
+        for c in calls:
+            fn = c["function"]
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+                out = handlers[fn["name"]](args)
+                if asyncio.iscoroutine(out):
+                    out = await out
+            except Exception as exc:  # noqa: BLE001 - the model can recover
+                out = {"error": str(exc)}
+            convo.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(out, default=str)})
+    return ""

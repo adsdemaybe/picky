@@ -1,15 +1,16 @@
 "use client";
 // "Ask me": talk to this robot's brain (POST /api/fleet/robots/{id}/messages -> fleet.BrainReply). Mic = browser
 // SpeechRecognition where available; replies can be read out with speechSynthesis (toggle, remembered per screen).
-import { Mic, MicOff, Send, Volume2, VolumeX } from "lucide-react";
+import { Mic, MicOff, Send, Shuffle, Volume2, VolumeX } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { errorText, gw } from "@/lib/gateway/client";
+import { errorText, gw, type S } from "@/lib/gateway/client";
 import type { RobotInfo } from "@/lib/gateway/events";
 import { speak, stopSpeaking, useCanSpeak, useSpeechInput } from "@/lib/speech";
 import { cn } from "@/lib/utils";
+import { presetsFor } from "./presets";
 
 // ------------------------------------------------------------------------------------------------ speak setting
 
@@ -52,13 +53,25 @@ export function useSpeakSetting(): SpeakSetting {
 
 type Msg = { id: string; role: "user" | "robot" | "error"; text: string; retry?: string };
 
-const SUGGESTIONS = ["What are you doing?", "Where are the tortillas?", "What's in your basket?"];
+const ALWAYS = ["What are you doing?", "What's in your basket?"];
 
 let nextId = 0;
 const mid = () => `m${++nextId}`;
 
-export function ChatTab({ robot, userId, speech }: { robot: RobotInfo; userId: string | null; speech: SpeakSetting }) {
+export function ChatTab({
+  robot,
+  userId,
+  speech,
+  planogram,
+}: {
+  robot: RobotInfo;
+  userId: string | null;
+  speech: SpeakSetting;
+  planogram: S["Planogram"] | null;
+}) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [round, setRound] = useState(() => new Date().getDate());
+  const presets = useMemo(() => presetsFor(planogram, round), [planogram, round]);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const list = useRef<HTMLDivElement>(null);
@@ -100,11 +113,16 @@ export function ChatTab({ robot, userId, speech }: { robot: RobotInfo; userId: s
               {mic.supported ? "Tap the mic and talk, or type below." : "Type your question below."}
             </p>
             <div className="flex flex-wrap gap-2">
-              {SUGGESTIONS.map((s) => (
+              {[...presets.map((p) => p.text), ...ALWAYS].map((s) => (
                 <Button key={s} variant="outline" size="lg" onClick={() => void send(s)} disabled={busy}>
                   {s}
                 </Button>
               ))}
+              {presets.length > 0 && (
+                <Button variant="ghost" size="lg" onClick={() => setRound((r) => r + 1)} disabled={busy}>
+                  <Shuffle /> More questions
+                </Button>
+              )}
             </div>
           </div>
         ) : (

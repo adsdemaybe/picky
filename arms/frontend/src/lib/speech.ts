@@ -108,20 +108,85 @@ export function canSpeak() {
   return typeof window !== "undefined" && "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
 }
 
-/** Read a reply out loud (cancels whatever is still being said). No-op where speechSynthesis is missing. */
-export function speak(text: string) {
-  if (!canSpeak() || !text.trim()) return;
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "en-US";
-    u.rate = 1.02;
-    window.speechSynthesis.speak(u);
-  } catch {
-    /* speaking is best effort */
+// ---- a more human voice ------------------------------------------------------------------------------------------
+// 1) a neural voice from /api/tts when the server has a TTS key (OpenAI / ElevenLabs / Deepgram), else
+// 2) the most natural built-in voice this device has (Apple Premium / Enhanced, Microsoft "Natural", Google), spoken
+//    sentence by sentence at a relaxed pace. Novelty / compact voices are never picked.
+const NOVELTY = /albert|bad news|bahh|bells|boing|bubbles|cellos|deranged|fred|good news|hysterical|jester|junior|organ|pipe|ralph|superstar|trinoids|whisper|wobble|zarvox|grandma|grandpa|eddy|flo|reed|rocko|sandy|shelley/i;
+const PREFERRED = [/ava/i, /zoe/i, /samantha/i, /allison/i, /evan/i, /nathan/i, /aria/i, /jenny/i, /google us english/i, /serena/i, /karen/i, /moira/i];
+
+let ttsProvider: Promise<string | null> | null = null;
+let audio: HTMLAudioElement | null = null;
+
+function bestVoice(): SpeechSynthesisVoice | null {
+  const voices = window.speechSynthesis.getVoices().filter((v) => /^en(-|_|$)/i.test(v.lang) && !NOVELTY.test(v.name));
+  if (!voices.length) return null;
+  const score = (v: SpeechSynthesisVoice) => {
+    let s = 0;
+    if (/premium/i.test(v.name)) s += 50;
+    if (/enhanced|natural|neural/i.test(v.name)) s += 40;
+    if (/google/i.test(v.name)) s += 20;
+    const pref = PREFERRED.findIndex((re) => re.test(v.name));
+    if (pref >= 0) s += 30 - pref;
+    if (/en-us/i.test(v.lang)) s += 5;
+    if (v.localService) s += 1;
+    return s;
+  };
+  return voices.sort((a, b) => score(b) - score(a))[0];
+}
+
+function speakBrowser(text: string) {
+  const synth = window.speechSynthesis;
+  const voice = bestVoice();
+  // short sentences sound more natural than one long utterance (and recover if one is cut off)
+  const parts = text.match(/[^.!?]+[.!?]*/g)?.map((s) => s.trim()).filter(Boolean) ?? [text];
+  for (const part of parts) {
+    const u = new SpeechSynthesisUtterance(part);
+    if (voice) u.voice = voice;
+    u.lang = voice?.lang ?? "en-US";
+    u.rate = 0.98;
+    u.pitch = 1.05;
+    synth.speak(u);
   }
 }
 
+/** Read a reply out loud (cancels whatever is still being said). Neural voice when available, else built-in. */
+export function speak(text: string) {
+  if (typeof window === "undefined" || !text.trim()) return;
+  stopSpeaking();
+  ttsProvider ??= fetch("/api/tts")
+    .then((r) => (r.ok ? r.json() : { provider: null }))
+    .then((j: { provider: string | null }) => j.provider)
+    .catch(() => null);
+  void ttsProvider.then(async (prov) => {
+    if (prov) {
+      try {
+        const r = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+        if (r.status === 200) {
+          const url = URL.createObjectURL(await r.blob());
+          audio = new Audio(url);
+          audio.onended = () => URL.revokeObjectURL(url);
+          await audio.play();
+          return;
+        }
+      } catch {
+        /* fall back to the built-in voice */
+      }
+    }
+    if (canSpeak()) {
+      try {
+        speakBrowser(text);
+      } catch {
+        /* speaking is best effort */
+      }
+    }
+  });
+}
+
 export function stopSpeaking() {
+  if (audio) {
+    audio.pause();
+    audio = null;
+  }
   if (canSpeak()) window.speechSynthesis.cancel();
 }

@@ -37,7 +37,9 @@ export async function POST(req: Request) {
   };
 
   const hasCreds = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-  if (!hasCreds) return Response.json({ ...localAnswer(last, purchases), source: "offline" });
+  const hasGemini = !!process.env.GEMINI_API_KEY;
+  const hasGrok = !!process.env.XAI_API_KEY;
+  if (!hasCreds && !hasGemini && !hasGrok) return Response.json({ ...localAnswer(last, purchases), source: "offline" });
 
   const tools = [
     betaTool({
@@ -139,6 +141,27 @@ export async function POST(req: Request) {
     }),
   ];
 
+  if (!hasCreds) {
+    // Grok (xAI) first when XAI_API_KEY is set (PICKY_CHAT_LLM=gemini flips it, same knob as the robot chat), then the
+    // other one, then the offline answerer
+    const engines: [string, () => Promise<string>][] = [];
+    const gemini: [string, () => Promise<string>] = ["gemini", () => geminiAnswer(body.messages.slice(-12), tools as unknown as ToolLike[])];
+    const grok: [string, () => Promise<string>] = ["grok", () => grokAnswer(body.messages.slice(-12), tools as unknown as ToolLike[])];
+    const grokFirst = (process.env.PICKY_CHAT_LLM || "grok").toLowerCase() === "grok";
+    if (hasGrok && grokFirst) engines.push(grok);
+    if (hasGemini) engines.push(gemini);
+    if (hasGrok && !grokFirst) engines.push(grok);
+    for (const [source, run] of engines) {
+      try {
+        const text = await run();
+        if (text) return Response.json({ text, cards, source });
+      } catch (err) {
+        console.error(`[chat] ${source} failed`, err);
+      }
+    }
+    return Response.json({ ...localAnswer(last, purchases), source: "offline" });
+  }
+
   try {
     const client = new Anthropic();
     const final = await client.beta.messages.toolRunner({
@@ -173,4 +196,109 @@ export async function POST(req: Request) {
     }
     return Response.json({ ...localAnswer(last, purchases), source: "offline" });
   }
+}
+
+// ---- Gemini (GEMINI_API_KEY): same tools, function calling over the REST API --------------------------------------
+type ToolLike = {
+  name: string;
+  description?: string;
+  input_schema?: Record<string, unknown>;
+  inputSchema?: Record<string, unknown>;
+  run: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+};
+type GeminiPart = { text?: string; functionCall?: { name: string; args?: Record<string, unknown> }; [k: string]: unknown };
+
+/** Gemini function declarations take an OpenAPI subset: drop JSON-schema keys it rejects. */
+function geminiSchema(s: unknown): unknown {
+  if (Array.isArray(s)) return s.map(geminiSchema);
+  if (!s || typeof s !== "object") return s;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(s as Record<string, unknown>)) {
+    if (k === "additionalProperties" || k === "$schema") continue;
+    out[k] = geminiSchema(v);
+  }
+  return out;
+}
+
+async function geminiAnswer(history: ChatMsg[], tools: ToolLike[]): Promise<string> {
+  const model = process.env.PICKY_GEMINI_MODEL || "gemini-3.8-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const decls = tools.map((t) => {
+    const params = geminiSchema(t.input_schema ?? t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>;
+    const empty = !params.properties || Object.keys(params.properties as object).length === 0;
+    return empty ? { name: t.name, description: t.description ?? "" } : { name: t.name, description: t.description ?? "", parameters: params };
+  });
+  const contents: { role: "user" | "model"; parts: GeminiPart[] }[] = history.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+  for (let i = 0; i < 6; i++) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY! },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents,
+        tools: [{ functionDeclarations: decls }],
+        generationConfig: { maxOutputTokens: 2048 },
+      }),
+    });
+    if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const j = (await r.json()) as { candidates?: { content?: { parts?: GeminiPart[] } }[] };
+    const parts = j.candidates?.[0]?.content?.parts ?? [];
+    const calls = parts.filter((p) => p.functionCall);
+    if (!calls.length) {
+      return parts
+        .map((p) => p.text ?? "")
+        .join("")
+        .trim();
+    }
+    contents.push({ role: "model", parts }); // echo as returned (keeps thought signatures)
+    const results: GeminiPart[] = [];
+    for (const c of calls) {
+      const tool = tools.find((t) => t.name === c.functionCall!.name);
+      let result: unknown;
+      try {
+        result = tool ? await tool.run(c.functionCall!.args ?? {}) : `unknown tool ${c.functionCall!.name}`;
+      } catch (e) {
+        result = `error: ${String(e)}`;
+      }
+      results.push({ functionResponse: { name: c.functionCall!.name, response: { result } } });
+    }
+    contents.push({ role: "user", parts: results });
+  }
+  return "";
+}
+
+// ---- Grok (XAI_API_KEY): OpenAI-compatible chat completions with the same tools ------------------------------------
+async function grokAnswer(history: ChatMsg[], tools: ToolLike[]): Promise<string> {
+  const model = process.env.PICKY_GROK_MODEL || "grok-4.20-0309-non-reasoning";
+  const defs = tools.map((t) => ({
+    type: "function",
+    function: { name: t.name, description: t.description ?? "", parameters: t.input_schema ?? t.inputSchema ?? { type: "object", properties: {} } },
+  }));
+  type Msg = { role: string; content: string; tool_calls?: { id: string; function: { name: string; arguments: string } }[]; tool_call_id?: string };
+  const convo: Msg[] = [{ role: "system", content: SYSTEM }, ...history.map((m) => ({ role: m.role, content: m.content }))];
+  for (let i = 0; i < 6; i++) {
+    const r = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.XAI_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages: convo, tools: defs, max_tokens: 1200 }),
+    });
+    if (!r.ok) throw new Error(`grok ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const msg = ((await r.json()) as { choices: { message: Msg }[] }).choices[0].message;
+    if (!msg.tool_calls?.length) return (msg.content ?? "").trim();
+    convo.push({ role: "assistant", content: msg.content ?? "", tool_calls: msg.tool_calls });
+    for (const c of msg.tool_calls) {
+      const tool = tools.find((t) => t.name === c.function.name);
+      let result: unknown;
+      try {
+        result = tool ? await tool.run(JSON.parse(c.function.arguments || "{}")) : `unknown tool ${c.function.name}`;
+      } catch (e) {
+        result = `error: ${String(e)}`;
+      }
+      convo.push({ role: "tool", tool_call_id: c.id, content: typeof result === "string" ? result : JSON.stringify(result) });
+    }
+  }
+  return "";
 }
