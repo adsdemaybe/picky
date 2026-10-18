@@ -3,7 +3,7 @@
 // from the store offer (catalog.ProductLocation: aisle, fixture, level, index). "Take me there" pins a one-slot
 // shelf_scan goal on this robot (POST /api/fleet/robots/{id}/goals, end_at "stay"): the fleet has no "guide" goal
 // kind, and a single-slot scan is the one that drives to that shelf and stays there without picking or charging.
-import { Footprints, Loader2, MapPin, Search, X } from "lucide-react";
+import { Footprints, Loader2, MapPin, Search, ShoppingBasket, X } from "lucide-react";
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -196,6 +196,29 @@ function Location({ found, robot, speech, onClose }: { found: Found; robot: Robo
     }
   };
 
+  // walk-in shopper: the robot shops it into its basket; the checkout card then shows on this screen (Checkout tab)
+  const [ordered, setOrdered] = useState<string | null>(null);
+  const getIt = async () => {
+    setSending(true);
+    try {
+      const plan = await gw.createRequest({
+        text: `get me ${p.name}`,
+        user_id: "guest",
+        channel: "web",
+        store_id: robot.store_id,
+        role: "shopper",
+      });
+      setOrdered(p.sku);
+      const line = plan.data.reply || `I will grab ${p.name}. Pay on my screen when I am back.`;
+      toast.success(line);
+      speech.say(line);
+    } catch (e) {
+      toast.error(`I can't get it right now: ${errorText(e)}`);
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <motion.section
       initial={{ opacity: 0, y: 10, scale: 0.98 }}
@@ -226,6 +249,9 @@ function Location({ found, robot, speech, onClose }: { found: Found; robot: Robo
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button size="lg" onClick={guide} disabled={sending || going || !!busyReason}>
               {sending ? <Loader2 className="animate-spin" /> : <Footprints />} {going ? "On my way, follow me" : "Take me there"}
+            </Button>
+            <Button size="lg" variant="outline" onClick={getIt} disabled={sending || ordered === p.sku || !robot.connected}>
+              <ShoppingBasket /> {ordered === p.sku ? "Getting it, pay on Checkout" : "Get it for me"}
             </Button>
             <span className="flex items-center gap-1 text-[13.5px] text-muted-foreground">
               <MapPin className="size-4 text-tomato" aria-hidden /> {busyReason ?? (going ? `Heading to ${name}.` : "Marked on the map.")}
