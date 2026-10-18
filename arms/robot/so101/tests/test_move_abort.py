@@ -1,5 +1,7 @@
 import pytest
 
+pytest.importorskip("cv2")  # pick_place imports OpenCV (robot venv); base deps skip
+
 from arms.robot.so101 import pick_place
 
 
