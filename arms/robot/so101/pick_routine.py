@@ -29,6 +29,16 @@ GRIP_CLOSED = 5.0  # stalls on the object; LeRobot drops the gripper to reduced 
 GRIP_OPEN = 98.0
 
 
+def detect_named(frame: np.ndarray, name: str, model: str):
+    """Perceptron box for `name`; short names ("gum") often return nothing, so retry with fuller phrasings."""
+    for query in (name, f"{name} packet", f"{name} package", f"pack of {name}", f"box of {name}", f"{name} container"):
+        d = detect(frame, [query], model).get(query)
+        if d:
+            d.label = name
+            return d
+    return None
+
+
 @dataclass
 class Waypoint:
     name: str
@@ -62,7 +72,11 @@ def plan(
     p = ScenePlan(target, dest)
     frame = grab_frame(cfg) if frame is None else frame
     size = (frame.shape[1], frame.shape[0])
-    dets = detect(frame, [target, dest], cfg.perceptron_model)
+    dets = {}
+    for name in (target, dest):
+        d = detect_named(frame, name, cfg.perceptron_model)
+        if d:
+            dets[name] = d
     for d in dets.values():
         x0, y0, x1, y1 = d.box_px
         cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 255, 0), 2)
@@ -76,6 +90,16 @@ def plan(
     h = object_height
     t = cam.pixel_to_world(*dets[target].center_px, h / 2, size)
     dd = cam.pixel_to_world(*dets[dest].center_px, 0.01, size)
+    # Wide destinations (plates, bins): drop on the side nearest the robot, 5 cm in from the rim, rather than the
+    # centre - the far half is at the edge of reach and of the camera calibration, where errors are largest.
+    x0, y0, x1, y1 = dets[dest].box_px
+    left = cam.pixel_to_world(x0, (y0 + y1) / 2, 0.01, size)
+    right = cam.pixel_to_world(x1, (y0 + y1) / 2, 0.01, size)
+    radius = float(np.linalg.norm(right[:2] - left[:2])) / 2
+    if radius > 0.06:
+        toward_base = -dd[:2] / np.linalg.norm(dd[:2])
+        dd = dd.copy()
+        dd[:2] = dd[:2] + toward_base * (radius - 0.05)
     p.target_xy, p.dest_xy = (float(t[0]), float(t[1])), (float(dd[0]), float(dd[1]))
     jaw = box_long_axis_yaw(cam, dets[target].box_px, h / 2, size) + math.pi / 2  # close across the thin side
     p.jaw_yaw_deg = math.degrees(jaw)
@@ -109,7 +133,15 @@ def plan(
     return p
 
 
-def execute(robot, kin: SO101Kinematics, p: ScenePlan, step: bool = False, log=print) -> None:
+def execute(
+    robot,
+    kin: SO101Kinematics,
+    p: ScenePlan,
+    step: bool = False,
+    log=print,
+    cfg: RigConfig | None = None,
+    snap_after: tuple[str, ...] = ("lift", "release"),
+) -> None:
     for w in p.waypoints:
         if step:
             input(f"  next: {w.name} - Enter to run, Ctrl-C to stop ")
@@ -117,6 +149,7 @@ def execute(robot, kin: SO101Kinematics, p: ScenePlan, step: bool = False, log=p
         if w.xyz is None:
             move(robot, pose, w.gripper, seconds=1.5)
             log(f"  {w.name}: gripper -> {read_pose(robot)[1]:.0f}")
+            _snap(cfg, w.name, snap_after, log)
             continue
         q = kin.ik(w.xyz, pose)
         q["wrist_roll"] = p.roll
@@ -124,6 +157,19 @@ def execute(robot, kin: SO101Kinematics, p: ScenePlan, step: bool = False, log=p
         move(robot, q, w.gripper, seconds=max(1.5, jump / 15.0), steps=60)
         err = settle(robot, q, w.gripper)
         log(f"  {w.name}: settled to {err:.1f} deg")
+        _snap(cfg, w.name, snap_after, log)
+
+
+def _snap(cfg: RigConfig | None, name: str, which: tuple[str, ...], log) -> None:
+    """Save a camera frame after selected waypoints so a run can be checked afterwards."""
+    if cfg is None or name not in which:
+        return
+    path = f"last_{name.split()[0]}.jpg"
+    try:
+        cv2.imwrite(path, grab_frame(cfg))
+        log(f"  (frame saved: {path})")
+    except RuntimeError as e:
+        log(f"  (no frame: {e})")
 
 
 def describe(p: ScenePlan) -> str:
@@ -158,7 +204,7 @@ def main() -> None:
         print(f"annotated camera frame: {p.frame_path}")
         if p.error or args.dry:
             return
-        execute(robot, kin, p, step=args.step)
+        execute(robot, kin, p, step=args.step, cfg=cfg)
         print("done")
     finally:
         move(robot, rest, rest_grip, seconds=3.0)
