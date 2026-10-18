@@ -250,6 +250,36 @@ export function directorRungs({ robotId, storeId, base, simOf, waiting }: Ladder
   ];
 }
 
+/** Big panel on a store ceiling camera (the bird's-eye view of the floor), then its snapshots, then the replay's map. */
+export function overheadRungs({ robotId, base, simOf, waiting }: LadderOpts, cameraId: string, title: string): Rung[] {
+  const local: Rung = waiting
+    ? { kind: "node", title: "Assigning a robot", badge: "Standby", node: <Waiting title="Picking the closest free robot" body="The live picture starts as soon as the fleet assigns one." pulse /> }
+    : { kind: "node", title: "Store map", badge: "Demo replay", note: "Robot position from the trip", node: mapNode };
+  if (!robotId || !base) return [local];
+  const sim = simOf(cameraId);
+  return [
+    { kind: "mjpeg", title, badge: `Live · ${sim}`, live: true, note: "Store ceiling camera", src: cameraUrl(cameraId, "stream", { fps: 8, w: 1280 }, base), probe: cameraUrl(cameraId, "snapshot", { w: 320 }, base) },
+    { kind: "snapshot", title, badge: `${sim} · snapshots`, live: true, note: "Stream reconnecting", src: cameraUrl(cameraId, "snapshot", { w: 1280 }, base), every: 800 },
+    local,
+  ];
+}
+
+/** The store's ceiling cameras (GET /api/cameras?store_id, kind 'ceiling'): the bird's-eye views /watch can switch to. */
+export function useCeilingCameras(storeId: string, base: string, enabled: boolean) {
+  const [cams, setCams] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => {
+    if (!enabled || !base) return;
+    let alive = true;
+    gw.cameras({ store_id: storeId })
+      .then((r) => alive && setCams(r.data.filter((c) => c.kind === "ceiling").map((c) => ({ id: c.camera_id, name: c.name ?? c.camera_id }))))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [storeId, base, enabled]);
+  return cams;
+}
+
 /** Second panel: the robot's front camera with Perceptron boxes, then the raw front camera, then the replay camera. */
 export function perceivedRungs({ robotId, base, simOf, perceptron, waiting }: LadderOpts): Rung[] {
   const local: Rung = waiting

@@ -83,7 +83,7 @@ export const gw = {
   profile: (userId: string) => req<S["UserProfile-Output"]>(`/api/users/${enc(userId)}/profile`),
   putProfile: (userId: string, p: S["UserProfile-Input"]) => req<S["UserProfile-Output"]>(`/api/users/${enc(userId)}/profile`, { method: "PUT", body: p }),
   /** CameraInfo rows; `source` = who renders it right now ("isaac" | "fake" | "none"). */
-  cameras: (q: { robot_id?: string; store_id?: string }) => req<{ camera_id: string; source?: string; online?: boolean }[]>(`/api/cameras${qs(q)}`, undefined, 5000),
+  cameras: (q: { robot_id?: string; store_id?: string }) => req<{ camera_id: string; source?: string; online?: boolean; kind?: string; name?: string }[]>(`/api/cameras${qs(q)}`, undefined, 5000),
   /** Purchase history, newest first (a bare list, or {purchases: [...]} / {items: [...]}). */
   purchases: (userId: string, limit = 60) => req<PurchaseRow[] | { purchases?: PurchaseRow[]; items?: PurchaseRow[] }>(`/api/users/${enc(userId)}/purchases${qs({ limit })}`, undefined, 5000),
   /** "Running low" restock suggestions from purchase cadence (most due first). */
