@@ -88,7 +88,7 @@ from contracts.fleet import (
 from contracts.messaging import InboundMessage, OutboundMessage, ReplyInterpretation
 from contracts.perception import ScanReport
 from contracts.planogram import Planogram
-from contracts.profile import Feedback, ProfileUpdate, UserProfile
+from contracts.profile import Feedback, ProfileUpdate, ReplenishSuggestion, UserProfile
 from contracts.routing import GridSpec
 from contracts.sim import (
     RobotError,
@@ -111,6 +111,9 @@ log = get_logger(__name__)
 STATIC_DIR = Path(__file__).parent / "static"
 MJPEG_BOUNDARY = "frame"
 MAX_STREAM_FPS = 15.0
+DEFAULT_STREAM_FPS = 5.0
+DIRECTOR_STREAM_FPS = 10.0
+"""Default MJPEG rate of '<robot>.director' (0.2.3 livestream main view); ?fps= overrides."""
 MAX_MUX_FPS = 5.0
 """Per-camera cap on the multiplexed /ws/cameras socket."""
 
@@ -402,12 +405,14 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
         return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.get("/api/cameras/{camera_id}/stream.mjpg", response_class=StreamingResponse)
-    async def camera_stream(camera_id: str, request: Request, fps: float = 5.0, w: int | None = None) -> Any:
+    async def camera_stream(camera_id: str, request: Request, fps: float | None = None, w: int | None = None) -> Any:
         cams = svc("cameras")
         try:
-            await cams.get_camera(camera_id)
+            cam = await cams.get_camera(camera_id)
         except KeyError:
             raise HTTPException(404, f"unknown camera {camera_id}") from None
+        if fps is None:  # the director (chase) camera is the livestream's main view: smooth by default
+            fps = DIRECTOR_STREAM_FPS if getattr(cam, "kind", None) == "director" else DEFAULT_STREAM_FPS
         rate = max(0.2, min(fps, MAX_STREAM_FPS))
         return StreamingResponse(
             _mjpeg(cams, camera_id, rate, _width(w), request),
@@ -471,6 +476,26 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
         offers = await catalog.get_offers(sku, store_id or None)
         return SearchHit(product=product, offers=offers, score=1.0)
 
+    image_cache: dict[tuple[str, int], bytes] = {}
+
+    @app.get("/api/products/{sku}/image.jpg", response_class=Response)
+    async def product_image(sku: str, w: int | None = None) -> Response:
+        """Product thumbnail (0.2.3): a render / photo from PICKY_PRODUCT_IMAGE_DIR, else the sim prop's label card."""
+        size = max(64, min(int(w or 320), 1024))
+        jpeg = image_cache.get((sku, size))
+        if jpeg is None:
+            product = await svc("catalog").get_product(sku)
+            if product is None:
+                raise HTTPException(404, f"unknown sku {sku}")
+            from arms.catalog import product_image_jpeg
+
+            image_dir = get_settings().picky_product_image_dir or None
+            jpeg = await asyncio.to_thread(product_image_jpeg, product, size, image_dir)
+            if len(image_cache) >= 512:
+                image_cache.pop(next(iter(image_cache)))
+            image_cache[(sku, size)] = jpeg
+        return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=300"})
+
     @app.get("/api/stores/{store_id}/deals", response_model=list[Deal])
     async def get_deals(store_id: str) -> list[Deal]:
         return await svc("catalog").get_deals(store_id)
@@ -492,6 +517,22 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
     async def get_profile(user_id: str) -> UserProfile:
         try:
             return await svc("recommender").get_profile(user_id)
+        except KeyError:
+            raise HTTPException(404, f"unknown user {user_id}") from None
+
+    @app.get("/api/users/{user_id}/suggestions", response_model=list[ReplenishSuggestion])
+    async def user_suggestions(
+        user_id: str,
+        store_id: str | None = None,
+        limit: int = 8,
+        include_all: bool = Query(False, alias="all"),
+    ) -> list[ReplenishSuggestion]:
+        """'You bought this 12 days ago' cards (0.2.3; recommender extra ``replenish_suggestions``)."""
+        fn = getattr(svc("recommender"), "replenish_suggestions", None)
+        if fn is None:
+            raise HTTPException(501, "this recommender has no replenish suggestions")
+        try:
+            return await fn(user_id, store_id=store_id, limit=max(1, min(limit, 50)), include_all=include_all)
         except KeyError:
             raise HTTPException(404, f"unknown user {user_id}") from None
 
@@ -780,7 +821,8 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
                     for rid in robot_ids or [None]:
                         with contextlib.suppress(Exception):
                             listed += await cams.list_cameras(store_id=sid, robot_id=rid)
-                ids += [c.camera_id for c in listed if c.camera_id not in ids]
+                # '.perceived' streams only when named explicitly (each spends Perceptron calls)
+                ids += [c.camera_id for c in listed if c.camera_id not in ids and c.kind != "perceived"]
             if not ids:
                 await send(_error_dict(None, "no cameras match"))
                 return
@@ -908,12 +950,14 @@ async def _mjpeg(cams: Any, camera_id: str, fps: float, width: int | None, reque
 
 
 async def _robot_cameras(r: Registry, robot_id: str) -> list[str]:
+    """Every camera of the robot for /ws/frames, except the annotated '.perceived' streams (they spend Perceptron
+    calls: subscribe to them explicitly by camera id)."""
     cams = r.services.cameras
     if cams is not None:
         with contextlib.suppress(Exception):
             listed = await cams.list_cameras(robot_id=robot_id)
             if listed:
-                return [c.camera_id for c in listed]
+                return [c.camera_id for c in listed if c.kind != "perceived"]
     return [robot_camera_id(robot_id, k) for k in ROBOT_CAMERA_KINDS]
 
 

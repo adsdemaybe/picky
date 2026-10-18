@@ -7,8 +7,9 @@ differently. Store stock/prices/deals come from ``services.catalog`` at call tim
 planogram files.
 """
 
-from datetime import date
+from datetime import date, datetime
 
+from arms.recommender.replenish import DEFAULT_LIMIT, ReplenishFile, build_card, due_cadences, load_replenish
 from arms.recommender.scoring import (
     Candidate,
     Scored,
@@ -21,11 +22,11 @@ from arms.recommender.scoring import (
     score_candidate,
     words,
 )
-from contracts.catalog import Deal, NearExpiryItem, Product
+from contracts.catalog import Deal, NearExpiryItem, Product, StoreOffer
 from contracts.common import ONLINE_STORE_ID, Sku, StoreId, TripId, UserId, utcnow
 from contracts.messaging import normalize_handle
 from contracts.planogram import DemoUser, Planogram
-from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, UserProfile
+from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, ReplenishSuggestion, UserProfile
 from contracts.services import Services
 from contracts.shopping import Cart, RecKind, Recommendation, ShoppingList
 from utils import data as data_mod
@@ -59,6 +60,9 @@ class FakeRecommenderService:
         self._history: dict[UserId, UserHistory] = {}
         self._purchases: dict[UserId, list[PurchaseRecord]] = {}
         self._seed_users = users
+        self._replenish_file: ReplenishFile | None = None
+        self._session_purchases: dict[UserId, list[PurchaseRecord]] = {}
+        """Purchases recorded at runtime (paid trips): they move the replenish clock (a bought item drops off)."""
 
     # ---------------------------------------------------------------------------------------------------- loading
     def _ensure_loaded(self) -> dict[UserId, UserProfile]:
@@ -380,6 +384,72 @@ class FakeRecommenderService:
             if r.rating is not None:
                 hist.ratings[r.sku] = r.rating
             self._purchases.setdefault(r.user_id, []).append(r.model_copy())
+            self._session_purchases.setdefault(r.user_id, []).append(r.model_copy())
+
+    # ---------------------------------------------------------------------------------------------------- replenish
+    def _replenish(self) -> ReplenishFile:
+        if self._replenish_file is None:
+            try:
+                root = data_mod.data_dir(self._data_root)
+            except Exception as exc:  # noqa: BLE001 - no data dir: no history
+                log.warning("no data dir for replenish history (%s)", exc)
+                self._replenish_file = ReplenishFile()
+            else:
+                self._replenish_file = load_replenish(root)
+        return self._replenish_file
+
+    async def _product_for(self, sku: Sku) -> Product | None:
+        catalog = self._services.catalog
+        if catalog is not None:
+            try:
+                product = await catalog.get_product(sku)
+                if product is not None:
+                    return product
+            except Exception as exc:  # noqa: BLE001 - fall back to data/
+                log.debug("catalog.get_product(%s) failed (%s)", sku, exc)
+        return self._all_products().get(sku)
+
+    async def _offer_for(self, sku: Sku, store_id: StoreId, product: Product | None) -> StoreOffer | None:
+        catalog = self._services.catalog
+        if catalog is not None:
+            try:
+                offers = await catalog.get_offers(sku, [store_id])
+                return next((o for o in offers if o.store_id == store_id), None)
+            except Exception as exc:  # noqa: BLE001 - fall back to the planogram file
+                log.debug("catalog.get_offers(%s) failed (%s); using the planogram", sku, exc)
+        plan = await self._planogram(store_id)
+        slots = [s for s in plan.slots if s.sku == sku] if plan is not None else []
+        if not slots or product is None:
+            return None
+        slot = max(slots, key=lambda s: (s.qty, s.slot_id))
+        price = slot.price_cents if slot.price_cents is not None else product.price_cents
+        return StoreOffer(store_id=store_id, sku=sku, price_cents=price, qty=sum(s.qty for s in slots))
+
+    async def replenish_suggestions(
+        self,
+        user_id: UserId,
+        store_id: StoreId | None = None,
+        limit: int = DEFAULT_LIMIT,
+        *,
+        now: datetime | None = None,
+        include_all: bool = False,
+    ) -> list[ReplenishSuggestion]:
+        """'You bought this 12 days ago' cards (GET /api/users/{user_id}/suggestions; gateway extra, not in the
+        Protocol): due items from purchase cadence, most overdue first. Unknown user -> KeyError."""
+        profiles = self._ensure_loaded()
+        fixture = self._replenish().users.get(user_id)
+        if user_id not in profiles and fixture is None:
+            raise KeyError(f"unknown user {user_id!r}")
+        profile = profiles.get(user_id)
+        sid = store_id or (fixture.store_id if fixture else None) or (profile.home_store_id if profile else None)
+        sid = sid or "store_ave"
+        cads = due_cadences(fixture, self._session_purchases.get(user_id, []), now or utcnow(), include_all=include_all)
+        cards: list[ReplenishSuggestion] = []
+        for c in cads[: max(0, limit)]:
+            product = await self._product_for(c.sku)
+            offer = await self._offer_for(c.sku, sid, product)
+            cards.append(build_card(user_id, c, product, offer, sid))
+        return cards
 
     # ---------------------------------------------------------------------------------------------------- extras
     def purchases(self, user_id: UserId) -> list[PurchaseRecord]:

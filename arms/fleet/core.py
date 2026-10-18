@@ -1302,7 +1302,7 @@ class FleetManager:
         else:
             plan = RequestPlan(
                 request_id=new_id("req"),
-                text=request.text,
+                text=request.text.strip() or await self._order_text(request),
                 user_id=request.user_id,
                 channel=request.channel,
                 role=request.role,
@@ -1384,7 +1384,61 @@ class FleetManager:
             upd["aisle_ids"] = fallback.aisle_ids
         return draft.model_copy(update=upd) if upd else draft
 
+    # ---- structured orders (0.2.3: exact SKUs, no LLM) ---------------------------------------------------------
+    @staticmethod
+    def _merged_items(request: FleetRequest) -> dict[str, tuple[int, str]]:
+        merged: dict[str, tuple[int, str]] = {}
+        for it in request.items:
+            qty, note = merged.get(it.sku, (0, ""))
+            merged[it.sku] = (qty + it.qty, note or it.note)
+        return merged
+
+    async def _order_text(self, request: FleetRequest) -> str:
+        """Chat-history text of a structured order: 'Order: 1 x Mild Chunky Salsa 16 oz, 4 x Lime'."""
+        merged = self._merged_items(request)
+        products = await self._products(list(merged))
+        parts = [f"{qty} x {getattr(products.get(sku), 'name', None) or sku}" for sku, (qty, _) in merged.items()]
+        return "Order: " + ", ".join(parts)
+
+    async def _structured_draft(self, request: FleetRequest) -> RequestDraft:
+        """A structured order -> a shop draft whose list pins every SKU (sourcing keeps the exact SKU in store, else
+        orders it online); unknown SKUs are dropped and named in the summary."""
+        merged = self._merged_items(request)
+        products = await self._products(list(merged))
+        unknown = [sku for sku in merged if sku not in products]
+        list_id = new_id("list")
+        items: list[ListItem] = []
+        for sku, (qty, note) in merged.items():
+            product = products.get(sku)
+            if product is None:
+                continue
+            items.append(
+                ListItem(
+                    item_id=f"{list_id}_i{len(items) + 1}",
+                    query=product.name,
+                    sku=sku,
+                    qty=qty,
+                    category=product.category,
+                    notes=note or "ordered by the shopper",
+                )
+            )
+        if not items:
+            return RequestDraft(
+                intent="shop",
+                summary="Order",
+                clarifying_question=f"I couldn't find {', '.join(unknown)} in the catalog. What should I get?",
+                confidence=0.0,
+            )
+        title = f"Your order ({plural(len(items), 'item')})"
+        sl = ShoppingList(list_id=list_id, user_id=request.user_id, title=title, items=items)
+        summary = title + (f"; not in the catalog: {', '.join(unknown)}" if unknown else "")
+        return RequestDraft(
+            intent="shop", summary=summary, shopping_list=sl, store_hint=request.store_id, confidence=1.0
+        )
+
     async def _interpret(self, plan: RequestPlan, request: FleetRequest, history: list[str] | None) -> RequestDraft:
+        if request.items and not history:
+            return await self._structured_draft(request)
         ctx = await self._rule_context()
         text = request.text
         combined = " ".join([history[0], text]) if history else text

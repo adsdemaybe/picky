@@ -36,4 +36,12 @@ def create_fake(services: Services, **kwargs: Any) -> CatalogService:
     return FakeCatalogService(services, **kwargs)
 
 
-__all__ = ["create", "create_fake"]
+def product_image_jpeg(product: Any, size: int = 320, image_dir: str | None = None) -> bytes:
+    """Product thumbnail JPEG (GET /api/products/{sku}/image.jpg): a photo / render from ``image_dir`` when present,
+    else a studio shot of the sim prop (shape, proportions, label colour + label text from ``Product.asset``)."""
+    from arms.catalog.thumbs import product_image_jpeg as _image
+
+    return _image(product, size, image_dir)
+
+
+__all__ = ["create", "create_fake", "product_image_jpeg"]
