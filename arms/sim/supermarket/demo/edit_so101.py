@@ -235,7 +235,7 @@ class Editor:
         for k, ln in enumerate(lines):
             d.text((76, H - h + 34 + 40 * k), ln, font=f2, fill=(228, 228, 228))
 
-    def caption(self, fr, t):
+    def caption(self, fr, t, hold=None):
         r = self.r
         rv = fr["rovers"][0]
         name = rv["name"]
@@ -263,8 +263,8 @@ class Editor:
                 f"Gemini: “{reason}”" if reason else "",
                 BLUE,
             )
-        if r.vla and rv["target"] and rv["phase"] in PICK_PHASES:
-            cap = self.vla_caption(rv, t, it)
+        if r.vla and rv["target"] and (rv["phase"] in PICK_PHASES or hold):
+            cap = self.vla_caption(rv, t, it, hold)
             if cap:
                 return cap
         if rv["phase"] in PICK_PHASES and rv["target"]:
@@ -307,7 +307,21 @@ class Editor:
             return ("Paid ✓", f"{rv.get('counter', 0)} items on the counter (simulated payment)", GREEN)
         return None
 
-    def vla_caption(self, rv, t, it):
+    def current_step(self, rv, t):
+        """(the vla_step this frame belongs to, done?): while the arm plays a step the frames carry its tool call in
+        ``sub`` and its event (logged when it finished) comes later; between steps the last finished one"""
+        r = self.r
+        tgt = rv.get("target")
+        leg = r.leg_for(tgt, t)
+        since = leg["t"] if leg else None
+        if str(rv.get("sub", "")).startswith("Perceptron VLA:"):
+            nxt = [e for e in r.events if e["kind"] == "vla_step" and e.get("item") == tgt and e["t"] >= t - 1e-6]
+            if nxt:
+                return nxt[0], False
+        st = r.item_events(tgt, ("vla_step",), t, since)
+        return (st[-1], True) if st else (None, None)
+
+    def vla_caption(self, rv, t, it, hold=None):
         """captions of a --policy perceptron pick: look -> Perceptron VLA steps -> verifier (None = default caption)"""
         r = self.r
         tgt = rv["target"]
@@ -315,15 +329,33 @@ class Editor:
         leg = r.leg_for(tgt, t)
         since = leg["t"] if leg else None
         ph = rv["phase"]
+        if hold is not None:
+            kind, e = hold
+            if kind == "decide":
+                lat = (e.get("latency_ms") or 0) / 1000
+                return (
+                    f"Perceptron Mk1.5 decides → {e.get('action') or 'no tool call'}",
+                    f"VLA step {e['n']} (attempt {e['attempt']}) · mast + wrist frames, arm state, last steps in · "
+                    f"one tool call out in {lat:.1f} s · the sim is paused while it thinks",
+                    PURPLE,
+                )
+            if kind == "look":
+                return (f"Perceptron Mk1.5: is the {nm} in view?", f"“{e.get('answer', '')}” (wrist camera)", PURPLE)
+            if kind == "verify":
+                ph = "verify"
         if ph == "look":
             e = r.item_events(tgt, ("look",), t, since)
             if e and e[-1].get("answer"):
                 return (f"Perceptron Mk1.5: is the {nm} in view?", f"“{e[-1]['answer']}” (wrist camera)", PURPLE)
             return (f"Arm to the look pose for {nm}", "slot from the store map · wrist camera on the shelf", PURPLE)
         if ph == "verify":
-            e = r.item_events(tgt, ("verify",), t, since)
-            if e:
-                v = e[-1]
+            if hold is not None:
+                v = hold[1]
+            else:
+                nxt = [e for e in r.events if e["kind"] == "verify" and e.get("item") == tgt and e["t"] >= t - 1e-6]
+                ev = r.item_events(tgt, ("verify",), t, since)
+                v = nxt[0] if nxt and (not ev or nxt[0]["t"] - t < 1.0) else (ev[-1] if ev else None)
+            if v:
                 what = "held between the jaws" if v.get("what") == "held" else "in the basket"
                 mark = {True: "✓", False: "✗"}.get(v.get("verdict"), "?")
                 agree = {True: "sim state agrees", False: "sim state disagrees"}.get(v.get("agrees"), "")
@@ -340,26 +372,22 @@ class Editor:
                 "this pick is scripted, logged as such",
                 RED,
             )
-        held = r.item_events(tgt, ("attached",), t, since)
-        if ph in ("reach", "grasp", "lift") and not held or (held and ph == "lift" and held[-1].get("tier") != "x"):
-            st = r.item_events(tgt, ("vla_step",), t, since)
-            if st:
-                s = st[-1]
-                if held and ph == "lift" and s["t"] < held[-1]["t"]:
-                    return None
-                lat = (s.get("latency_ms") or 0) / 1000
-                return (
-                    f"Perceptron VLA → {s.get('action') or 'no tool call'}",
-                    f"Mk1.5 step {s['n']} (attempt {s['attempt']}) · decided in {lat:.1f} s (sim paused) · "
-                    f"{s.get('outcome', '')}",
-                    PURPLE,
-                )
-            if ph != "lift":
+        if ph in ("reach", "grasp", "lift"):
+            s, done = self.current_step(rv, t)
+            if s is None:
                 return (
                     f"Perceptron VLA takes over the arm: {nm}",
                     "mast + wrist cameras → Mk1.5 → one tool call",
                     PURPLE,
                 )
+            held = r.item_events(tgt, ("attached",), t, since)
+            if done and held and s["t"] <= held[-1]["t"] and ph == "lift":
+                return None  # the scripted retract after the VLA's last step
+            lat = (s.get("latency_ms") or 0) / 1000
+            sub = f"Mk1.5 step {s['n']} (attempt {s['attempt']}) · decided in {lat:.1f} s"
+            if done:
+                sub += f" · {s.get('outcome', '')}"
+            return (f"Perceptron VLA → {s.get('action') or 'no tool call'}", sub, PURPLE)
         return None
 
     def step_panel(self, img, fr, t):
@@ -408,6 +436,9 @@ class Editor:
             rows.append((STEP_LABEL.get(s, s), st, None))
             if s == "grasp" and st != "next":
                 acts = r.item_events(tgt, ("vla_step",), t, leg["t"])
+                cur_s, cur_done = self.current_step(rv, t)
+                if cur_s is not None and not cur_done:
+                    acts = acts + [cur_s]
                 for a in acts[-4:]:
                     ok = "✓ held" if a.get("held") and a.get("act_kind") == "gripper" else ""
                     rows.append((f"{a['n']}. {a.get('action') or 'text'}  {ok}", "sub", PURPLE))
@@ -440,13 +471,15 @@ class Editor:
             d.text((x0 + 58, y + 2), lab, font=font(24, st == "now"), fill=WHITE if st != "next" else GREY)
             y += 40
 
-    def vla_input(self, img, t, tgt, box):
+    def vla_input(self, img, t, tgt, box, sub="", step=None):
         """the frame Mk1.5 decided on (its last step for this item) with the point it chose"""
         r = self.r
-        st = [e for e in r.item_events(tgt, ("vla_step",), t) if e.get("img")]
-        if not st:
+        if step is not None:
+            s = step
+        else:
+            s, _ = self.current_step({"target": tgt, "sub": sub}, t)
+        if s is None or not s.get("img"):
             return False
-        s = st[-1]
         cam = (s.get("point_px") or ["wrist"])[0]
         p = r.dir / "vla" / f"{s['img']}_{cam}.jpg"
         if not p.exists():
@@ -465,11 +498,11 @@ class Editor:
         im = im.resize((w, h), Image.LANCZOS)
         panel(img, (x0 - 6, y0 - 36, x0 + w + 6, y0 + h + 6), 205, 10)
         img.paste(im, (x0, y0))
-        label = f"Mk1.5 input · {cam} cam · step {s['n']}"
+        label = f"Mk1.5 saw ({cam}) · step {s['n']}"
         ImageDraw.Draw(img).text((x0 + 6, y0 - 33), label, font=font(22, True), fill=PURPLE)
         return True
 
-    def compose(self, fi, caption=None, overlays=True):
+    def compose(self, fi, caption=None, overlays=True, hold=None):
         r = self.r
         fr = r.frames[fi]
         t = fr["t"]
@@ -515,9 +548,16 @@ class Editor:
             basket_view = rv["phase"] == "basket" or r.last_event(t, ("released", "in_basket"), within=1.6)
             vla_pick = (
                 r.vla
-                and rv["phase"] in ("reach", "grasp", "lift", "look")
+                and (rv["phase"] in ("reach", "grasp", "lift") or (hold and hold[0] == "decide"))
                 and not r.last_event(t, ("attached",), within=1.5)
-                and self.vla_input(img, t, rv["target"], (W - 384 - 30, 480, 384, 0))
+                and self.vla_input(
+                    img,
+                    t,
+                    rv["target"],
+                    (W - 384 - 30, 480, 384, 0),
+                    sub=rv.get("sub", ""),
+                    step=hold[1] if hold and hold[0] == "decide" else None,
+                )
             )
             if vla_pick:
                 pass
@@ -541,7 +581,7 @@ class Editor:
             )
         if overlays and r.vla and fr["phase"] == "main":
             self.step_panel(img, fr, t)
-        cap = caption if caption is not None else self.caption(fr, t)
+        cap = caption if caption is not None else self.caption(fr, t, hold)
         if cap and cap[0]:
             self.caption_bar(img, *cap)
         if BADGE[0]:
@@ -735,6 +775,8 @@ def speed_for(run: Run, fi: int, picks_seen: int, mode: str = "full") -> float:
             "checkout": 4.0,
             "unload": 4.0,
             "replan": 1.0,
+            "look": 2.5,
+            "verify": 1.5,
         }.get(ph, 4.0)
     early = picks_seen < 3
     return {
@@ -748,6 +790,8 @@ def speed_for(run: Run, fi: int, picks_seen: int, mode: str = "full") -> float:
         "checkout": 2.0 if rv.get("counter", 0) < 2 else 4.0,
         "unload": 2.0 if rv.get("counter", 0) < 2 else 4.0,
         "paid": 1.0,
+        "look": 1.5 if early else 2.0,
+        "verify": 1.0,
     }.get(ph, 2.0)
 
 
@@ -764,6 +808,57 @@ def main_frames(run: Run, m0: int, m1: int, mode="full", windows=None):
                 sp = max(sp, 30.0)
         yield fi
         f += sp
+
+
+HOLD_FRAMES = {"full": {"decide": 24, "look": 36, "verify": 36}, "highlight": {"decide": 15, "look": 24, "verify": 27}}
+
+
+def vla_holds(run: Run) -> list[tuple[int, str, dict]]:
+    """(frame, kind, event) where a --policy perceptron run decided something with the sim paused: the first frame of
+    each VLA step (its tool call is in ``sub``), of the look question, of each verifier check"""
+    out = []
+    prev = None
+    for fi, fr in enumerate(run.frames):
+        rv = fr["rovers"][0]
+        key = (rv["phase"], rv.get("sub", ""), rv.get("target"))
+        if key != prev and fr["phase"] == "main":
+            t, tgt, sub = fr["t"], rv.get("target"), str(rv.get("sub", ""))
+            kind = (
+                "decide"
+                if sub.startswith("Perceptron VLA:")
+                else (
+                    "look" if sub.startswith("Perceptron: is it") else ("verify" if rv["phase"] == "verify" else None)
+                )
+            )
+            ev_kind = {"decide": "vla_step", "look": "look", "verify": "verify"}.get(kind)
+            if ev_kind:
+                nxt = [e for e in run.events if e["kind"] == ev_kind and e.get("item") == tgt and e["t"] >= t - 1e-6]
+                if nxt:
+                    out.append((fi, kind, nxt[0]))
+        prev = key
+    return out
+
+
+def with_holds(ed, frames_iter, mode="full", windows=None):
+    """compose each frame; at every VLA decision / look / verifier check hold the frame a moment (the sim was paused
+    while Perceptron answered, so the recording has no frames for it)"""
+    r = ed.r
+    holds = vla_holds(r) if r.vla else []
+    k, prev = 0, -1
+    for fi in frames_iter:
+        while k < len(holds) and holds[k][0] <= fi:
+            hf, kind, ev = holds[k]
+            k += 1
+            if hf <= prev:
+                continue
+            t = r.frames[hf]["t"]
+            if windows is not None and not any(a <= t <= b for a, b in windows):
+                continue
+            im = ed.compose(hf, hold=(kind, ev))
+            for _ in range(HOLD_FRAMES[mode][kind]):
+                yield im
+        yield ed.compose(fi)
+        prev = fi
 
 
 def write(path: Path, frames_iter, gif: Path | None = None, gif_range=None):
@@ -811,8 +906,7 @@ def full_cut(ed: Editor, early=False):
     if m0 is None:
         return
     yield from ed.plan_card(m0, int(7 * FPS))
-    for fi in main_frames(r, m0, m1):
-        yield ed.compose(fi)
+    yield from with_holds(ed, main_frames(r, m0, m1))
     if early:
         yield from ed.todo_card(m1, int(2 * FPS))
         return
@@ -840,20 +934,24 @@ def highlight(ed: Editor):
             continue
         secs.add(sec)
         t_in = next((x["t"] for x in r.events if x["kind"] == "in_basket" and x["item"] == e["item"]), e["t"] + 10)
-        if r.vla:
-            lk = [x["t"] for x in r.events if x["kind"] in ("look", "vla_grasp_setup") and x.get("item") == e["item"]]
+        if r.vla:  # parked -> look -> VLA steps -> verifier -> basket -> basket verifier
+            lk = [
+                x["t"]
+                for x in r.events
+                if x.get("item") == e["item"]
+                and (x["kind"] in ("look", "vla_grasp_setup") or (x["kind"] == "step_done" and x["step"] == "approach"))
+            ]
             vf = [x["t"] for x in r.events if x["kind"] == "verify" and x.get("item") == e["item"] and x["t"] > t_in]
-            wins.append(((min(lk) - 2.0) if lk else e["t"] - 6.0, (vf[-1] + 1.5) if vf else t_in + 0.8))
+            wins.append(((min(lk) - 0.5) if lk else e["t"] - 6.0, (vf[-1] + 1.0) if vf else t_in + 0.8))
         else:
             wins.append((e["t"] - 5.0, t_in + 0.8))
-        if len(wins) == 3:
+        if len(wins) == (4 if r.vla else 3):
             break
     un = next((e for e in r.events if e["kind"] == "unload_attached"), None)
     if un:
         wins.append((un["t"] - 4.0, un["t"] + 9.0))
     wins.sort()
-    for fi in main_frames(r, m0, m1, "highlight", wins):
-        yield ed.compose(fi)
+    yield from with_holds(ed, main_frames(r, m0, m1, "highlight", wins), "highlight", wins)
     yield from ed.paid_card(m1, int(3 * FPS))
     if o0 is not None:
         for fi in range(o0, o1 + 1, 3):
