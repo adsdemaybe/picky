@@ -52,15 +52,15 @@ slots:
     sku: salsa_hot
     level: 1
     index: 0
-    item_position: {x: 2.55, y: 5.0, z: 0.6}
-    approach_pose: {x: 3.2, y: 5.0, theta: 3.14159}
+    item_position: {x: 2.6, y: 5.0, z: 0.6}
+    approach_pose: {x: 2.98, y: 5.0, theta: 3.14159}
     qty: 6
     lots: [{lot_id: L1, qty: 6, expiry: 2026-10-20}]
   - slot_id: prod-avocado
     fixture_id: p1
     sku: avocado
-    item_position: {x: 10.6, y: 5.0, z: 0.9}
-    approach_pose: {x: 9.3, y: 5.0, theta: 0.0}
+    item_position: {x: 10.0, y: 5.0, z: 0.9}
+    approach_pose: {x: 9.62, y: 5.0, theta: 0.0}
     qty: 9
     lots: [{lot_id: A1, qty: 9, freshness: 0.8}]
     deal: {kind: near_expiry, price_cents: 99, original_cents: 129, reason: Ripe today}
@@ -93,6 +93,26 @@ users:
 """
 
 
+ROBOTS = """
+robots:
+  - {robot_id: rover-ave-1, name: Pico, store_id: store_ave, dock: {x: 1.0, y: 2.5, theta: 0.0}, battery_pct: 95}
+  - {robot_id: rover-ave-2, name: Rhea, store_id: store_ave, dock: {x: 1.8, y: 2.5, theta: 0.0}, cameras: [front]}
+store_cameras:
+  - camera_id: store_ave.ceiling-1
+    store_id: store_ave
+    name: Ave ceiling 1
+    mount: {frame: world, x: 7, y: 11, z: 3.2, pitch: -1.2, hfov_deg: 100}
+"""
+
+CATEGORIES = """
+categories:
+  - {category_id: produce, name: Produce, sort: 0}
+  - {category_id: dairy, name: Dairy & Eggs, sort: 1}
+  - {category_id: pantry, name: Pantry, sort: 2}
+  - {category_id: salsa, name: Salsa, parent_id: pantry}
+"""
+
+
 def _write(root: Path, rel: str, text: str) -> None:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +125,8 @@ def data_root(tmp_path: Path):
     _write(tmp_path, "planograms/store_ave.yaml", PLANOGRAM)
     _write(tmp_path, "online_store.yaml", ONLINE)
     _write(tmp_path, "fixtures/users.yaml", USERS)
+    _write(tmp_path, "fixtures/robots.yaml", ROBOTS)
+    _write(tmp_path, "categories.yaml", CATEGORIES)
     set_settings(picky_data_dir=str(tmp_path))
     d.clear_cache()
     yield tmp_path
@@ -204,16 +226,16 @@ def _plan_with(data_root: Path, *pairs: tuple[str, str]) -> list[str]:
 
 
 def test_validate_robot_clearance(data_root: Path):
-    problems = _plan_with(data_root, ("approach_pose: {x: 9.3, y: 5.0", "approach_pose: {x: 9.6, y: 5.0"))
+    problems = _plan_with(data_root, ("approach_pose: {x: 9.62, y: 5.0", "approach_pose: {x: 9.85, y: 5.0"))
     assert any("prod-avocado: approach_pose" in p and "fixture p1" in p for p in problems)
-    problems = _plan_with(data_root, ("entrance: {x: 1, y: 1.0", "entrance: {x: 1, y: 0.3"))
+    problems = _plan_with(data_root, ("entrance: {x: 1, y: 1.0", "entrance: {x: 1, y: 0.2"))
     assert any("entrance" in p and "outline" in p for p in problems)
 
 
 def test_validate_approach_heading_and_geometry(data_root: Path):
-    problems = _plan_with(data_root, ("{x: 3.2, y: 5.0, theta: 3.14159}", "{x: 3.2, y: 5.0, theta: 0.0}"))
+    problems = _plan_with(data_root, ("{x: 2.98, y: 5.0, theta: 3.14159}", "{x: 2.98, y: 5.0, theta: 0.0}"))
     assert any("does not face item_position" in p for p in problems)
-    problems = _plan_with(data_root, ("item_position: {x: 2.55, y: 5.0,", "item_position: {x: 2.55, y: 13,"))
+    problems = _plan_with(data_root, ("item_position: {x: 2.6, y: 5.0,", "item_position: {x: 2.6, y: 13,"))
     assert any("not on fixture f1" in p for p in problems)
     problems = _plan_with(
         data_root,
@@ -221,6 +243,71 @@ def test_validate_approach_heading_and_geometry(data_root: Path):
         ("    aisle_id: a1\n    sku: salsa_hot", "    aisle_id: a2\n    sku: salsa_hot"),
     )
     assert any("aisle_id 'a2' != fixture aisle_id 'a1'" in p for p in problems)
+
+
+def test_validate_so101_reach(data_root: Path):
+    far = _plan_with(data_root, ("{x: 2.98, y: 5.0, theta: 3.14159}", "{x: 3.5, y: 5.0, theta: 3.14159}"))
+    assert any("a1-f1-L1-0" in p and "beyond the SO-101 reach" in p and not d.is_warning(p) for p in far)
+    near = _plan_with(data_root, ("{x: 2.98, y: 5.0, theta: 3.14159}", "{x: 3.05, y: 5.0, theta: 3.14159}"))
+    assert [p for p in near if "a1-f1-L1-0" in p] and all(d.is_warning(p) for p in near if "a1-f1-L1-0" in p)
+    high = _plan_with(data_root, ("item_position: {x: 2.6, y: 5.0, z: 0.6}", "item_position: {x: 2.6, y: 5.0, z: 1.7}"))
+    assert any("outside the lift + arm range" in p for p in high)
+
+
+def test_load_robots_and_cameras(data_root: Path):
+    robots = d.load_robots()
+    assert list(robots) == ["rover-ave-1", "rover-ave-2"]
+    assert robots["rover-ave-1"].kind == "rover_so101" and robots["rover-ave-1"].battery_pct == 95
+    assert d.load_robot("rover-ave-2").name == "Rhea"
+    with pytest.raises(KeyError):
+        d.load_robot("rover-zzz-9")
+    assert [r.robot_id for r in d.robots_for_store("store_ave")] == ["rover-ave-1", "rover-ave-2"]
+    assert d.robots_for_store("store_hill") == []
+    cams = d.load_cameras()
+    assert [c.camera_id for c in cams] == [
+        "rover-ave-1.front",
+        "rover-ave-1.wrist",
+        "rover-ave-1.basket",
+        "rover-ave-2.front",
+        "store_ave.ceiling-1",
+    ]
+    assert cams[0].mount.frame == "robot_base" and cams[-1].kind == "ceiling" and cams[-1].robot_id is None
+    assert [c.camera_id for c in d.load_cameras(robot_id="rover-ave-2")] == ["rover-ave-2.front"]
+    assert d.load_cameras(store_id="store_hill") == []
+    assert d.load_store_cameras("store_ave")[0].mount.z == 3.2
+
+
+def test_validate_robots(data_root: Path):
+    _write(data_root, "fixtures/robots.yaml", ROBOTS.replace("dock: {x: 1.0, y: 2.5", "dock: {x: 1.85, y: 4.5"))
+    d.clear_cache()
+    assert any("robot rover-ave-1: dock" in p and "fixture f1" in p for p in d.validate_data())
+    _write(data_root, "fixtures/robots.yaml", ROBOTS.replace("name: Rhea, store_id: store_ave", "name: Rhea, "
+                                                                 "store_id: store_moon"))  # fmt: skip
+    d.clear_cache()
+    assert any("robot rover-ave-2: store 'store_moon'" in p for p in d.validate_data())
+    _write(data_root, "fixtures/robots.yaml", ROBOTS.replace("x: 7, y: 11", "x: 70, y: 11"))
+    d.clear_cache()
+    assert any("camera store_ave.ceiling-1" in p and "outside" in p for p in d.validate_data())
+    (data_root / "fixtures/robots.yaml").unlink()
+    d.clear_cache()
+    problems = d.validate_data()
+    assert problems and all(d.is_warning(p) for p in problems)
+
+
+def test_load_and_validate_categories(data_root: Path):
+    cats = d.load_categories()
+    assert list(cats) == ["produce", "dairy", "pantry", "salsa"] and cats["salsa"].parent_id == "pantry"
+    assert [c.category_id for c in d.load_categories_file().top_level()] == ["produce", "dairy", "pantry"]
+    _write(data_root, "products.yaml", PRODUCTS.replace("category: pantry", "category: condiments"))
+    d.clear_cache()
+    assert any("category 'condiments' is not a top-level id" in p for p in d.validate_data())
+    _write(data_root, "products.yaml", PRODUCTS.replace("category: pantry", "category: pantry\n    subcategory: dips"))
+    d.clear_cache()
+    problems = d.validate_data()
+    assert any(d.is_warning(p) and "subcategory 'dips'" in p for p in problems)
+    _write(data_root, "products.yaml", PRODUCTS.replace("category: pantry", "category: pantry\n    subcategory: salsa"))
+    d.clear_cache()
+    assert d.validate_data() == []
 
 
 def test_validate_level_z_and_deal_lot(data_root: Path):
@@ -256,3 +343,28 @@ def test_main_exit_codes(data_root: Path, capsys: pytest.CaptureFixture[str]):
     d.clear_cache()
     assert d.main() == 0  # warnings only
     assert "warning:" in capsys.readouterr().out
+
+
+def test_validate_capacity_rules(data_root: Path):
+    problems = _plan_with(data_root, ("    qty: 6\n", "    qty: 6\n    capacity: 4\n    low_threshold: 5\n"))
+    assert any("a1-f1-L1-0: qty 6 > capacity 4" in p for p in problems)
+    assert any("low_threshold 5 > capacity 4" in p for p in problems)
+
+
+def test_validate_slot_ids_unique_across_stores(data_root: Path):
+    hill = PLANOGRAM.replace("store_id: store_ave", "store_id: store_hill").replace("slot_id: prod-avocado",
+                                                                                   "slot_id: hill-avocado")  # fmt: skip
+    _write(data_root, "planograms/store_hill.yaml", hill)
+    d.clear_cache()
+    problems = d.validate_data()
+    assert any("a1-f1-L1-0: slot_id also used in store_ave" in p and not d.is_warning(p) for p in problems)
+    assert not any("hill-avocado: slot_id also used" in p for p in problems)
+
+
+def test_validate_dock_spacing_and_approach_clearance(data_root: Path):
+    _write(data_root, "fixtures/robots.yaml", ROBOTS.replace("dock: {x: 1.8, y: 2.5", "dock: {x: 1.4, y: 2.5"))
+    d.clear_cache()
+    assert any("docks are 0.40 m apart" in p for p in d.validate_data())
+    _write(data_root, "fixtures/robots.yaml", ROBOTS.replace("dock: {x: 1.0, y: 2.5", "dock: {x: 9.5, y: 5.2"))
+    d.clear_cache()
+    assert any("robot rover-ave-1: dock is" in p and "prod-avocado approach_pose" in p for p in d.validate_data())

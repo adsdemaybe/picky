@@ -153,6 +153,7 @@ async def test_identify_ground_truth_slot(services):
     assert {d.method for d in rep.detections} == {"ground_truth"}
     assert rep.detections[0].text == PRODUCTS["avocado"].barcode
     assert rep.lot_freshness == {"L_new": pytest.approx(0.9167, abs=1e-3), "L_old": pytest.approx(0.30)}
+    assert rep.lot_counts == {"L_new": 3, "L_old": 2}  # v0.2: units per lot when the count is exact
     assert rep.freshness["avo_3"] == 0.95
     assert rep.shelf_tag_cents == 129 and rep.pose is not None and rep.frame_id == "frame_t1"
 

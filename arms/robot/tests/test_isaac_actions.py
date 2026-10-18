@@ -2,11 +2,30 @@
 
 import math
 
-from arms.robot.isaac import ActionStatus, MagicGraspAction, NavigateAction, PlaceAction, RidgebackFranka
+from arms.robot.isaac import (
+    ActionStatus,
+    LiftAction,
+    MagicGraspAction,
+    NavigateAction,
+    PlaceAction,
+    RidgebackFranka,
+    RoverSO101,
+    UnloadAction,
+    basket_world,
+)
+from contracts.common import LIFT_MAX_M, LIFT_MIN_M
+from contracts.sim import BASKET_OFFSET_LOCAL
 
 
 def test_importing_isaac_package_does_not_need_isaacsim():
-    RidgebackFranka()  # constructor is lazy
+    rover = RoverSO101("/World/Stores/store_ave/Robots/rover-ave-1", robot_id="rover-ave-1")  # constructor is lazy
+    assert rover.lift_m == LIFT_MIN_M and not rover.arm_loaded
+    assert RidgebackFranka is RoverSO101  # v0.1 alias for arms/sim/app.py
+
+
+def test_basket_world_matches_contract_offset():
+    x, y, z = basket_world(1.0, 2.0, math.pi / 2)  # facing +y: the basket (x=-0.12 local) sits at -y
+    assert (round(x, 6), round(y, 6), z) == (1.0, round(2.0 + BASKET_OFFSET_LOCAL[0], 6), BASKET_OFFSET_LOCAL[2])
 
 
 def test_navigate_action_drives_kinematic_base():
@@ -72,3 +91,38 @@ def test_place_action_releases_over_basket():
     )
     assert _run(act) == ActionStatus.SUCCEEDED
     assert released == [1] and hand[-1] == (1.0, 1.0, 0.55)
+
+
+def test_lift_action_moves_at_lift_speed_and_clamps():
+    seen: list[float] = []
+    act = LiftAction(0.45, 5.0, seen.append)
+    assert _run(act, 400) == ActionStatus.SUCCEEDED
+    assert seen[-1] == LIFT_MAX_M
+    assert all(b - a <= 0.25 * 0.05 + 1e-9 for a, b in zip(seen, seen[1:], strict=False))
+
+
+def test_magic_grasp_raises_the_lift_first():
+    lifts: list[float] = []
+    hand: list[tuple] = []
+    act = MagicGraspAction(
+        item=(5.0, 4.05, 1.06),
+        approach_theta=math.pi / 2,
+        move_hand=hand.append,
+        attach=lambda: True,
+        set_lift=lifts.append,
+        lift_from=0.45,
+        lift_to=1.1,
+    )
+    assert act.phase == "lift"
+    assert _run(act) == ActionStatus.SUCCEEDED
+    assert lifts[-1] == 1.1 and hand  # lift done before the arm moved
+    first_hand_step = len(lifts)
+    assert first_hand_step > 1
+
+
+def test_unload_action_removes_every_item():
+    removed: list[int] = []
+    act = UnloadAction(count=3, remove=lambda i: removed.append(i) or True)
+    assert _run(act) == ActionStatus.SUCCEEDED and removed == [0, 1, 2]
+    bad = UnloadAction(count=2, remove=lambda i: False)
+    assert _run(bad) == ActionStatus.FAILED and bad.error_code == "internal"

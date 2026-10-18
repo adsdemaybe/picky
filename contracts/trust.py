@@ -21,6 +21,7 @@ from contracts.common import (
     ApprovalId,
     Cents,
     Channel,
+    GoalId,
     JsonScalar,
     LineId,
     MandateId,
@@ -28,6 +29,7 @@ from contracts.common import (
     OrderId,
     ReceiptId,
     RecId,
+    RobotId,
     Score01,
     Sku,
     StoreId,
@@ -222,6 +224,8 @@ class ApprovalKind(StrEnum):
     ONLINE_ORDER = "online_order"
     CHECKOUT = "checkout"
     PICK_CHOICE = "pick_choice"
+    QUESTION = "question"
+    """Free-form question from a robot brain (ask_user tool): yes/no or ``options``."""
 
 
 class ApprovalOption(Model):
@@ -233,8 +237,15 @@ class ApprovalOption(Model):
 
 class ApprovalRequest(Model):
     approval_id: ApprovalId
-    trip_id: TripId
-    user_id: UserId
+    trip_id: TripId | None = Field(
+        None, description="Always set for shopper trips; None only for robot-brain questions on goals without a trip."
+    )
+    goal_id: GoalId | None = Field(None, description="Goal of the robot brain that asks (ask_user tool).")
+    robot_id: RobotId | None = Field(None, description="Robot that asks (shown as 'Pico asks: ...').")
+    store_id: StoreId | None = Field(None, description="Store it concerns (staff view filter /api/approvals?store_id).")
+    user_id: UserId = Field(
+        description="Who must answer. Goals without a user (manual staff goals) ask common.STAFF_USER_ID ('staff')."
+    )
     kind: ApprovalKind
     title: str = Field(description="Short question: 'Add pepper-jack? 30% off'.")
     body: str = ""
