@@ -718,7 +718,15 @@ def _is_bad_request(exc: Exception) -> bool:
 # Tried in order when the requested Gemini model is overloaded (503), unknown/retired (404) or out of quota (429:
 # Gemini API rate limits are per model, so a sibling model usually still answers; measured on vhagar 2026-10-18, the
 # planner's first call hit 429 RESOURCE_EXHAUSTED on gemini-3.8-flash while the request interpreter had just used it).
-GEMINI_FALLBACK_MODELS: tuple[str, ...] = ("gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest")
+# By 11:10 PT the same day the key's quota was spent on every *-flash model (3.5/3.6/3.7/3.8, flash-latest: 429) while
+# gemini-3-flash-preview (sometimes 503) and gemini-3.5-flash-lite still answered, so those come first.
+GEMINI_FALLBACK_MODELS: tuple[str, ...] = (
+    "gemini-3-flash-preview",
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.7-flash",
+    "gemini-flash-latest",
+)
 _GEMINI_FALLBACK_CODES = frozenset({404, 429, 500, 503})
 _SERVED_BY: dict[str, str] = {}
 """Requested Gemini model id -> the model id that answered its latest call (differs after a 429 / 503 fallback)."""
