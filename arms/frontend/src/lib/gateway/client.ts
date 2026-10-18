@@ -87,7 +87,8 @@ export const gw = {
   /** Purchase history, newest first (a bare list, or {purchases: [...]} / {items: [...]}). */
   purchases: (userId: string, limit = 60) => req<PurchaseRow[] | { purchases?: PurchaseRow[]; items?: PurchaseRow[] }>(`/api/users/${enc(userId)}/purchases${qs({ limit })}`, undefined, 5000),
   /** "Running low" restock suggestions from purchase cadence (most due first). */
-  suggestions: (userId: string) => req<Suggestion[]>(`/api/users/${enc(userId)}/suggestions`, undefined, 5000),
+  // the LLM re-rank takes 5-8 s when the gateway's cache is cold (it bounds it at 8 s, then rule order)
+  suggestions: (userId: string) => req<Suggestion[]>(`/api/users/${enc(userId)}/suggestions`, undefined, 15_000),
 };
 
 /** GET /api/users/{id}/suggestions row. Hand-typed until the endpoint lands in schemas/openapi.json (pnpm gen-types). */
