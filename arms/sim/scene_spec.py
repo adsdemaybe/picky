@@ -21,12 +21,21 @@ at the layout position of its rank, front units first, and units are assigned to
 stocked unit is spawned (the scan ground truth must equal the catalog qty): units beyond what fits share the back-row
 positions (hidden behind the front rows) and a warning is recorded.
 
+Per-item models (``arms.sim.assets.SkuAssets``, optional): a SKU that resolves to a model uses the model's
+``target_dims_m`` as its unit size (``SlotLayout.dims``) and its prims carry ``render='asset'|'parts'``, so the Isaac
+backend references the model instead of drawing a box. Unit counts, instance ids and lots never change; without assets
+(the default) every unit is the primitive box at its products.yaml size. Shelf slots fill wide first in both cases
+(``slot_lateral_room``).
+
 Rovers (``RoverSpec``): a small diff-drive base + vertical lift mast + an SO-101 approximated with primitives (links
 sized from the SO-ARM100 repo's SO-101 URDF: base, shoulder, upper arm 0.116 m, forearm 0.135 m, wrist + gripper),
 a basket on the back half at ``contracts.sim.BASKET_OFFSET_LOCAL`` and the pan-tilt front camera head on the mast.
 Prims are robot-local and grouped: ``base`` (rides the base), ``lift`` (rides the lift carriage, z relative to
 ``LIFT_REF_M``), ``arm`` (rides the carriage and extends along +x). The Isaac backend may swap the arm primitives for
-the real URDF (``PICKY_SO101_URDF``, see app.py).
+the real URDF (``PICKY_SO101_URDF``, see app.py). With a rover USD (``PICKY_ROVER_USD`` -> ``picky_rover.usda``) the
+spec also carries ``model_usd`` / ``model_path`` and ``puppet_prims``: the LeKiwi base + SO-101 come from the USD
+(posed kinematically, ``arms.sim.rover_puppet``) and only the mast, camera head, carriage bracket and basket stay
+primitives; ``prims`` remains the full primitive rover (fallback, Pillow sketch).
 
 Usage: ``python -m arms.sim.scene_spec [store_id ...]`` prints a summary of the scene for the data in PICKY_DATA_DIR.
 """
@@ -35,10 +44,12 @@ import math
 import re
 import sys
 from collections.abc import Iterable, Sequence
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from arms.sim import rover_puppet as puppet
+from arms.sim.assets import SkuAssets
 from contracts.cameras import DEFAULT_ROBOT_CAMERA_MOUNTS, CameraInfo, CameraMount, robot_camera_id, store_camera_id
 from contracts.catalog import Lot, Product
 from contracts.common import ARM_MOUNT_X_M, ItemId, Point3, Pose2D, Rect2D, Sku
@@ -62,6 +73,7 @@ PrimRole = Literal[
 ]
 PrimShape = Literal["box", "cylinder", "sphere"]
 RoverGroup = Literal["base", "lift", "arm"]
+UnitRender = Literal["primitive", "asset", "parts"]
 Vec3 = tuple[float, float, float]
 
 # ---- store geometry (meters)
@@ -76,6 +88,10 @@ CEILING_SLAB_GAP_M = 0.08
 ceiling height (robots.yaml) otherwise start inside the slab and render its unlit inside (black band in Isaac)."""
 OBSTACLE_HEIGHT_M = 3.0
 ITEM_GAP_M = 0.01
+SLOT_ROOM_FILL = 0.9
+"""Share of a slot's lateral room (``slot_lateral_room``) its front row may use (gap to the neighbouring SKU)."""
+SLOT_ROOM_DEFAULT_M = 0.6
+"""Lateral room of a slot with no neighbour on its fixture level (still capped by the fixture's ends)."""
 MAX_UNITS_PER_SLOT = 120
 """Hard cap on spawned units per slot (catalog capacities are <= 60)."""
 MARKER_SIZE_M = 0.8
@@ -103,7 +119,7 @@ SO101_LINKS_M: tuple[tuple[str, float], ...] = (("upper_arm", 0.116), ("forearm"
 """SO-101 link lengths (approx., from the SO-ARM100 URDF) used for the primitive arm."""
 
 FIXTURE_COLORS: dict[str, str] = {
-    "shelf": "#b8bcc4",
+    "shelf": "#d3d6db",
     "fridge": "#dfe9f2",
     "freezer": "#cfe0f5",
     "produce_bin": "#8b6a43",
@@ -150,6 +166,9 @@ class PrimSpec(BaseModel):
     price_cents: int | None = None
     store_id: str | None = None
     group: RoverGroup | None = Field(None, description="Rover prims: which moving part it rides.")
+    render: UnitRender = Field(
+        "primitive", description="Product units: 'asset' / 'parts' = draw the SKU's model (arms.sim.assets)."
+    )
 
 
 class SlotLayout(BaseModel):
@@ -168,6 +187,7 @@ class SlotLayout(BaseModel):
     barcode: str | None = None
     price_cents: int | None = None
     mass_kg: float | None = None
+    render: UnitRender = "primitive"
     positions: list[Vec3] = Field(description="Grid positions (unit centers) that fit, front row first.")
 
     def position(self, rank: int) -> Vec3:
@@ -233,6 +253,11 @@ class RoverSpec(BaseModel):
     max_speed_mps: float = 0.8
     camera_ids: list[str] = Field(default_factory=list)
     prims: list[PrimSpec] = Field(default_factory=list)
+    model_usd: str | None = Field(None, description="Rover USD referenced as a visual puppet (None = primitives).")
+    model_path: str | None = Field(None, description="'<root>/Model/LeKiwi': the prim that references model_usd.")
+    puppet_prims: list[PrimSpec] = Field(
+        default_factory=list, description="With model_usd: the primitives kept next to the USD (mast, basket, ...)."
+    )
 
 
 class WorldSpec(BaseModel):
@@ -306,11 +331,18 @@ def to_world(pose: Pose2D, local: Vec3) -> Point3:
 
 
 def basket_drop_position(pose: Pose2D, index: int, item_dims: Vec3 = (0.08, 0.08, 0.15)) -> Point3:
-    """Center of the ``index``-th item dropped in the basket (2 x 3 grid per layer, then stacked)."""
+    """Center of the ``index``-th item dropped in the basket (2 x 3 grid per layer, then stacked). Basket units are
+    yawed pose.theta + pi/2 (width along the robot's y, depth along its x); a big unit is pulled in so its footprint
+    stays inside the basket walls instead of hanging over them."""
     bx, by, _ = BASKET_SIZE_M
     col, row, layer = index % 2, (index // 2) % 3, index // 6
-    lx = BASKET_OFFSET_M[0] + (col - 0.5) * bx / 2
-    ly = BASKET_OFFSET_M[1] + (row - 1) * by / 3
+    w, d = item_dims[0], item_dims[1]
+    ox, oy = BASKET_OFFSET_M[0], BASKET_OFFSET_M[1]
+    lx = ox + (col - 0.5) * bx / 2
+    ly = oy + (row - 1) * by / 3
+    hx, hy = max(0.0, (bx - d) / 2), max(0.0, (by - w) / 2)
+    lx = min(ox + hx, max(ox - hx, lx))
+    ly = min(oy + hy, max(oy - hy, ly))
     lz = BASKET_OFFSET_M[2] + item_dims[2] / 2 + layer * min(item_dims[2], 0.08)
     return to_world(pose, (lx, ly, lz))
 
@@ -507,29 +539,73 @@ def unit_lots(lots: Sequence[Lot], n: int) -> list[tuple[str | None, float | Non
     return out[:n]
 
 
-def slot_layout(slot: Slot, fx: Fixture, product: Product) -> SlotLayout:
-    """Grid positions for the units of ``slot`` (store-local centers), front row first."""
+def slot_lateral_room(planogram: Planogram, slot: Slot, fx: Fixture) -> float:
+    """Width (m) along the shelf the units of ``slot`` may spread over: the distance to the nearest other slot on the
+    same fixture, level and pick face (``SLOT_ROOM_DEFAULT_M`` without one), capped by the fixture's ends."""
+    pick = pick_face_dir(slot)
+    yaw = item_yaw_for(slot)
+    lat = (math.cos(yaw), math.sin(yaw))
+    p = slot.item_position
+    gaps = [
+        abs((o.item_position.x - p.x) * lat[0] + (o.item_position.y - p.y) * lat[1])
+        for o in planogram.slots
+        if o.slot_id != slot.slot_id
+        and o.fixture_id == slot.fixture_id
+        and o.level == slot.level
+        and abs(_wrap(pick_face_dir(o) - pick)) <= 0.3  # not the other face of a double-sided gondola
+    ]
+    gaps = [g for g in gaps if g > 1e-3]
+    room = min(gaps) if gaps else SLOT_ROOM_DEFAULT_M
+    r = fx.rect
+    ax, _ = _axis(yaw)
+    lo, hi, c = (r.x, r.x_max, p.x) if ax != 0 else (r.y, r.y_max, p.y)
+    to_end = min(c - lo, hi - c)
+    if to_end > 0:
+        room = min(room, 2 * to_end)
+    return max(0.0, room)
+
+
+def slot_layout(
+    slot: Slot,
+    fx: Fixture,
+    product: Product,
+    dims: Vec3 | None = None,
+    render: UnitRender = "primitive",
+    lateral_room_m: float | None = None,
+) -> SlotLayout:
+    """Grid positions for the units of ``slot`` (store-local centers), front row first. ``dims`` overrides the
+    products.yaml unit size (a per-item model's ``target_dims_m``). ``lateral_room_m`` (``slot_lateral_room``): shelf
+    slots then fill WIDE first, like a stocked store: as many front-row facings as fit in that room (at least
+    ``slot.facings``, at most what the slot's capacity / qty needs), each row ordered from the center out, so rank 0
+    stays on the slot's tag (what a default pick takes) and a partly sold-out slot keeps a centered block."""
     asset = product.asset
-    w, d, h = asset.dims_m
+    w, d, h = dims or asset.dims_m
     pick_dir = pick_face_dir(slot)
     yaw = item_yaw_for(slot)
     inward = (-math.cos(pick_dir), -math.sin(pick_dir))  # into the fixture
     lateral = (math.cos(yaw), math.sin(yaw))  # item-local +x in world (left -> right when facing the shelf)
 
     cols = max(slot.facings, 4) if fx.kind == "produce_bin" else slot.facings
+    if lateral_room_m is not None and fx.kind != "produce_bin":
+        fit = int((lateral_room_m * SLOT_ROOM_FILL + ITEM_GAP_M) // (w + ITEM_GAP_M))
+        cols = max(slot.facings, min(fit, max(slot.capacity, slot.qty, 1)))
     rows = max(1, int(_available_depth(fx, pick_dir) // (d + ITEM_GAP_M)))
     room = _vertical_room(fx, slot.level)
     layers = max(1, int(room // h)) if room > 0 else 1
     if fx.kind == "produce_bin":
         layers = max(layers, 2)  # produce is piled
+    # wide fill: one column sits ON the tag (rank 0, the default pick, straight ahead of the arm), the rest alternate
+    # left / right of it; without a room the grid stays centered on the tag
+    center = (cols - 1) // 2 if lateral_room_m is not None else (cols - 1) / 2
+    order = sorted(range(cols), key=lambda c: (abs(c - center), c)) if lateral_room_m is not None else range(cols)
     positions: list[Vec3] = []
     base = slot.item_position
     for layer in range(layers):
         for row in range(rows):
-            for col in range(cols):
+            for col in order:
                 if len(positions) >= MAX_UNITS_PER_SLOT:
                     break
-                lat = (col - (cols - 1) / 2) * (w + ITEM_GAP_M)
+                lat = (col - center) * (w + ITEM_GAP_M)
                 dep = d / 2 + row * (d + ITEM_GAP_M)
                 x = base.x + lateral[0] * lat + inward[0] * dep
                 y = base.y + lateral[1] * lat + inward[1] * dep
@@ -550,6 +626,7 @@ def slot_layout(slot: Slot, fx: Fixture, product: Product) -> SlotLayout:
         barcode=product.barcode,
         price_cents=price,
         mass_kg=asset.mass_kg,
+        render=render,
         positions=positions,
     )
 
@@ -578,7 +655,22 @@ def unit_prim(
         price_cents=layout.price_cents,
         collider=False,
         store_id=store_id,
+        render=layout.render,
     )
+
+
+def layout_for(
+    slot: Slot,
+    fx: Fixture,
+    product: Product,
+    assets: SkuAssets | None = None,
+    lateral_room_m: float | None = None,
+) -> SlotLayout:
+    """``slot_layout`` with the SKU's per-item model (when ``assets`` resolves it): its dims + render mode."""
+    ua = assets.resolve(product.sku) if assets is not None else None
+    if ua is None:
+        return slot_layout(slot, fx, product, lateral_room_m=lateral_room_m)
+    return slot_layout(slot, fx, product, dims=ua.dims, render=ua.render, lateral_room_m=lateral_room_m)
 
 
 def unit_instance(store_id: str, layout: SlotLayout, iid: str, rank: int, lot_id: str | None, fresh: float | None):
@@ -595,12 +687,16 @@ def unit_instance(store_id: str, layout: SlotLayout, iid: str, rank: int, lot_id
 
 
 def build_scene_spec(
-    planogram: Planogram, products: dict[Sku, Product] | Iterable[Product], seed: int = 0
+    planogram: Planogram,
+    products: dict[Sku, Product] | Iterable[Product],
+    seed: int = 0,
+    assets: SkuAssets | None = None,
 ) -> SceneSpec:
     """Planogram + products -> SceneSpec (store-local; fixtures as boxes, one product prim + ItemInstance per unit).
 
     Deterministic for the same inputs (ids and freshness do not depend on ``seed``). Problems that should not kill a
-    demo (unknown sku, more stock than fits) become ``SceneSpec.warnings`` instead of exceptions.
+    demo (unknown sku, more stock than fits) become ``SceneSpec.warnings`` instead of exceptions. ``assets``: per-item
+    models (unit dims + render mode per SKU; None = primitives everywhere).
     """
     by_sku = products if isinstance(products, dict) else {p.sku: p for p in products}
     sid = planogram.store_id
@@ -624,7 +720,7 @@ def build_scene_spec(
         if fx is None:  # unreachable with a validated Planogram, kept for safety
             warnings.append(f"{slot.slot_id}: unknown fixture {slot.fixture_id!r}")
             continue
-        layout = slot_layout(slot, fx, product)
+        layout = layout_for(slot, fx, product, assets, slot_lateral_room(planogram, slot, fx))
         layouts[slot.slot_id] = layout
         stocked[product.sku] = product
         n = min(slot.qty, MAX_UNITS_PER_SLOT)
@@ -663,8 +759,9 @@ def build_scene_spec(
 # --------------------------------------------------------------------------------------------------------------------
 # Rovers + cameras
 # --------------------------------------------------------------------------------------------------------------------
-def build_rover_spec(robot: RobotSpec) -> RoverSpec:
-    """Primitive model of the rover + lift + SO-101 + basket (robot-local; see the module docstring)."""
+def build_rover_spec(robot: RobotSpec, model_usd: str | None = None) -> RoverSpec:
+    """Primitive model of the rover + lift + SO-101 + basket (robot-local; see the module docstring). ``model_usd``
+    (``picky_rover.usda``) adds the visual-puppet plan: reference path + the primitives kept next to it."""
     root = rover_root(robot.store_id, robot.robot_id)
     color = robot.color or ROVER_DEFAULT_COLOR
     sid = robot.store_id
@@ -757,6 +854,7 @@ def build_rover_spec(robot: RobotSpec) -> RoverSpec:
     prims.append(prim("so101_jaw_fixed", "arm", (x - 0.02, 0.018, z), (0.05, 0.008, 0.04), "#f59e0b"))
     prims.append(prim("so101_jaw_moving", "arm", (x - 0.02, -0.018, z), (0.05, 0.008, 0.04), "#f59e0b"))
     prims.append(prim("so101_wrist_cam", "arm", (x - 0.05, 0.0, z + 0.035), (0.03, 0.03, 0.02), "#111111"))
+    puppet_prims = _puppet_prims(prims, prim, color) if model_usd else []
     return RoverSpec(
         robot_id=robot.robot_id,
         store_id=sid,
@@ -769,7 +867,72 @@ def build_rover_spec(robot: RobotSpec) -> RoverSpec:
         max_speed_mps=robot.max_speed_mps,
         camera_ids=[robot_camera_id(robot.robot_id, k) for k in robot.cameras],
         prims=prims,
+        model_usd=model_usd,
+        model_path=f"{root}/{puppet.MODEL_PRIM_NAME}/{puppet.MODEL_REF_NAME}" if model_usd else None,
+        puppet_prims=puppet_prims,
     )
+
+
+def _puppet_prims(prims: list[PrimSpec], prim: Any, color: str) -> list[PrimSpec]:
+    """Primitives that stay next to the rover USD: the lift column (moved behind the SO-101 to the base center, so the
+    folded arm clears it), camera head + neck, basket on its post (both standing on LeKiwi's deck) and a carriage
+    bracket from the column to the SO-101 shoulder (lift group, authored at zero lift travel)."""
+    by_name = {p.path.rsplit("/", 1)[-1]: p for p in prims}
+    fm = DEFAULT_ROBOT_CAMERA_MOUNTS["front"]
+    mast_old = by_name["mast"]
+    mast_top = mast_old.center[2] + mast_old.size[2] / 2
+    mx = puppet.MAST_X_M
+    out = [
+        prim(
+            "mast",
+            "base",
+            (mx, 0.0, (puppet.DECK_Z_M + mast_top) / 2),
+            (0.05, 0.07, mast_top - puppet.DECK_Z_M),
+            "#d0d4da",
+        ),
+        by_name["front_cam_head"],
+    ]
+    neck_x0, neck_x1, head_bottom = mx - 0.02, fm.x - 0.005, fm.z - 0.03
+    out.append(
+        prim(
+            "front_cam_neck",
+            "base",
+            ((neck_x0 + neck_x1) / 2, fm.y, (mast_top + head_bottom) / 2),
+            (neck_x1 - neck_x0, 0.02, max(0.01, head_bottom - mast_top)),
+            "#d0d4da",
+        )
+    )
+    ox, oy, oz = BASKET_OFFSET_M
+    post_x = ox + 0.05  # under the basket's front half, on LeKiwi's deck
+    out.append(
+        prim(
+            "basket_post",
+            "base",
+            (post_x, oy, (puppet.DECK_Z_M + oz) / 2),
+            (0.04, 0.04, oz - puppet.DECK_Z_M),
+            "#9aa0a6",
+        )
+    )
+    out += [by_name[n] for n in ("basket_floor", "basket_front", "basket_back", "basket_left", "basket_right")]
+    out.append(by_name["basket_cam"])
+    # bracket from the lift column to the basket camera (it floated in mid-air above the basket)
+    bc = by_name["basket_cam"]
+    bx0, bx1 = bc.center[0], mx
+    out.append(
+        prim(
+            "basket_cam_arm",
+            "base",
+            ((bx0 + bx1) / 2, 0.0, bc.center[2] + bc.size[2] / 2 + 0.01),
+            (abs(bx1 - bx0), 0.02, 0.02),
+            "#d0d4da",
+        )
+    )
+    shoulder_x = ARM_MOUNT_X_M + puppet.ARM_PAN_FORWARD_M
+    x0, x1 = mx + 0.025, shoulder_x + 0.02
+    out.append(
+        prim("carriage", "lift", ((x0 + x1) / 2, 0.0, puppet.SHOULDER_BASE_Z_M - 0.02), (x1 - x0, 0.08, 0.04), color)
+    )
+    return out
 
 
 def default_robots(planogram: Planogram) -> list[RobotSpec]:
@@ -841,13 +1004,15 @@ def build_world_spec(
     robots: Iterable[RobotSpec] | None = None,
     store_cameras: Iterable[StoreCameraSpec] | None = None,
     seed: int = 0,
+    assets: SkuAssets | None = None,
+    rover_usd: str | None = None,
 ) -> WorldSpec:
     """Every store side by side + every rover at its dock + every camera. Robots / cameras default per store
     (``default_robots`` / ``default_store_cameras``) when none are given for that store."""
     by_sku = products if isinstance(products, dict) else {p.sku: p for p in products}
     robots = list(robots or [])
     cams = list(store_cameras or [])
-    stores = {p.store_id: build_scene_spec(p, by_sku, seed) for p in planograms}
+    stores = {p.store_id: build_scene_spec(p, by_sku, seed, assets=assets) for p in planograms}
     order = [p.store_id for p in planograms]
     offsets = store_offsets(order, {p.store_id: (p.bounds.w, p.bounds.h) for p in planograms})
     all_robots: list[RobotSpec] = []
@@ -859,7 +1024,7 @@ def build_world_spec(
     return WorldSpec(
         stores=stores,
         offsets=offsets,
-        rovers={r.robot_id: build_rover_spec(r) for r in all_robots},
+        rovers={r.robot_id: build_rover_spec(r, model_usd=rover_usd) for r in all_robots},
         cameras=camera_infos(all_robots, all_cams),
     )
 
@@ -871,7 +1036,13 @@ def load_scene_spec(store_id: str, seed: int = 0, data_root: str | None = None) 
     return build_scene_spec(load_planogram(store_id, data_root), load_products(data_root), seed=seed)
 
 
-def load_world_spec(store_ids: Sequence[str] | None = None, seed: int = 0, data_root: str | None = None) -> WorldSpec:
+def load_world_spec(
+    store_ids: Sequence[str] | None = None,
+    seed: int = 0,
+    data_root: str | None = None,
+    assets: SkuAssets | None = None,
+    rover_usd: str | None = None,
+) -> WorldSpec:
     """Build every store (default: all planograms in data/) + robots.yaml robots/cameras (defaults if missing)."""
     from utils.data import DataError, list_store_ids, load_planogram, load_products, load_robots_file
 
@@ -882,12 +1053,16 @@ def load_world_spec(store_ids: Sequence[str] | None = None, seed: int = 0, data_
         robots, cams = rf.robots, rf.store_cameras
     except (DataError, FileNotFoundError):
         robots, cams = [], []
-    return build_world_spec(plans, load_products(data_root), robots, cams, seed)
+    return build_world_spec(plans, load_products(data_root), robots, cams, seed, assets=assets, rover_usd=rover_usd)
 
 
 def main(argv: list[str] | None = None) -> int:
+    from arms.sim.assets import rover_usd_from_env
+
     args = sys.argv[1:] if argv is None else argv
-    world = load_world_spec(args or None)
+    assets = SkuAssets.from_env()
+    world = load_world_spec(args or None, assets=assets, rover_usd=rover_usd_from_env())
+    print(assets.describe)
     for sid, spec in world.stores.items():
         roles: dict[str, int] = {}
         for p in spec.prims:
@@ -899,10 +1074,15 @@ def main(argv: list[str] | None = None) -> int:
             + ", ".join(f"{k}={v}" for k, v in sorted(roles.items()))
         )
         print(f"  instances: {len(spec.instances)} across {len({i.slot_id for i in spec.instances})} slots")
+        modeled = sum(1 for p in spec.product_prims() if p.render != "primitive")
+        print(f"  units on per-item models: {modeled} / {len(spec.product_prims())}")
         for w in spec.warnings:
             print(f"  warning: {w}")
     for r in world.rovers.values():
-        print(f"rover {r.robot_id} ({r.name}) in {r.store_id} dock=({r.dock.x}, {r.dock.y}) prims={len(r.prims)}")
+        model = f" model={r.model_usd}" if r.model_usd else ""
+        print(
+            f"rover {r.robot_id} ({r.name}) in {r.store_id} dock=({r.dock.x}, {r.dock.y}) prims={len(r.prims)}{model}"
+        )
     print("cameras: " + ", ".join(c.camera_id for c in world.cameras))
     return 0
 

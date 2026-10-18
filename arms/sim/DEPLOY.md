@@ -62,6 +62,12 @@ export PICKY_SIM_STORES=store_ave,store_hill  # optional; default = every planog
 export PICKY_SIM_WORKER_ID=isaac-vhagar
 export PICKY_SIM_LABEL_DIR=/data/$USER/picky/labels
 # export PICKY_SO101_URDF=/data/$USER/SO-ARM100/Simulation/SO101/so101_new_calib.urdf   # optional, experimental
+# Optional visuals: build them first (arms/sim/ASSETS.md). Unset = primitive boxes / rovers as before; a path that
+# does not exist yet only logs a warning and draws the primitives
+export PICKY_ASSET_ROOT=/data/$USER/picky-assets/products                          # per-item grocery models
+export PICKY_ROVER_USD=/data/$USER/picky-assets/robots/picky-rover/picky_rover.usda  # LeKiwi + SO-101 + lift
+# export PICKY_SIM_ASSETS=off        # rollback switch: primitives for every SKU even with PICKY_ASSET_ROOT set
+# export PICKY_SKU_ASSETS=...         # another SKU map (default $PICKY_DATA_DIR/sim/sku_assets.yaml)
 EOF
 ```
 Always start the worker **from the repo root with `-m`** (`cd /data/$USER/picky/repo && $PY -m arms.sim.app`): Isaac's
@@ -106,7 +112,32 @@ $PY -m arms.sim.app 2>&1 | tee /data/$USER/picky/logs/sim.log
 - GPU: ~3.6-4.6 GB for the worker with every camera used.
 - Fallback: `$PY -m arms.sim.app --backend sketch` renders with Pillow (no Isaac). Use it if Isaac won't start.
 
-## 6. Verify
+## 6. Per-item models + rover USD (optional)
+
+The assets live outside the repo, on vhagar: `/data/$USER/picky-assets/products` (~3 GB) and
+`/data/$USER/picky-assets/robots/picky-rover/{picky_rover.usda,lekiwi.usd}`. `arms/sim/ASSETS.md` gives the exact
+commands to rebuild them, plus the licenses and the credit line. With the two env lines above the worker logs these
+lines:
+
+```
+per-item models from /data/.../products (125 SKUs mapped in .../data/sim/sku_assets.yaml); rover: .../picky_rover.usda
+store store_ave: 1218 units on per-item models, 10 shelf tags     # SimLog: "117 SKUs on per-item models, ..."
+rover USD ...: SO-101 puppet ready in 6.1s (reach table max error ... mm; z_ref 0.319 m)
+```
+
+Measured on vhagar on 2026-10-17 with the live worker (RTX 5090, both stores, 3 rovers, models + rover USD on;
+taco request + staff shelf scan through the gateway on :8100):
+
+- Launch to `sim link up`: ~46 s warm (store_ave ~20 s, the reach table 5.3 s once for all rovers, store_hill ~8 s).
+  The first launch after a deploy took ~99 s: its first frames load every model texture (~56 s for store_ave).
+- A new render product is ready in 0.55-0.7 s. The worker's `isaac render` average is ~80 ms per frame (12 render
+  products, 4-6 active), and gateway snapshots took a median of 0.24 s (p90 0.65 s) while ~4 cameras were polled.
+- GPU memory: ~3.8 GB after the build, ~5.9 GB with all 12 cameras used.
+- `PICKY_SIM_AMBIENT` (default 0.1) sets the RTX ambient fill for the shelf interiors; 0.6 already washes the store out.
+- A unit, SKU or rover whose files are missing falls back to the primitive with a warning; nothing else changes.
+- Rollback: `PICKY_SIM_ASSETS=off` and / or `unset PICKY_ROVER_USD`, then restart the worker.
+
+## 7. Verify
 
 ```bash
 curl -s localhost:8100/api/sim/status | python3 -m json.tool | head -30     # isaac_store_ids / isaac_robot_ids

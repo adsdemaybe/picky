@@ -22,6 +22,9 @@ Wire semantics implemented here (contracts/sim.py is the spec):
   (looks down into the basket), '<store>.ceiling-<n>'. Scan frames list EVERY non-basket unit of the slot (bbox None
   when off-image); captures list the visible units; stream frames carry no instances. Frames are RAW
   (``blurred=False``): perception blurs faces in the gateway.
+- Optional visuals (app.py wires them on the GPU host): ``assets`` (``arms.sim.assets.SkuAssets``, per-item grocery
+  models: unit dims + render mode per SKU, also on restock) and ``rover_usd`` (LeKiwi + SO-101 visual puppet). Neither
+  changes ids, counts or any wire message.
 """
 
 import base64
@@ -32,9 +35,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from arms.sim.assets import SkuAssets
 from arms.sim.geometry import (
     ARM_FULL_EXT_M,
     ARM_STOW_EXT_M,
+    HELD_CLEARANCE_M,
     LIFT_REST_M,
     CameraPose,
     clamp_lift,
@@ -58,6 +63,8 @@ from arms.sim.scene_spec import (
     default_store_cameras,
     instance_id_for,
     instance_index,
+    layout_for,
+    slot_lateral_room,
     store_offsets,
     unit_instance,
     unit_lots,
@@ -67,6 +74,7 @@ from contracts import CONTRACTS_VERSION
 from contracts.cameras import ROBOT_CAMERA_KINDS, CameraInfo, parse_camera_id, robot_camera_id, store_camera_id
 from contracts.catalog import Product
 from contracts.common import (
+    ARM_MOUNT_X_M,
     BATTERY_CHARGE_PCT_PER_MIN,
     BATTERY_DRAIN_PCT_PER_M,
     BATTERY_IDLE_DRAIN_PCT_PER_MIN,
@@ -156,6 +164,8 @@ class SimBackend(Protocol):
 
     def set_robot_pose(self, robot_id: str, pose: Pose2D, lift_height_m: float, arm_ext_m: float) -> None: ...
 
+    # optional: ``set_robot_gripper(robot_id, closed)`` (visual jaws; called before each set_robot_pose)
+
     def add_instance(self, prim: PrimSpec) -> None: ...
 
     def remove_instance(self, store_id: str, instance_id: str) -> None: ...
@@ -198,6 +208,7 @@ class NullBackend:
         self.positions: dict[tuple[str, str], Point3] = {}
         self.yaws: dict[tuple[str, str], float] = {}
         self.renders: list[tuple[str, str]] = []
+        self.grippers: dict[str, bool] = {}
 
     def build_store(self, spec: SceneSpec, offset: Vec3) -> None:
         sid = spec.store_id
@@ -223,6 +234,9 @@ class NullBackend:
 
     def set_robot_pose(self, robot_id: str, pose: Pose2D, lift_height_m: float, arm_ext_m: float) -> None:
         self.robot_poses[robot_id] = (pose, lift_height_m, arm_ext_m)
+
+    def set_robot_gripper(self, robot_id: str, closed: bool) -> None:
+        self.grippers[robot_id] = closed
 
     def add_instance(self, prim: PrimSpec) -> None:
         key = (prim.store_id or "", prim.instance_id or "")
@@ -278,9 +292,9 @@ class StoreScene:
 class Rover:
     """Live state of one hosted robot."""
 
-    def __init__(self, robot: RobotSpec) -> None:
+    def __init__(self, robot: RobotSpec, model_usd: str | None = None) -> None:
         self.robot = robot
-        self.spec: RoverSpec = build_rover_spec(robot)
+        self.spec: RoverSpec = build_rover_spec(robot, model_usd=model_usd)
         self.pose: Pose2D = robot.dock
         self.lift: float = LIFT_REST_M
         self.arm_ext: float = ARM_STOW_EXT_M
@@ -441,6 +455,13 @@ class _Pick(_Action):
         )
         self.lift_target = clamp_lift(self.target.position.z)
         self.t_lift = abs(self.lift_target - rover.lift) / LIFT_SPEED_MPS
+        # reach only as far as the unit: the TCP stops HELD_CLEARANCE_M short of its near face, so the held position
+        # at the attach equals where the unit stood (no jump) and the wrist camera never drives into it (at a fixed
+        # ARM_FULL_EXT_M it ended up inside the front unit)
+        pose, tp = rover.pose, self.target.position
+        along = (tp.x - pose.x) * math.cos(pose.theta) + (tp.y - pose.y) * math.sin(pose.theta)
+        depth = scene.item_dims(self.target.instance_id)[1]
+        self.reach_ext = max(ARM_STOW_EXT_M, min(ARM_FULL_EXT_M, along - depth / 2 - HELD_CLEARANCE_M - ARM_MOUNT_X_M))
         self.attached = False
 
     def step(self, dt: float) -> CommandResult | None:
@@ -453,9 +474,9 @@ class _Pick(_Action):
         if t <= self.t_lift:
             r.arm_ext = ARM_STOW_EXT_M
         elif t <= t1:
-            r.arm_ext = ARM_STOW_EXT_M + (ARM_FULL_EXT_M - ARM_STOW_EXT_M) * (t - self.t_lift) / GRASP_REACH_S
+            r.arm_ext = ARM_STOW_EXT_M + (self.reach_ext - ARM_STOW_EXT_M) * (t - self.t_lift) / GRASP_REACH_S
         elif t <= t2:
-            r.arm_ext = ARM_FULL_EXT_M
+            r.arm_ext = self.reach_ext
         else:
             if not self.attached:
                 scene = self.core.scene_of(r)
@@ -464,7 +485,7 @@ class _Pick(_Action):
                 r.holding = self.target.instance_id
                 self.attached = True
             r.arm_ext = max(
-                ARM_STOW_EXT_M, ARM_FULL_EXT_M - (ARM_FULL_EXT_M - ARM_STOW_EXT_M) * (t - t2) / GRASP_RETRACT_S
+                ARM_STOW_EXT_M, self.reach_ext - (self.reach_ext - ARM_STOW_EXT_M) * (t - t2) / GRASP_RETRACT_S
             )
         self.core.sync_carried(r)
         if t < t3:
@@ -573,10 +594,16 @@ class WorkerCore:
         loader: SceneLoader = default_scene_loader,
         robots_loader: RobotsLoader = default_robots_loader,
         default_store: str | None = None,
+        assets: SkuAssets | None = None,
+        rover_usd: str | None = None,
     ) -> None:
         self.backend, self.emit, self.clock = backend, emit, clock
         self.loader, self.robots_loader = loader, robots_loader
         self.default_store = default_store
+        self.assets = assets
+        """Per-item grocery models (None / inactive = primitives; see arms.sim.assets)."""
+        self.rover_usd = rover_usd
+        """Rover USD for the visual puppet (None = primitive rovers)."""
         self.stores: dict[str, StoreScene] = {}
         self.store_order: list[str] = []
         self.offsets: dict[str, Vec3] = {}
@@ -626,9 +653,19 @@ class WorkerCore:
             cameras = (old.cameras if old else None) or [c for c in file_cams if c.store_id == sid]
         cameras = [c for c in cameras if c.store_id == sid] or default_store_cameras(planogram)
 
-        spec = build_scene_spec(planogram, products, seed=seed or 0)
+        spec = build_scene_spec(planogram, products, seed=seed or 0, assets=self.assets)
         for w in spec.warnings:
             self.emit(SimLog(level="warning", message=f"{sid} scene: {w}"))
+        if self.assets is not None and self.assets.active:
+            info = self.assets.summary(sorted(spec.products))
+            why = "; ".join(f"{k}: {', '.join(v)}" for k, v in sorted(info["why"].items()))
+            self.emit(
+                SimLog(
+                    level="info",
+                    message=f"{sid} scene: {info['models']} SKUs on per-item models, {info['primitive']} primitive"
+                    + (f" ({why})" if why else ""),
+                )
+            )
         # cancel + remove this store's robots (and any robot id that moves here from another store)
         new_ids = {r.robot_id for r in robots}
         for rover in [r for r in self.rovers.values() if r.store_id == sid or r.robot_id in new_ids]:
@@ -676,7 +713,7 @@ class WorkerCore:
         self.offsets = new
 
     def _spawn(self, robot: RobotSpec) -> Rover:
-        rover = Rover(robot)
+        rover = Rover(robot, model_usd=self.rover_usd)
         self.rovers[robot.robot_id] = rover
         self.backend.spawn_robot(rover.spec)
         self.set_pose(rover, robot.dock)
@@ -796,11 +833,17 @@ class WorkerCore:
         scene = self.stores.get(rover.store_id)
         if scene is None:
             return
+        gripper = getattr(self.backend, "set_robot_gripper", None)
+        if gripper is not None:  # jaws open while reaching for a unit, closed when holding or stowed
+            gripper(rover.robot_id, rover.holding is not None or rover.arm_ext <= ARM_STOW_EXT_M + 1e-6)
         self.backend.set_robot_pose(rover.robot_id, rover.pose, rover.lift, rover.arm_ext)
         yaw = rover.pose.theta + math.pi / 2
         if rover.holding is not None and rover.holding in scene.instances:
             dims = scene.item_dims(rover.holding)
-            self.move_instance(scene, rover.holding, held_position(rover.pose, rover.lift, rover.arm_ext, dims), yaw)
+            # held: label (item -y) toward the robot, as it faced the robot on the shelf, so the wrist camera reads it
+            # (yaw + pi flipped it at the grasp and the wrist camera only saw the unit's blank back)
+            pos = held_position(rover.pose, rover.lift, rover.arm_ext, dims)
+            self.move_instance(scene, rover.holding, pos, rover.pose.theta - math.pi / 2)
         for k, iid in enumerate(rover.basket):
             if iid in scene.instances:
                 self.move_instance(scene, iid, basket_drop_position(rover.pose, k, scene.item_dims(iid)), yaw)
@@ -1123,13 +1166,14 @@ class WorkerCore:
         layout = scene.spec.slot_layouts.get(cmd.slot_id)
         product = scene.products.get(cmd.sku) or scene.products.get(slot.sku)
         if layout is None and product is not None:
-            from arms.sim.scene_spec import slot_layout
-
             fx = scene.planogram.fixture(slot.fixture_id)
             if fx is None:
                 raise _Fail("unknown_slot", f"slot {cmd.slot_id} has no fixture")
-            layout = slot_layout(slot, fx, product)
+            # same dims / model / width as the build (restocks match)
+            layout = layout_for(slot, fx, product, self.assets, slot_lateral_room(scene.planogram, slot, fx))
             scene.spec.slot_layouts[cmd.slot_id] = layout
+            if product.sku not in scene.spec.products:
+                scene.spec.products[product.sku] = product
         if layout is None:
             raise _Fail("internal", f"unknown sku {cmd.sku!r} for slot {cmd.slot_id}")
         held = self.held_ids(scene.store_id)
