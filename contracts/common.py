@@ -79,6 +79,19 @@ ReceiptId = str
 OrderId = str
 FeedbackId = str
 EventId = str
+RobotId = str
+"""Fleet robot id, e.g. 'rover-ave-1' (data/fixtures/robots.yaml)."""
+GoalId = str
+RequestId = str
+CameraId = str
+"""'<robot_id>.front|wrist|basket' for robot cameras, '<store_id>.ceiling-<n>' for store ceiling cameras."""
+CategoryId = str
+"""Category taxonomy id (data/categories.yaml), lowercase snake_case: 'produce', 'dairy', 'personal_care'."""
+AssignmentId = str
+StepId = str
+MovementId = str
+AlertId = str
+ObservationId = str
 
 EMBED_DIM = 384
 """Embedding size for product/profile vectors (BAAI/bge-small-en-v1.5). Mirrored by vector(384) in db/schema.sql."""
@@ -88,15 +101,69 @@ ONLINE_STORE_ID: StoreId = "online"
 
 DEFAULT_STORE_ID: StoreId = "store_ave"
 
-ROBOT_RADIUS_M = 0.6
-"""THE robot footprint radius (meters), agreed by routing, robot, sim and data.
+DEFAULT_ROBOT_ID: str = "rover-ave-1"
+"""Robot an in-process single-robot caller may default to (e.g. a CLI / demo that names no robot). NEVER a wire
+default: sim commands that need a robot must carry ``robot_id`` (contracts/sim.py)."""
 
-~ circumradius of the Ridgeback-Franka base (0.96 x 0.79 m -> 0.62 m) with the arm stowed. Routing inflates obstacles
-by exactly this (``GridSpec.robot_radius_m`` default, no extra margin); the robot fake / sim use it for collisions.
-Data rules (checked by ``python -m utils.data``): every approach pose, the entrance and the checkout pose are at least
+STAFF_USER_ID: str = "staff"
+"""Fallback recipient of robot questions on goals that have no user (manual staff goals): the web staff view lists
+approvals for ``user_id='staff'`` (filter ``/api/approvals?user_id=staff&store_id=...``)."""
+
+# --------------------------------------------------------------------------------------------------------------------
+# THE robot model: a small rover carrying a vertical lift with an SO-101 arm (one model for sim, fake, routing, data)
+# --------------------------------------------------------------------------------------------------------------------
+ROBOT_KIND = "rover_so101"
+"""The only robot kind (RobotSpec.kind). Physical robot + VLA fine-tuning come later; sim + 2D fake now."""
+
+ROBOT_RADIUS_M = 0.3
+"""THE robot footprint radius (meters), agreed by routing, robot, sim, fleet and data.
+
+~ circumradius of the rover base (~0.46 x 0.36 m) with the SO-101 stowed over it. Routing inflates obstacles by
+exactly this (``GridSpec.robot_radius_m`` default, no extra margin); the robot fake / sim use it for collisions.
+Data rules (checked by ``python -m utils.data``): every approach pose, dock, entrance and checkout pose is at least
 this far from every fixture rect, obstacle and the store outline, so aisles must be >= 2 x ROBOT_RADIUS_M + 0.1 m
-(1.3 m) wide; design them 1.5 m.
+(0.7 m) wide; design them >= 1.2 m so two rovers can pass.
 """
+
+ARM_MOUNT_X_M = 0.12
+"""The lift mast (and the SO-101 shoulder on it) sits this far forward of the base center (base frame, +x forward)."""
+
+ARM_REACH_M = 0.35
+"""SO-101 effective horizontal reach from its shoulder (meters). Max horizontal pick distance from the base center
+is ``ARM_MOUNT_X_M + ARM_REACH_M`` (0.47 m)."""
+
+LIFT_MIN_M = 0.2
+LIFT_MAX_M = 1.2
+"""Vertical lift travel: SO-101 shoulder height above the floor (meters)."""
+
+REACH_Z_MIN_M = 0.1
+REACH_Z_MAX_M = 1.5
+"""Item heights (``Slot.item_position.z``) the arm can pick from: lift range +- ~0.1/0.3 m of arm travel."""
+
+APPROACH_DIST_MIN_M = 0.35
+APPROACH_DIST_MAX_M = 0.40
+"""Design range for the horizontal distance approach pose (base center) -> slot ``item_position`` (= shelf face).
+>= ROBOT_RADIUS_M keeps the bumper off the shelf; <= ARM_MOUNT_X_M + ARM_REACH_M is the hard reach limit."""
+
+REACH_NAV_TOLERANCE_M = 0.10
+"""The robot counts as "at" an approach pose for picking when its base center is within this distance of it
+(``slot_reachable``); NavigateCmd's default tolerance (0.05 m) is tighter."""
+
+ROBOT_MAX_SPEED_MPS = 0.8
+"""Nominal rover cruise speed (fake + sim); routing ETAs may use a lower average (RouteRequest.robot_speed_mps)."""
+
+# ---- battery model (THE robot arm owns ``RobotState.battery_pct``: it integrates these from pose deltas and carries
+# the value across backends (Isaac <-> 2D fake); a worker-reported battery is advisory only)
+BATTERY_DRAIN_PCT_PER_M = 0.2
+"""Battery used per meter driven (percentage points)."""
+BATTERY_IDLE_DRAIN_PCT_PER_MIN = 0.05
+"""Battery used per minute while not driving and not charging."""
+BATTERY_CHARGE_PCT_PER_MIN = 5.0
+"""Battery gained per minute while charging (status CHARGING)."""
+BATTERY_MOTION_MIN_PCT = 5.0
+"""Below this a robot refuses motion commands with ``RobotError('battery_low')`` (except driving to its dock)."""
+DOCK_TOLERANCE_M = 0.15
+"""A robot is "on its dock" within this distance of ``RobotSpec.dock``; idle on the dock = status CHARGING."""
 
 # --------------------------------------------------------------------------------------------------------------------
 # Scalars
@@ -114,7 +181,18 @@ JsonScalar = str | int | float | bool | None
 Channel = Literal["web", "voice", "photon"]
 """User-facing channel a message or approval travels on."""
 
-CameraName = Literal["head", "wrist", "basket", "overview"]
+CameraName = Literal["front", "wrist", "basket", "ceiling", "head", "overview"]
+"""Camera on a robot ('front' mast camera, SO-101 'wrist' camera, 'basket' camera) or a store 'ceiling' camera.
+'head' / 'overview' are v0.1 aliases of 'front' / 'ceiling' (still accepted; normalize with ``normalize_camera``)."""
+
+_CAMERA_ALIASES = {"head": "front", "overview": "ceiling"}
+
+
+def normalize_camera(name: str) -> str:
+    """'head' -> 'front', 'overview' -> 'ceiling'; anything else unchanged."""
+    return _CAMERA_ALIASES.get(name, name)
+
+
 Currency = Literal["USD"]
 
 
@@ -178,6 +256,29 @@ class Pose2D(Model):
 
     def as_point(self) -> Point2:
         return Point2(x=self.x, y=self.y)
+
+
+def slot_reachable(
+    robot_pose: Pose2D,
+    approach_pose: Pose2D,
+    item_position: Point3,
+    *,
+    nav_tolerance_m: float = REACH_NAV_TOLERANCE_M,
+) -> bool:
+    """THE reach predicate (validator, robot fake and sim worker all use it; sim magic grasp in particular).
+
+    True when the robot base is within ``nav_tolerance_m`` of the slot's approach pose, the slot's ``item_position``
+    (front-center of the pick face) is within ``ARM_MOUNT_X_M + ARM_REACH_M`` horizontally of that approach pose,
+    and ``REACH_Z_MIN_M <= item_position.z <= REACH_Z_MAX_M``. It checks the SLOT, never an individual unit's position:
+    any instance of a reachable slot (incl. back-row units a shopper picked from the freshness top-3) can be grasped.
+    REACH_Z_* is the sim magic-grasp envelope; the real SO-101 will need a tighter one later.
+    """
+    if robot_pose.distance_to(approach_pose) > nav_tolerance_m + 1e-9:
+        return False
+    reach = math.hypot(item_position.x - approach_pose.x, item_position.y - approach_pose.y)
+    if reach > ARM_MOUNT_X_M + ARM_REACH_M + 1e-9:
+        return False
+    return REACH_Z_MIN_M - 1e-9 <= item_position.z <= REACH_Z_MAX_M + 1e-9
 
 
 class Rect2D(Model):

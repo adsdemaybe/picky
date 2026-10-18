@@ -12,12 +12,15 @@ from pydantic import Field
 
 from contracts.common import (
     BBox,
+    CameraId,
     Cents,
     FrameId,
+    GoalId,
     InstanceId,
     LotId,
     Model,
     Pose2D,
+    RobotId,
     ScanId,
     Score01,
     Sku,
@@ -63,9 +66,16 @@ class ScanReport(Model):
     lot_freshness: dict[LotId, Score01] = Field(
         default_factory=dict, description="Mean freshness per Lot (what catalog stores)."
     )
+    lot_counts: dict[LotId, int] = Field(
+        default_factory=dict,
+        description="Units per Lot (from the instances' lot_id) when count_is_exact; catalog sets lot qty from it.",
+    )
     shelf_tag_cents: Cents | None = Field(None, description="Price read off the shelf tag (mispricing check).")
     pose: Pose2D | None = Field(None, description="Robot pose at capture (frame.pose); locates slot-less scans.")
     frame_id: FrameId | None = None
+    camera_id: CameraId | None = Field(None, description="Camera the frame came from ('rover-ave-1.front').")
+    robot_id: RobotId | None = Field(None, description="Robot that scanned (stock movement actor 'robot:<id>').")
+    goal_id: GoalId | None = None
     trip_id: TripId | None = None
     latency_ms: float = 0.0
     notes: str = ""

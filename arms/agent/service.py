@@ -27,8 +27,9 @@ from arms.agent import logic
 from arms.agent.fake import FakeAgent
 from contracts.api import AddLineResult
 from contracts.catalog import SearchQuery
-from contracts.common import ONLINE_STORE_ID, Channel, StoreId, money
+from contracts.common import ONLINE_STORE_ID, Channel, StoreId, UserId, money
 from contracts.events import make_event
+from contracts.fleet import GoalPriority, RequestDraft, RequesterRole, RequestIntent
 from contracts.messaging import InboundMessage, OutboundMessage, ReplyInterpretation
 from contracts.profile import UserProfile
 from contracts.services import Services
@@ -75,6 +76,15 @@ count of selling units (packs, cans, bunches, each), sized for the number of ser
 guests are vegetarian (dietary=['vegetarian'] on that item). Respect the shopper's allergies and dislikes. \
 budget_cents is the stated budget in integer cents (null if none)."""
 
+REQUEST_SYSTEM = """You read one message typed into the Picky web app (a fleet of shopping robots in grocery \
+stores) and say what it asks for. intent: 'shop' (the user wants groceries bought: list items as generic product \
+queries with integer qty sized for the servings, vegetarian options get dietary=['vegetarian']), 'fetch' (staff: bring \
+ONE item somewhere), 'shelf_scan' (staff: scan shelves / check stock; categories = category ids such as produce, \
+dairy, meat, bakery, pantry, international, snacks, beverages, frozen, household, personal_care), 'return_to_dock' \
+(a robot should go charge), 'status' (a question about progress, an order or where a product is), or 'chat'. \
+robot_name / store_name only when the text names one. Ask a clarifying_question only when you cannot act at all. \
+reply = one short friendly sentence for the user."""
+
 REPLY_SYSTEM = """Classify a shopper's text reply. kind: 'approval' (answers one of the pending questions; set \
 approval_id from the list, decision approve/reject, choice/choices = option ids), 'feedback' (rating 1-5 about a \
 purchased product; sku from the follow-up skus), 'intent' (a new shopping request; intent_text), or 'chat'."""
@@ -96,6 +106,22 @@ class IntentDraft(BaseModel):
     budget_cents: int | None = Field(None, ge=0)
     dietary_notes: list[str] = Field(default_factory=list)
     items: list[DraftItemOut] = Field(default_factory=list)
+
+
+class RequestDraftOut(BaseModel):
+    intent: RequestIntent
+    summary: str
+    title: str | None = None
+    servings: int | None = Field(None, ge=1, le=100)
+    items: list[DraftItemOut] = Field(default_factory=list)
+    robot_name: str | None = None
+    store_name: str | None = None
+    categories: list[str] = Field(default_factory=list)
+    aisle_numbers: list[int] = Field(default_factory=list)
+    urgent: bool = False
+    reply: str = ""
+    clarifying_question: str | None = None
+    confidence: float = Field(0.8, ge=0, le=1)
 
 
 # --- tool executor -----------------------------------------------------------------------------------------------
@@ -319,6 +345,123 @@ class ClaudeAgent:
         from utils import llm
 
         return self._client is not None or llm.is_configured()
+
+    async def interpret_request(
+        self,
+        text: str,
+        user_id: UserId,
+        store_id: StoreId | None = None,
+        *,
+        role: RequesterRole = "shopper",
+        profile: UserProfile | None = None,
+        history: list[str] | None = None,
+    ) -> RequestDraft:
+        """Claude structured output -> RequestDraft; code resolves names, money and the list (rules on failure)."""
+        from arms.agent import interpret
+
+        if not self._llm_ready():
+            return await self._fallback.interpret_request(
+                text, user_id, store_id, role=role, profile=profile, history=history
+            )
+        from utils.llm import complete_json
+
+        hints = interpret.load_hints()
+        turns = "".join(f"\n{'User' if n % 2 == 0 else 'You asked'}: {h}" for n, h in enumerate(history or []))
+        ctx = (
+            f"Requester role: {role}. Selected store: {store_id or 'none'}.\n"
+            f"Robots: {', '.join(f'{name} ({rid}, {sid})' for rid, (name, sid) in hints.robots.items())}.\n"
+            f"Stores: {', '.join(f'{n} ({sid})' for sid, n in hints.store_names.items()) or 'store_ave, store_hill'}."
+            + (f"\nEarlier turns:{turns}" if turns else "")
+            + f"\nMessage: {text!r}"
+        )
+        if profile is not None:
+            ctx += f"\nShopper: dietary={profile.dietary} allergies={profile.allergies} dislikes={profile.dislikes}"
+        try:
+            out = await complete_json(ctx, RequestDraftOut, system=REQUEST_SYSTEM, kind="brain", client=self._client)
+        except Exception as e:
+            log.warning("interpret_request via LLM failed (%s); using rules", e)
+            await self._error(None, f"request interpretation fell back to rules: {e}", "llm_fallback")
+            return await self._fallback.interpret_request(
+                text, user_id, store_id, role=role, profile=profile, history=history
+            )
+        return await self._draft_from_llm(out, text, user_id, store_id, role, profile, history, hints)
+
+    async def _draft_from_llm(
+        self,
+        out: RequestDraftOut,
+        text: str,
+        user_id: UserId,
+        store_id: StoreId | None,
+        role: RequesterRole,
+        profile: UserProfile | None,
+        history: list[str] | None,
+        hints: Any,
+    ) -> RequestDraft:
+        """The LLM proposes; code decides: only known robots / stores / categories survive, the budget is parsed by
+        regex, and the shopping list is built (and SKU-guessed) by the deterministic helpers."""
+        from arms.agent import interpret
+
+        full = interpret.combined_text(text, history)
+        robot = interpret.find_robot(full, hints)
+        if robot is None and out.robot_name:
+            robot = interpret.find_robot(out.robot_name, hints)
+        store = interpret.find_store(full, hints) or (
+            interpret.find_store(out.store_name, hints) if out.store_name else None
+        )
+        if store is None and robot is not None:
+            store = hints.robots[robot][1]
+        store = store or store_id
+        intent: RequestIntent = out.intent
+        if intent == "fetch" and role != "staff":
+            intent = "shop"  # shopper purchases always go through a trip (mandate + approval + checkout)
+        cats = [c for c in out.categories if c in hints.categories] or interpret.find_categories(full, hints)
+        labels = hints.aisles.get(store or "", {})
+        aisles = [labels[f"aisle {n}"] for n in out.aisle_numbers if f"aisle {n}" in labels]
+        priority: GoalPriority = "urgent" if out.urgent else "normal"
+        shopping_list = None
+        if intent in ("shop", "fetch") and out.clarifying_question is None:
+            parsed = logic.parse_intent_text(full, profile)
+            items = [
+                logic.DraftItem(i.query, i.qty, i.category, [d.lower() for d in i.dietary], i.required, i.notes)
+                for i in out.items
+            ] or logic.draft_items(parsed)
+            if intent == "fetch":
+                items = items[:1]
+            budget = parsed.budget_cents
+            if budget is None and profile is not None:
+                budget = profile.default_budget_cents
+            intent_obj = Intent(intent_id=new_id("int"), user_id=user_id, text=full, trip_id=None)
+            sl = logic.build_shopping_list(
+                intent_obj,
+                items,
+                title=out.title or logic.title_for(parsed),
+                servings=out.servings or parsed.servings,
+                budget_cents=budget,
+                dietary_notes=parsed.dietary_notes,
+            )
+            if not sl.items:
+                return await self._fallback.interpret_request(
+                    text, user_id, store_id, role=role, profile=profile, history=history
+                )
+            guessed = await logic.guess_skus(self._services.catalog, sl.items, profile)
+            shopping_list = sl.model_copy(update={"items": guessed})
+        reply = out.reply
+        if intent == "status":
+            answer = await interpret.answer_question(self._services.catalog, text, store)
+            reply = answer or reply
+        return RequestDraft(
+            intent=intent,
+            summary=out.summary,
+            shopping_list=shopping_list,
+            store_hint=store,
+            robot_hint=robot,
+            categories=cats if intent == "shelf_scan" else [],
+            aisle_ids=aisles if intent == "shelf_scan" else [],
+            priority=priority,
+            reply=reply,
+            clarifying_question=out.clarifying_question,
+            confidence=out.confidence,
+        )
 
     async def expand_intent(self, intent: Intent, profile: UserProfile | None = None) -> ShoppingList:
         if not self._llm_ready():
