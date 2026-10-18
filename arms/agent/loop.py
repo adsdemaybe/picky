@@ -1857,7 +1857,23 @@ class PlanLoop:
                     "declined" if step.ask_kind == "recommendation" else "skipped",
                     f"shopper declined ({step.ask_kind})",
                 )
+                if step.ask_kind == "recommendation":
+                    await self._replan_route(run)
         return "next"
+
+    async def _replan_route(self, run: _Run) -> None:
+        """A declined optional stop leaves the route: re-solve the trip route like the v0.2 executor does after a
+        yes/no (``trips.replan`` stores Trip.route + emits route.planned), so the web map stops drawing a detour
+        the robot never drives. Best effort: the map is a view, a routing failure never stops the run."""
+        trips = getattr(self.s, "trips", None)
+        if trips is None or not run.plan.trip_id:
+            return
+        try:
+            await trips.replan(run.plan.trip_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("route re-plan after a declined stop failed for %s: %s", run.plan.trip_id, exc)
 
     async def _check_line(self, run: _Run, step: GraspStep) -> str:
         plan = run.plan
