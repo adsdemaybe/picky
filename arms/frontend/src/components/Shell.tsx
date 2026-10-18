@@ -69,6 +69,8 @@ export function TopBar() {
   const path = usePathname();
   const phase = useTrip((s) => s.phase);
   const live = phase === "shopping" || phase === "checkout" || phase === "waiting_login";
+  // the T-Mobile store is its own site (app/tmobile/layout.tsx), not a tab of the grocery app
+  if (path.startsWith("/tmobile")) return null;
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-6 px-4 md:px-8">
@@ -156,6 +158,7 @@ export function BottomTabs() {
   const path = usePathname();
   const phase = useTrip((s) => s.phase);
   const live = phase === "shopping" || phase === "checkout" || phase === "waiting_login";
+  if (path.startsWith("/tmobile")) return null;
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Main">
       <ul className="grid grid-cols-5">

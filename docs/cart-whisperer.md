@@ -9,8 +9,10 @@
 > shows** the planning-phase SKIP / WAIT cards ("Picky's advice": **Skip it** / **Worth waiting**) and the zero case
 > ("Nothing worth a stop today") for both stores (`src/lib/order.ts`, `src/lib/prices.ts`,
 > `src/data/stores/tmobile.ts`). Cart Whisperer runs in the grocery stores
-> and in the T-Mobile-style wireless store (`store_tmobile`), which is a web-app fixture until
-> `data/planograms/store_tmobile.yaml` lands after v0.2.
+> and in the T-Mobile wireless store (`store_tmobile`). **That store now lives in `data/`**
+> (`data/planograms/store_tmobile.yaml`, 91 real SKUs at t-mobile.com prices of Oct 17 2026, Maya's devices and the
+> promo calendar in `data/fixtures/wireless.yaml`; see `data/README.md`). It keeps every `tmobile.ts` SKU id, so the
+> web app can regenerate its fixture from it; the wireless numbers below use the real prices.
 >
 > Team source: [`docs/team-plan.md`](team-plan.md) §3.2 (T-Mobile) and §6.2 (recommender "says wait"). That file lives
 > on `arm/frontend` until PR #12 merges. Read it with `git show origin/arm/frontend:docs/team-plan.md`.
@@ -93,14 +95,14 @@ three signal families.
 |---|---|---|---|---|
 | Commerce | **Cart now** | `Cart.lines[]` (`sku`, `qty`, `unit_price_cents`, `source` in_store/online, `store_id`, `status`, `list_item_id`, `rec_id`), `shipping_cents`, `total_cents`, `online_cents` | gateway (`Trip.cart`, `TripController.add_line` / `remove_line`) | everything; shipping waste; duplicates |
 | Commerce | **Store now** | `StoreOffer.price_cents` / `list_price_cents` / `qty` / `deal` / `lots`, `Deal.kind` / `reason` / `valid_until`, `NearExpiryItem.days_left`, `ProductLocation.slot_id` / `approach_pose`, `Product.tags` / `allergens` / `size` / `unit` / `shelf_life_days` / `category` | catalog (`search`, `get_planogram`, `get_deals`, `get_near_expiry`, `get_product`) | in-stock gate, prices, deals, unit price, where it is |
-| Commerce | **Promo calendar + price history** (new) | Upcoming promos per SKU (`BUDS-RUN` $59.99 from Fri Oct 23; `PX9-128` $599.99 expected Nov 27; `COFFEE` $7.99 from Fri Oct 23) and a 13-week price history | Today: web-app demo data (`offers.json` from `scripts/gen-data.mjs`, `tmobileUpcoming` in `tmobile.ts`). Planned: catalog (v0.3), shared with Find & compare | WAIT; the good-price verdict |
-| Commerce | **Compatibility** (new) | `compatible_with` on accessories (`CASE-PX9-CLR` → `PX9-128`; `CASE-PX7-BLK` → `PX7`) | Today: `tmobile.ts`. Planned: a catalog `Product` field (v0.3) | hard gate; SKIP card when the shopper asks for or picks an incompatible item |
+| Commerce | **Promo calendar + price history** (new) | Upcoming promos per SKU (`BUDS-RUN` $49.99 from Fri Oct 23; `PX9-128` $599.99 expected Nov 27; `COFFEE` $7.99 from Fri Oct 23) and a 13-week price history; real line-activation offers (bill credits) | Today: `data/fixtures/wireless.yaml` (`upcoming_promos`, `line_promos`) + web-app demo data (`offers.json` from `scripts/gen-data.mjs`). Planned: catalog (v0.3), shared with Find & compare | WAIT; the good-price verdict |
+| Commerce | **Compatibility** (new) | `compatible_with` on accessories (`CASE-PX9-CLR` → `PX9-128`; `CASE-PX7-BLK` → `PX7`) | Today: `Product.tags` `fits:<sku>` in `data/products.yaml` (+ `requires_ios` / `requires_android`). Planned: a catalog `Product` field (v0.3) | hard gate; SKIP card when the shopper asks for or picks an incompatible item |
 | Customer | **Profile** | `UserProfile.prefs` (weights in [-1, 1]), `dislikes`, `disliked_skus`, `favorite_skus`, `dietary`, `allergies`, `household_size`, `default_budget_cents`, `taste_vector` (384-d) | recommender (`get_profile`); seed `data/fixtures/users.yaml` | taste score, allergen/dislike gates, cadence scaling |
 | Customer | **Purchase history + cadence** | `PurchaseRecord.sku`, `qty`, `unit_price_cents`, `ts`, `rating` | recommender (`record_purchase`); seed `users.yaml` `purchases` | replenish ("probably out"), SKIP ("just bought it"), past ratings |
 | Customer | **Feedback** | `Feedback.rating`, `tags` (e.g. `too_mild`), `text` | recommender (`record_feedback`) | taste deltas, cite "you said it was too mild" |
 | Customer | **Intent** | `Trip.intent.text`, `ShoppingList.title`, `servings`, `budget_cents`, `dietary_notes`, `ListItem.query` / `qty` / `required` / `dietary` / `notes` / `sku`; `RequestDraft.summary` | agent (`interpret_request` / `expand_intent`), stored on the `Trip` by the gateway | complete (missing parts of the occasion), qty fix (servings), keep guests' dietary needs on swaps |
 | Customer | **Money** | `IntentMandate.cap_cents`, `per_item_cap_cents`, `ask_above_cents`, `allowed_categories`, `blocked_categories`, `allow_online`; `MandateDecision.remaining_cents`; `ShoppingList.budget_cents` | trust (`get_mandate`, `evaluate`) | hard gates, budget_pressure, "back under budget" swaps, WAIT when over budget, `needs_approval` flag |
-| Customer | **Devices, owned items, lines** (new) | Owned SKUs with purchase date (`CHG-20W` bought 2026-03-14); phone model + `age_months` (Pixel 7, 34); `installments_left` (4) × `monthly_installment_cents` (1650) = $66.00; `household_lines` (2) | Today: `tmobile.ts` `mayaDevices`. Planned: `users.yaml` + new profile fields (v0.3, data PR) | SKIP owned / incompatible; WAIT early upgrade |
+| Customer | **Devices, owned items, lines** (new) | Owned SKUs with purchase date (`CHG-20W` bought 2026-03-14); phone model + `age_months` (Pixel 7, 34); `installments_left` (4) × `monthly_installment_cents` (1650) = $66.00; `household_lines` (2) | Today: `data/fixtures/wireless.yaml` `accounts` (+ the owned SKUs as `users.yaml` purchases). Planned: new profile fields (v0.3) | SKIP owned / incompatible; WAIT early upgrade |
 | Customer | **Conversation** | the shopper's chat lines this trip (`POST /api/trips/{id}/messages`), robot chat (`BrainStep` with `role="user"`), `ApprovalResponse.note` | gateway (chat), agent (brain `recent_steps`) | "no cilantro" means never suggest cilantro; tone of the "why" |
 | Customer | **Past suggestions** | earlier `Suggestion`s with outcome declined / ignored / accepted; `TransparencyEntry.outcome` for detour recs | recommender (new suppression store); trust ledger | suppress declined, down-weight that kind, never re-ask in the same trip |
 | Physical | **Robot + route** | `Trip.route.stops[]` still pending (`Trip.stop_status`), `Stop.pose` / `slot_id`, `RobotState.pose`, `Trip.robot_id`, the slot the robot is at, `last_picked_sku` (new) | routing (`Route`), robot (`RobotService.state`), gateway (from `robot.arrived` / `item.picked`) | detour cost (m / s), "offer only while the slot is ahead", "what you just picked up" |
@@ -112,19 +114,19 @@ store, retailer, device and price data is synthetic.
 
 Grocery examples use real SKUs and prices from `data/` (store_ave unless noted). "Maya" is `data/fixtures/users.yaml`
 maya (budget $40, cap $60, ask above $15, blocks alcohol; likes spicy 0.8 / vegetarian 0.6 / mexican 0.5; favorites
-`TORT-CORN`, `BEANS-BLACK`, ...). Wireless examples use the web app's `store_tmobile` fixture (`tmobile.ts`,
-`order.ts`; fictional) and are re-checked when that store moves into `data/`.
+`TORT-CORN`, `BEANS-BLACK`, ...). Wireless examples use `store_tmobile` from `data/` (real products and prices;
+synthetic shopper, devices and promo calendar).
 
 | Kind | Action | Fires when | Examples |
 |---|---|---|---|
-| **complete** | add | The stated occasion is missing a part: a dish or setup template (tacos → tortillas, protein, salsa, ...; new phone → case, glass), a pair rule (ground beef → seasoning, chips → salsa), or "party for N ≥ 6" → plates or napkins | "Tacos for 6 but no tortillas → `TORT-CORN` Corn Tortillas 30 ct, **$2.79**, you rated them 5★." · "2 lb `BEEF-GROUND`, no seasoning → `TACO-SEASONING` Taco Seasoning Mix 1 oz, **$1.49**, two slots from the tortillas (`AVE-G2-E1-02`), +0 m." · Wireless: "Pixel 9 case but no screen protector → `GLASS-PX9` 2-pk, **$23.99** (20% off with a Pixel 9 case), same wall." |
+| **complete** | add | The stated occasion is missing a part: a dish or setup template (tacos → tortillas, protein, salsa, ...; new phone → case, glass), a pair rule (ground beef → seasoning, chips → salsa), or "party for N ≥ 6" → plates or napkins | "Tacos for 6 but no tortillas → `TORT-CORN` Corn Tortillas 30 ct, **$2.79**, you rated them 5★." · "2 lb `BEEF-GROUND`, no seasoning → `TACO-SEASONING` Taco Seasoning Mix 1 oz, **$1.49**, two slots from the tortillas (`AVE-G2-E1-02`), +0 m." · Wireless: "Pixel 9 case but no screen protector → `GLASS-PX9` ZAGG Glass Elite, **$39.99** (20% off with a Pixel 9 case), same wall." |
 | **replenish** | add | Cadence says you are probably out: days since the last purchase ≥ the typical interval (your own history, or a category default scaled by `household_size`, labeled as a default) | "`OAT-MILK` Oat Milk 64 oz: you bought it Oct 8 (9 days ago); a household of 2 usually finishes that in about a week (category default). **$4.79**, back wall." |
-| **swap/save** | swap | Same need, cheaper: lower unit price, a deal, or a cheaper same-diet / same-compatibility alternative; also "this swap gets you back under budget". Never swaps a SKU the shopper asked for by name or a favorite (except for an allergen) | "Swap 1 lb `BEEF-GROUND` ($5.49) for `SOYRIZO` Soy Chorizo 12 oz ($4.49): it also covers your vegetarian guest, and you rated it 4★ on Oct 8. **Save $1.00**, same fridge." · `CHEESE-COTIJA` $4.99 → `CHEESE-MEX` $3.79, both 8 oz, both vegetarian: **save $1.20** (only when the line came from a generic "cheese"). · Wireless: `CASE-PX9-RUG` $49.99 → `CASE-PX9-CLR` $29.99, both fit the Pixel 9: **save $20.00** (only when the line came from a generic "case"). |
+| **swap/save** | swap | Same need, cheaper: lower unit price, a deal, or a cheaper same-diet / same-compatibility alternative; also "this swap gets you back under budget". Never swaps a SKU the shopper asked for by name or a favorite (except for an allergen) | "Swap 1 lb `BEEF-GROUND` ($5.49) for `SOYRIZO` Soy Chorizo 12 oz ($4.49): it also covers your vegetarian guest, and you rated it 4★ on Oct 8. **Save $1.00**, same fridge." · `CHEESE-COTIJA` $4.99 → `CHEESE-MEX` $3.79, both 8 oz, both vegetarian: **save $1.20** (only when the line came from a generic "cheese"). · Wireless: `CASE-PX9-RUG` UAG Pathfinder $49.95 → `CASE-PX9-CLR` Case-Mate Signature Clear $29.99, both fit the Pixel 9: **save $19.96** (only when the line came from a generic "case"). |
 | **qty fix** | set_qty | Quantity doesn't match servings and pack size (`ShoppingList.servings` × per-person rule vs `Product.size` count) | "2 packs of Corn Tortillas 30 ct = 60 tortillas for 6 people at 3 each (18). **1 pack is enough: −$2.79.**" (Real: the agent's recipe assumes 12-count packs.) · "1 guac kit (serves 4) for 6 people → make it 2." |
 | **deal match** | add | A deal or near-expiry markdown that fits taste and intent, within headroom. Never duplicates a pending detour rec | "`CHIPS-TORTILLA` Restaurant Style Tortilla Chips, **$2.99** (25% off, 'Taco night' endcap). Goes with your salsa; you rated Chile Lime chips 5★." · `GUAC-KIT` **$3.99** (was $5.99, best by Oct 18): "you're eating tonight." |
-| **remove/warn** | remove (or set_qty) | Allergen conflict, shipping waste, or over budget (what to drop). Owned, duplicate and just-bought items are now **skip** | Sam (peanut allergy) adds `TRAIL-MIX`: "**Contains peanuts**, and your profile lists a peanut allergy. Remove?" · "Cilantro is out here, so it ships: $1.29 + $2.99 shipping. **Drop it: −$4.28.**" · Wireless: "The power bank puts you $18.96 over your $90. Drop it?" |
-| **skip** (new) | `none`, or `remove` if the item is in the cart | The item (on the list, in the cart, asked for, just picked, or a template candidate) is already owned or was bought within its cadence, is incompatible with the device it's for, or is a duplicate | Wireless (shipped): "**Skip the charger:** you bought a 20W USB-C charger in March and it works with the Pixel 9" (avoids $24.99). · Wireless (designed, in-trip): "That's the $9.99 clearance Pixel 7 case; it doesn't fit the Pixel 9. The Clear Case in your basket does." · Grocery: "**Skip re-buying Classic Red:** bought Sep 26, you go through one about every 5 weeks." |
-| **wait** (new) | `remind` | A cheaper promo is announced soon, the item puts you over budget and a sale is coming, or a phone upgrade while `installments_left > 0` | Wireless (shipped): "SportFit earbuds $79.99 → **$59.99 from Fri Oct 23**. Picky texts you Friday" (save $20.00). · Wireless (shipped): "Your Pixel 7 has 4 installments left ($66.00); a $200-off Pixel 9 promo is expected Nov 27. I'll remind you." · Grocery (shipped): "Coffee: weekly ad $2 off Fri Oct 23 ($7.99). Buy 1 now, not 2." |
+| **remove/warn** | remove (or set_qty) | Allergen conflict, shipping waste, or over budget (what to drop). Owned, duplicate and just-bought items are now **skip** | Sam (peanut allergy) adds `TRAIL-MIX`: "**Contains peanuts**, and your profile lists a peanut allergy. Remove?" · "Cilantro is out here, so it ships: $1.29 + $2.99 shipping. **Drop it: −$4.28.**" · Wireless: "The power bank puts you $9.96 over your $100. Drop it?" |
+| **skip** (new) | `none`, or `remove` if the item is in the cart | The item (on the list, in the cart, asked for, just picked, or a template candidate) is already owned or was bought within its cadence, is incompatible with the device it's for, or is a duplicate | Wireless (shipped): "**Skip the charger:** you bought a 20W USB-C charger in March and it works with the Pixel 9" (avoids $14.99). · Wireless (designed, in-trip): "That's the $9.99 clearance Pixel 7 case; it doesn't fit the Pixel 9. The Clear Case in your basket does." · Grocery: "**Skip re-buying Classic Red:** bought Sep 26, you go through one about every 5 weeks." |
+| **wait** (new) | `remind` | A cheaper promo is announced soon, the item puts you over budget and a sale is coming, or a phone upgrade while `installments_left > 0` | Wireless (shipped): "Beats Flex $69.99 → **$49.99 from Fri Oct 23**. Picky texts you Friday" (save $20.00). · Wireless (shipped): "Your Pixel 7 has 4 installments left ($66.00); a $200-off Pixel 9 promo is expected Nov 27. I'll remind you." · Grocery (shipped): "Coffee: weekly ad $2 off Fri Oct 23 ($7.99). Buy 1 now, not 2." |
 
 Allergen warnings always rank first, ignore the score threshold, and don't count toward the "declined, so suppress"
 rule. When a SKIP and a detour rec touch the same category in one trip (Classic Red skip vs the Ghost Pepper detour),
@@ -376,7 +378,7 @@ class SuggestionMetrics(Model):       # per trip and per store
 Quick replies are `1`, `2`, `ALL` and `NO`. The reply goes to `agent.interpret_reply` → the same POST. Send at most one
 suggestions text per phase. WAIT reminder on the promo date:
 
-> SportFit earbuds are $59.99 today (were $79.99). Want them? Reply YES.
+> Beats Flex are $49.99 today (were $69.99). Want them? Reply YES.
 
 **Robot:** there is no screen on the robot. When the cart changes, the robot picks something, or it arrives at a stop
 with a pending suggestion, the brain asks through `ask_user`, which reaches the shopper in the web app or on Photon
@@ -471,22 +473,25 @@ for Maya on 2026-10-13 in `data/fixtures/users.yaml` (a data change, owned by th
 
 ### 11b. Wireless (store_tmobile, the T-Mobile cut)
 
-Numbers from `arm/frontend` `src/lib/order.ts` + `src/data/stores/tmobile.ts` (fictional; re-check when store_tmobile
-moves into `data/`).
+Numbers from `data/` (real t-mobile.com prices, Oct 17 2026). The web app (`src/lib/order.ts`, `tmobile.ts`) still
+shows the older fictional prices; the copy changes are flagged.
 
-- **Request** at store_tmobile: *"case and screen protector for my new Pixel 9, under $90"*.
-- **List:** Pixel 9 Clear Case **$29.99**; Pixel 9 Glass 2-pk **$23.99** (20% off with a Pixel 9 case).
-- **Detours:** USB-C braided 2 m cable **$19.99** (+0 m, same wall), kept; 10,000 mAh power bank $34.99, not kept (it
-  would put the cart over $90).
-- **Picky's advice (planning):** **SKIP** the charger (−$24.99: "you bought a 20W USB-C charger in March and it works with
-  the Pixel 9") and **WAIT** on the phone (4 installments left, $66.00; $200 off expected Nov 27; "I'll remind you").
-- **Total $73.97.** Tech mandate (`im_maya_tech_001`): cap $150, per-item $100, ask above $50, so only the checkout
-  approval asks.
+- **Request** at store_tmobile: *"case and screen protector for my new Pixel 9, under $100"* (was $90: real prices are
+  higher).
+- **List:** Case-Mate Signature Clear for Pixel 9 (`CASE-PX9-CLR`) **$29.99**; ZAGG Glass Elite for Pixel 9
+  (`GLASS-PX9`) **$39.99** (20% off $49.99 with a Pixel 9 case). Both hang in the Pixel bay of the accessory wall.
+- **Detours:** Apple 240W USB-C cable 2 m (`CBL-USBC-2M`) **$29.99** (+0 m, same wall), kept; Belkin 10K power bank
+  (`PB-10K`) $39.99, not kept (it would put the cart $9.96 over $100).
+- **Picky's advice (planning):** **SKIP** the charger (−$14.99: "you bought a 20W USB-C charger in March and it works with
+  the Pixel 9"; the shelf tag still says $24.99, a mispricing on the merchant dashboard) and **WAIT** on the phone
+  (4 installments left, $66.00; $200 off expected Nov 27; "I'll remind you").
+- **Total $99.97.** Tech mandate (`im_maya_tech_001`, not in `users.yaml` yet: one mandate per demo user today): cap
+  $150, per-item $100, ask above $50, so only the checkout approval asks.
 - **In-trip (designed):** "grab the $9.99 clearance case too" → **SKIP** ("that's a Pixel 7 case; it doesn't fit the
   Pixel 9. The Clear Case in your basket does.").
-- **Second request** *"earbuds for running, under $100"*: SportFit **$79.99** + **WAIT** (Fri Oct 23 $59.99, save
-  $20, "I'll text you Friday") + **"Nothing worth a stop today"** (the zero case). The $79.99 line is above the $50
-  ask threshold, so it asks too.
+- **Second request** *"earbuds for running, under $100"*: Beats Flex (`BUDS-RUN`) **$69.99** + **WAIT** (Fri Oct 23
+  $49.99, save $20, "I'll text you Friday") + **"Nothing worth a stop today"** (the zero case). The $69.99 line is above
+  the $50 ask threshold, so it asks too.
 - **Story check (team call):** if Maya takes the WAIT on the phone, the case and glass are for a phone she doesn't
   have yet. Either the request becomes "I'm picking up my Pixel 9 today" and the WAIT is about the second line's
   upgrade, or the phone WAIT shows only when the phone is on the list.
@@ -578,7 +583,7 @@ declined suggestion, and `DEMO OK` asserts both.
 - [ ] **P2** Persist suppressions / outcomes in Postgres with the profile store
 
 **catalog** (after v0.2; data + contracts PRs)
-- [ ] **P1** `store_tmobile` planogram (reach-valid slots, allowed fixture kinds) + wireless SKUs + categories in `data/`
+- [x] **P1** `store_tmobile` planogram (reach-valid slots, allowed fixture kinds) + wireless SKUs + categories in `data/` (data only; `make demo` does not shop there yet)
 - [ ] **P1** `compatible_with`, promo calendar and 13-week price history (shared with Find & compare)
 
 **trust**
@@ -601,7 +606,7 @@ declined suggestion, and `DEMO OK` asserts both.
 
 **messaging**
 - [ ] **P1** "Before you check out: ..." text with ≤3 numbered options + quick replies `1` / `2` / `ALL` / `NO`; one text per phase
-- [ ] **P1** WAIT reminder text on `remind_on` ("SportFit earbuds are $59.99 today. Want them? Reply YES.")
+- [ ] **P1** WAIT reminder text on `remind_on` ("Beats Flex are $49.99 today. Want them? Reply YES.")
 - [ ] **P2** Mid-trip suggestion text when the web app is not open
 
 **frontend** (teammate)
@@ -611,7 +616,7 @@ declined suggestion, and `DEMO OK` asserts both.
 - [ ] **P1** Merchant tile: accepted rate, $ saved, $ added, avoided spend, basket completeness (labeled simulated where seeded); trip 2 "hidden because you declined" line
 
 **data** (data owner, after v0.2)
-- [ ] **P1** Maya's devices / owned items / household lines; a robot for `store_tmobile` in `robots.yaml`
+- [x] **P1** Maya's devices / owned items / household lines (`data/fixtures/wireless.yaml` + `users.yaml` purchases); a robot for `store_tmobile` in `robots.yaml` (Tess) (data only)
 - [ ] **P2** Maya `SOUR-CREAM` purchase on 2026-10-13 if we want the "bought it Tuesday" skip beat
 
 ## 14. Open questions

@@ -1050,6 +1050,33 @@ prim(
     alt="lw_tray_tray011",
 )
 
+# ===================================================================================================== wireless store
+# store_tmobile (data/planograms/store_tmobile.yaml): retail boxes, blister cards and clamshells. No model in the
+# index fits them better than a printed box, so every wireless SKU is a box primitive under our label. The tethered
+# live demo units (phones / tablets / watches on the tables) are sized from data/sim/demo_units.yaml, not here.
+WIRELESS_CATEGORIES = {
+    "phone",
+    "tablet",
+    "wearable",
+    "audio",
+    "case",
+    "screen",
+    "charger",
+    "home_internet",
+    "connected",
+}
+for _p in products:
+    if _p["category"] in WIRELESS_CATEGORIES and _p["sku"] not in S:
+        prim(
+            _p["sku"],
+            "primitive",
+            "box",
+            "label_color",
+            BOX,
+            "Retail box / blister card in a wireless store: a printed box primitive + our label is the real look.",
+            material="printed paperboard",
+        )
+
 
 # ---------------------------------------------------------------------------------------------------------------------
 # Derived fields
@@ -1452,9 +1479,10 @@ assert set(out_skus) == set(prod_by), set(prod_by) ^ set(out_skus)
 header = {
     "schema": "picky sku_assets v1",
     "generated_from": {
-        "products": "data/products.yaml (125 SKUs)",
+        "products": f"data/products.yaml ({len(products)} SKUs)",
         "index": "picky-assets/products/index.yaml (463 assets)",
-        "planograms": "data/planograms/store_ave.yaml, store_hill.yaml",
+        "planograms": "data/planograms/"
+        + ", ".join(f"{s}.yaml" for s in sorted({x["store"] for v in STATS_.values() for x in v["slots"]})),
     },
     "asset_root": {
         "env": "PICKY_ASSET_ROOT",

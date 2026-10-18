@@ -216,6 +216,9 @@ def test_real_stores_keep_every_unit_with_models():
         if sid not in mapped_stores:  # stores the map wasn't generated for keep every unit on the primitive path
             continue
         on_models = [p for p in modeled.stores[sid].product_prims() if p.render != "primitive"]
+        if all(sa.entries[i.sku]["render"] == "primitive" for i in spec.instances):
+            assert not on_models, sid  # store_tmobile: retail boxes are primitives by design (gen_sku_assets.py)
+            continue
         assert len(on_models) > 0.8 * len(spec.instances), sid
 
 

@@ -1,0 +1,273 @@
+# Picky demo data (DubHacks 2026), T-Mobile track. Inputs for the four other challenge directions shown on the
+# T-Mobile site: The Matchmaker (/tmobile/match), Next Best Moment (/tmobile/moment), The Timekeeper (/tmobile/upgrade)
+# and Household Mix (/tmobile/household). Cart Whisperer uses data/fixtures/wireless.yaml.
+#
+# Plans, financing, trade-in values and the household accounts come from data/wireless.yaml; this file only adds the
+# signals that file doesn't carry. EVERYTHING HERE IS SYNTHETIC: fictional people, illustrative ratings, made-up
+# support histories. Read by arms/frontend/scripts/gen-data.mjs -> src/data/generated/directions.json.
+schema_version: 1
+as_of: 2026-10-18
+
+# --------------------------------------------------------------------------------------------------- phones
+# Illustrative 1-5 ratings (phones on the store_tmobile floor) used by the Matchmaker to rank devices against what a shopper says matters. size: compact
+# (<6.2"), standard, large, foldable. os_support_until: last month of promised security updates (illustrative).
+phone_traits:
+  IP18PRO-256: {camera: 5, battery: 4, performance: 5, value: 1, size: standard}
+  IP17PRO-256: {camera: 5, battery: 4, performance: 5, value: 2, size: standard}
+  IP17-256: {camera: 4, battery: 4, performance: 4, value: 3, size: standard}
+  IP16-128: {camera: 3, battery: 3, performance: 4, value: 3, size: standard}
+  GS26U-256: {camera: 5, battery: 5, performance: 5, value: 1, size: large}
+  GS26-256: {camera: 4, battery: 3, performance: 5, value: 3, size: compact}
+  GS25-128: {camera: 4, battery: 3, performance: 4, value: 3, size: compact}
+  GZF8-256: {camera: 3, battery: 3, performance: 4, value: 2, size: foldable}
+  PX11P-256: {camera: 5, battery: 4, performance: 4, value: 2, size: compact}
+  PX10-128: {camera: 4, battery: 4, performance: 4, value: 4, size: standard}
+  PX9-128: {camera: 4, battery: 3, performance: 3, value: 3, size: standard}
+  REVVL8P-256: {camera: 2, battery: 4, performance: 2, value: 5, size: large}
+  MOTOG26-128: {camera: 2, battery: 5, performance: 2, value: 5, size: large}
+
+# --------------------------------------------------------------------------------------------------- Matchmaker
+# Preset conversations: each is a shopper's answers to the five questions, so the demo is one tap per persona.
+# account_id (optional) links to data/wireless.yaml for their current phone / carrier.
+matchmaker_presets:
+- id: priya
+  label: 'Priya, student'
+  account_id: acct_priya
+  says: "I'm a student, I mostly text and use maps, my moto g is 3 years old and I can't spend much."
+  lines: 1
+  budget_monthly_cents: 6000
+  priorities: [price, battery]
+  usage: light
+  keep_phone: false
+  trade_in: {model_id: moto-g-2022, condition: fair}
+- id: alex
+  label: 'Alex, switching with a partner'
+  account_id: acct_alex
+  says: "We're two people paying $135 at another carrier. I want a better camera, Robin is happy with her iPhone 13."
+  lines: 2
+  budget_monthly_cents: 16000
+  priorities: [price, camera]
+  usage: medium
+  keep_phone: false
+  keep_second_phone: true
+  switching: true
+  trade_in: {model_id: galaxy-s22, condition: good}
+- id: jordan
+  label: 'Jordan, photographer'
+  account_id: acct_jordan
+  says: "Photos are my thing. My iPhone 13 is four years old and full."
+  lines: 1
+  budget_monthly_cents: 15000
+  priorities: [camera, performance]
+  usage: medium
+  keep_phone: false
+  trade_in: {model_id: iphone-13, condition: good}
+- id: dev
+  label: 'Dev, heavy data'
+  account_id: acct_dev
+  says: "I tether my laptop all the time, like 40 GB of hotspot a month, and my data keeps slowing down."
+  lines: 1
+  budget_monthly_cents: 12000
+  priorities: [performance, battery]
+  usage: heavy
+  keep_phone: true
+- id: ruth
+  label: 'Ruth, 55+'
+  account_id: acct_ruth
+  says: "I'm 68, I call my grandkids and read the news. My iPhone 15 works fine. Am I paying too much?"
+  lines: 1
+  budget_monthly_cents: 6000
+  priorities: [price]
+  usage: light
+  keep_phone: true
+  age_55: true
+
+# --------------------------------------------------------------------------------------------------- Next Best Moment
+# Account signals for the churn-risk model. support_contacts_90d lists the topic of each contact. bill_change_pct_6mo
+# is the change in the monthly bill over 6 months. Signals named like competitor proxies are things a carrier can see
+# in its own channels (a port-out PIN request, a payoff-amount lookup, visits to "switching" help pages).
+retention_accounts:
+- account_id: acct_garcia
+  name: 'Garcia family'
+  monthly_revenue_cents: 24000
+  tenure_months: 74
+  support_contacts_90d: [bill_increase, bill_increase, coverage_home]
+  bill_change_pct_6mo: 18
+  competitor_signals: [payoff_lookup]
+  promo_credit_ending: null
+  plan_fit: overpaying   # every line under 25 GB on Premium
+- account_id: acct_dev
+  name: 'Dev'
+  monthly_revenue_cents: 6000
+  tenure_months: 26
+  support_contacts_90d: [slow_data, slow_data, slow_data, hotspot_throttled]
+  bill_change_pct_6mo: 0
+  competitor_signals: [speed_test_competitor_ssid, port_out_pin]
+  promo_credit_ending: null
+  plan_fit: throttled    # 140 GB/mo on a plan with no priority data
+- account_id: acct_kim
+  name: 'Kim'
+  monthly_revenue_cents: 8500
+  tenure_months: 30
+  support_contacts_90d: [bill_question]
+  bill_change_pct_6mo: 0
+  competitor_signals: [switching_help_page]
+  promo_credit_ending: {month: 2026-11, monthly_cents: 2500, what: 'device credit on her Galaxy S24 ends'}
+  plan_fit: ok
+- account_id: acct_jordan
+  name: 'Jordan'
+  monthly_revenue_cents: 7500
+  tenure_months: 52
+  support_contacts_90d: [battery_drain]
+  bill_change_pct_6mo: 0
+  competitor_signals: [competitor_device_deals]
+  promo_credit_ending: null
+  plan_fit: ok
+  device_age_months: 48
+- account_id: acct_ana
+  name: 'Ana, student'
+  monthly_revenue_cents: 4000
+  tenure_months: 7
+  support_contacts_90d: [data_cap, data_cap]
+  bill_change_pct_6mo: 0
+  competitor_signals: [switching_help_page]
+  promo_credit_ending: null
+  plan_fit: undersized   # hits the 10 GB cap every month on prepaid
+- account_id: acct_ruth
+  name: 'Ruth'
+  monthly_revenue_cents: 6000
+  tenure_months: 140
+  support_contacts_90d: []
+  bill_change_pct_6mo: 0
+  competitor_signals: []
+  promo_credit_ending: null
+  plan_fit: eligible_cheaper   # 55+ plan is $5/mo less
+- account_id: acct_maya
+  name: 'Maya'
+  monthly_revenue_cents: 9000
+  tenure_months: 34
+  support_contacts_90d: []
+  bill_change_pct_6mo: 0
+  competitor_signals: []
+  promo_credit_ending: null
+  plan_fit: ok
+- account_id: acct_tom
+  name: 'Tom'
+  monthly_revenue_cents: 11500
+  tenure_months: 108
+  support_contacts_90d: []
+  bill_change_pct_6mo: 0
+  competitor_signals: []
+  promo_credit_ending: null
+  plan_fit: ok
+
+# The proportionate actions a care team can take. cost_cents is what the action costs the carrier (credits or an
+# agent's time; right_size is computed: 12 months of revenue given up). fixes lists the risk drivers it addresses.
+# kind: fix = removes the cause; touch = attention only; discount = money, a last resort when there is no cause to fix.
+retention_actions:
+- {id: none, label: 'Do nothing', cost_cents: 0, fixes: [], kind: touch}
+- {id: check_in, label: 'Friendly check-in from a real person', cost_cents: 200, fixes: [support_friction], kind: touch}
+- {id: bill_explainer, label: 'Explain the bill change before it lands', cost_cents: 200, fixes: [promo_ending], kind: fix}
+- {id: right_size, label: 'Move them to the plan that fits (they pay less)', cost_cents: null, fixes: [overpaying, bill_shock], kind: fix}
+- {id: fit_up, label: 'Move them to the plan that fits (no more slowdowns), first month free', cost_cents: 3000, fixes: [throttled, undersized], kind: fix}
+- {id: trade_in_offer, label: 'Send a personal trade-in estimate + honest upgrade timing', cost_cents: 0, fixes: [old_device], kind: fix}
+- {id: perk, label: 'Add a streaming perk for 12 months', cost_cents: 6000, fixes: [competitor_shopping], kind: discount}
+- {id: loyalty_credit, label: '$10/mo loyalty credit for 12 months', cost_cents: 12000, fixes: [competitor_shopping, bill_shock], kind: discount}
+- {id: tech_visit, label: 'Network engineer check + free signal booster', cost_cents: 15000, fixes: [coverage], kind: fix}
+
+# --------------------------------------------------------------------------------------------------- Timekeeper
+# Phone health signals for the "should I upgrade?" advisor. target_sku = the phone they're looking at (data/
+# products.yaml). expected_promo (optional) = a sale on the promo calendar.
+upgrade_cases:
+- id: maya
+  name: Maya
+  account_id: acct_maya
+  line_id: maya-1
+  device_model_id: pixel-7
+  condition: good
+  battery_health_pct: 86
+  storage_used_pct: 62
+  os_support_until: 2027-10
+  issues: []
+  target_sku: PX9-128
+  expected_promo: {starts: 2026-11-27, price_cents: 59999, reason: 'Holiday: $200 off Pixel 9'}
+- id: ruth
+  name: Ruth
+  account_id: acct_ruth
+  line_id: ruth-1
+  device_model_id: iphone-15
+  condition: excellent
+  battery_health_pct: 91
+  storage_used_pct: 38
+  os_support_until: 2030-09
+  issues: []
+  target_sku: IP17-256
+- id: jordan
+  name: Jordan
+  account_id: acct_jordan
+  line_id: jordan-1
+  device_model_id: iphone-13
+  condition: good
+  battery_health_pct: 74
+  storage_used_pct: 96
+  os_support_until: 2027-09
+  issues: ['Battery below 80%: the phone may slow down under load', 'Storage 96% full: photos fail to save']
+  target_sku: IP17-256
+- id: teo
+  name: 'Teo (Garcia family)'
+  account_id: acct_garcia
+  line_id: garcia-4
+  device_model_id: pixel-6
+  condition: fair
+  battery_health_pct: 79
+  storage_used_pct: 71
+  os_support_until: 2026-10
+  issues: ['Security updates end this month']
+  target_sku: PX10-128
+- id: marco
+  name: 'Marco (Garcia family)'
+  account_id: acct_garcia
+  line_id: garcia-2
+  device_model_id: galaxy-s22
+  condition: good
+  battery_health_pct: 84
+  storage_used_pct: 55
+  os_support_until: 2027-02
+  issues: []
+  target_sku: GS25-128
+
+# --------------------------------------------------------------------------------------------------- Household Mix
+# Households for the optimizer. account_ids pull lines from data/wireless.yaml; `separate` households are people
+# paying on different accounts today. age_55 marks lines eligible for 55+ plans. streaming_cents = streaming services
+# the household pays for on its own (a plan perk can cover them).
+households:
+- id: garcia
+  name: 'Garcia family'
+  account_ids: [acct_garcia]
+  streaming: [{name: 'Streaming service A', monthly_cents: 1799}, {name: 'Streaming service B', monthly_cents: 999}]
+  note: 'Paying for Premium, but every line uses under 25 GB.'
+- id: nguyen
+  name: 'Nguyen household (3 accounts)'
+  separate: true
+  streaming: [{name: 'Streaming service A', monthly_cents: 1799}]
+  note: 'Three adults in one apartment, each paying on their own.'
+  lines:
+  - {line_id: ng-1, label: Linh, device_name: iPhone 15, current_plan_id: plus_unlimited, current_monthly_cents: 7000, usage_gb_month: 30, hotspot_gb_month: 4}
+  - {line_id: ng-2, label: Bao, device_name: Galaxy S24, current_plan_id: value_unlimited, current_monthly_cents: 5500, usage_gb_month: 14, hotspot_gb_month: 1}
+  - {line_id: ng-3, label: Mai, device_name: Pixel 8, current_plan_id: prepaid_10gb, current_monthly_cents: 4000, usage_gb_month: 9, hotspot_gb_month: 0}
+- id: alex
+  name: 'Alex & Robin (switching)'
+  account_ids: [acct_alex]
+  streaming: [{name: 'Streaming service A', monthly_cents: 1799}]
+  note: 'Paying $135 a month at another carrier.'
+- id: ruth
+  name: 'Ruth'
+  account_ids: [acct_ruth]
+  age_55_lines: [ruth-1]
+  streaming: []
+  note: 'One light-use line, eligible for 55+.'
+- id: dev
+  name: 'Dev'
+  account_ids: [acct_dev]
+  streaming: []
+  note: '140 GB a month and 45 GB of hotspot on a plan with no priority data.'

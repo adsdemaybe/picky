@@ -1,0 +1,110 @@
+# Picky T-Mobile store: how each wireless SKU is drawn in Isaac (tool input, read by arms/sim/tmobile/build_assets.py
+# to build the per-SKU package USDs and by arms/sim/tools/gen_sku_assets.py to write data/sim/sku_assets.yaml).
+#   pack:        retail packaging form of the stock unit (built at the products.yaml dims_m, our label on the front):
+#                pkg_phone_box / pkg_watch_box / pkg_audio_box (rigid lidded box), pkg_shelf_box (carton),
+#                pkg_hang_box (carton + header tab with a euro slot, hangs on a peg), pkg_blister_card (backer card +
+#                bubble, euro slot), pkg_flat_sleeve (thin sleeve + euro slot), pkg_card_pack (flat card).
+#   shelf: device  the stock unit is the unboxed device (speakers faced out): model + device_m (item frame, m).
+#   demo_model:  the downloaded model (models.yaml) drawn for the tethered LIVE DEMO unit of this SKU
+#                (data/sim/demo_units.yaml gives the slot, stand and device size).
+schema: picky tmobile sku plan v1
+skus:
+  IP18PM-256: {pack: pkg_phone_box, demo_model: ov_iphone13promax_ds}
+  IP18P-256: {pack: pkg_phone_box, demo_model: ov_iphone13pro_ds}
+  IPDUO-256: {pack: pkg_phone_box, demo_model: ov_iphone13promax_ds}
+  IPAIR-256: {pack: pkg_phone_box, demo_model: ov_iphonese3c_ds}
+  IP17-256: {pack: pkg_phone_box, demo_model: ov_iphone13c_ds}
+  IP17E-256: {pack: pkg_phone_box, demo_model: ov_iphonese3c_ds}
+  IP16-128: {pack: pkg_phone_box, demo_model: ov_iphone13c_ds}
+  PX11PXL-256: {pack: pkg_phone_box, demo_model: ov_pixel6pro_ds}
+  PX11P-256: {pack: pkg_phone_box, demo_model: ov_pixel6pro_ds}
+  PX11-256: {pack: pkg_phone_box, demo_model: ov_pixel6pro_ds}
+  PX11PF-256: {pack: pkg_phone_box, demo_model: ov_pixel6pro_ds}
+  PX10A-128: {pack: pkg_phone_box, demo_model: ov_pixel6pro_ds}
+  PX9-128: {pack: pkg_phone_box, demo_model: ov_pixel6pro_ds}
+  GS26U-256: {pack: pkg_phone_box, demo_model: ov_galaxys21u_ds}
+  GS26-256: {pack: pkg_phone_box, demo_model: ov_galaxys22_ma}
+  GS26FE-128: {pack: pkg_phone_box, demo_model: ov_galaxys22_ma}
+  ZFOLD8-256: {pack: pkg_phone_box, demo_model: ov_galaxys21u_ds}
+  ZFLIP8-256: {pack: pkg_phone_box, demo_model: ov_zflip3_ds}
+  GS25-128: {pack: pkg_phone_box, demo_model: ov_galaxys22_ma}
+  RAZRP26-256: {pack: pkg_phone_box, demo_model: ov_zflip3_ds}
+  RAZR26-256: {pack: pkg_phone_box, demo_model: ov_zflip3_ds}
+  MOTOG26-128: {pack: pkg_phone_box, demo_model: ov_android_generic_sg}
+  REVVL8P-256: {pack: pkg_phone_box, demo_model: ov_android_generic_sg}
+  IPAD-A16-128: {pack: pkg_watch_box, demo_model: ov_ipadmini6_ds}
+  IPADAIR11-128: {pack: pkg_watch_box, demo_model: ov_ipadmini6_ds}
+  TABS10FE-128: {pack: pkg_watch_box, demo_model: ov_ipadmini6_ds}
+  AWS12-42: {pack: pkg_watch_box, demo_model: ov_applewatch6_ss}
+  AWU4-49: {pack: pkg_watch_box, demo_model: ov_applewatch6_ss}
+  AWSE3-40: {pack: pkg_watch_box, demo_model: ov_applewatch6_ss}
+  PXW5-41: {pack: pkg_watch_box, demo_model: ov_smartwatch_round_md}
+  GW9-40: {pack: pkg_watch_box, demo_model: ov_smartwatch_round_md}
+  SYNCUP-KW2: {pack: pkg_watch_box, demo_model: ov_smartwatch_rect_hm}
+  WATCH-PX3: {pack: pkg_watch_box, demo_model: ov_smartwatch_round_md}
+  GW-5G: {pack: pkg_shelf_box}
+  HS-T10: {pack: pkg_shelf_box}
+  HS-M4: {pack: pkg_shelf_box}
+  ANT-5G: {pack: pkg_shelf_box}
+  TRK-SYNCUP2: {pack: pkg_hang_box}
+  SIM-KIT: {pack: pkg_card_pack}
+  AIRPODS-PRO3: {pack: pkg_audio_box}
+  AIRPODS-5: {pack: pkg_audio_box}
+  AIRPODS-4ANC: {pack: pkg_audio_box}
+  BUDS4-PRO: {pack: pkg_audio_box}
+  BUDS4: {pack: pkg_audio_box}
+  BUDS-PRO: {pack: pkg_audio_box}
+  PXBUDS-2A: {pack: pkg_audio_box}
+  PBPRO2: {pack: pkg_audio_box}
+  BUDS-RUN: {pack: pkg_hang_box}
+  BEATS-SOLO4: {pack: pkg_audio_box}
+  JBL-FLIP7:
+    pack: pkg_audio_box
+    shelf: device
+    model: gso_jbl_charge
+    device_m: [0.182, 0.069, 0.072]
+  JBL-CLIP5:
+    pack: pkg_audio_box
+    shelf: device
+    model: ov_jblclip3_wz
+    device_m: [0.095, 0.046, 0.135]
+  CASE-IP18PM-CLR: {pack: pkg_hang_box}
+  CASE-IP18P-SIL: {pack: pkg_hang_box}
+  CASE-IP18P-CLR: {pack: pkg_hang_box}
+  CASE-IP18P-ZCP: {pack: pkg_hang_box}
+  CASE-IP18P-PEL: {pack: pkg_hang_box}
+  CASE-IP17-CLR: {pack: pkg_hang_box}
+  CASE-IP17-T21: {pack: pkg_hang_box}
+  CASE-IP16-MAG: {pack: pkg_hang_box}
+  CASE-IP16-GOTO: {pack: pkg_blister_card}
+  CASE-PX11-MAG: {pack: pkg_hang_box}
+  CASE-PX11P-MAG: {pack: pkg_hang_box}
+  CASE-GS26U-CLR: {pack: pkg_hang_box}
+  CASE-GS26-CLR: {pack: pkg_hang_box}
+  CASE-GS26-SIL: {pack: pkg_hang_box}
+  CASE-GS25-GOTO: {pack: pkg_blister_card}
+  CASE-PX9-CLR: {pack: pkg_hang_box}
+  CASE-PX9-RUG: {pack: pkg_hang_box}
+  CASE-PX7-BLK: {pack: pkg_hang_box}
+  GLASS-IP18P-XTR6: {pack: pkg_flat_sleeve}
+  GLASS-IP18P-GOTO: {pack: pkg_flat_sleeve}
+  GLASS-PX11: {pack: pkg_flat_sleeve}
+  GLASS-GS26: {pack: pkg_flat_sleeve}
+  GLASS-GS26-GOTO: {pack: pkg_flat_sleeve}
+  GLASS-PX9: {pack: pkg_flat_sleeve}
+  CHG-20W: {pack: pkg_blister_card}
+  CHG-45W: {pack: pkg_hang_box}
+  CBL-USBC-2M: {pack: pkg_hang_box}
+  PB-10K: {pack: pkg_hang_box}
+  CHG-APL-20W: {pack: pkg_hang_box}
+  CHG-SAM-25W: {pack: pkg_hang_box}
+  CHG-GGL-45W: {pack: pkg_hang_box}
+  CHG-MAGSAFE-2M: {pack: pkg_hang_box}
+  CHG-PXSNAP: {pack: pkg_hang_box}
+  CHG-BLK-3IN1: {pack: pkg_shelf_box}
+  CAR-BLK-75W: {pack: pkg_hang_box}
+  PB-MOPHIE-5K: {pack: pkg_hang_box}
+  MNT-IOTTIE-QI2: {pack: pkg_hang_box}
+  GRIP-POP-MAG: {pack: pkg_blister_card}
+  GRIP-POP: {pack: pkg_blister_card}
+  TAG-AIRTAG2: {pack: pkg_audio_box}

@@ -1,0 +1,66 @@
+# Picky demo data (DubHacks 2026). Wireless-account signals for Cart Whisperer in store_tmobile (docs/cart-whisperer.md
+# §3 "Devices, owned items, lines" + "Promo calendar"). NO contracts model yet (proposed v0.3: profile device /
+# installment fields, a promo calendar, Product.compatible_with), so nothing validates this file except
+# arms/catalog/tests/test_tmobile_data.py; the recommender reads it as plain YAML. Mirrors the web app's
+# src/data/stores/tmobile.ts (mayaDevices, tmobileUpcoming) with the SKUs and prices of data/products.yaml.
+#
+# - accounts[]: SYNTHETIC (fictional demo users; the T-Mobile brief requires synthetic customer data). Owned items
+#   that are catalog SKUs are ALSO PurchaseRecords in data/fixtures/users.yaml (purchase_id links them). PX7 (her
+#   Pixel 7) is not sold here, so it is not a catalog SKU; accessories that fit it carry the tag 'fits:px7'.
+# - upcoming_promos[]: SYNTHETIC future shelf-price drops that drive WAIT cards ("$20 off from Fri Oct 23").
+# - line_promos[]: REAL offers seen on t-mobile.com/offers on 2026-10-17. All need a new line, a port-in or an
+#   upgrade and are paid as monthly bill credits, so they are NOT shelf prices (contracts Deal covers shelf deals
+#   only). credit_cents = total bill credit when the offer states one; effective_price_cents = the advertised
+#   device price after credits; requires = the line the offer names (absent = new line, port-in or upgrade).
+# - online_sale_prices[]: REAL t-mobile.com online sale prices on 2026-10-17 (in store = full price).
+# Money is integer cents. Dates are ISO; the demo day is 2026-10-17.
+schema_version: 1
+store_id: store_tmobile
+as_of: '2026-10-17'
+accounts:
+- user_id: maya
+  household_lines: 2
+  phone:
+    sku: PX7
+    name: Google Pixel 7
+    platform: android
+    in_catalog: false
+    purchased: '2023-12-02'
+    age_months: 34
+    installments_left: 4
+    monthly_installment_cents: 1650
+    payoff_cents: 6600
+  owned:
+  - {sku: CASE-PX7-BLK, bought: '2023-12-02', purchase_id: pur_maya_tmo_001, fits: [PX7],
+     note: Fits only the Pixel 7.}
+  - {sku: CHG-20W, bought: '2026-03-14', purchase_id: pur_maya_tmo_002, fits: [],
+     note: 'Universal USB-C PD, so it charges a Pixel 9 / Pixel 11 too: SKIP a new wall charger.'}
+upcoming_promos:
+- {sku: BUDS-RUN, starts: '2026-10-23', price_cents: 13999, was_cents: 17999, synthetic: true,
+   reason: 'Weekend sale: $40 off Galaxy Buds4'}
+- {sku: PX9-128, starts: '2026-11-27', price_cents: 59999, was_cents: 79999, synthetic: true,
+   reason: 'Holiday promo expected: $200 off Pixel 9'}
+line_promos:
+- {sku: IPDUO-256, headline: '$1000 off iPhone Duo, no trade-in (pre-order)', credit_cents: 100000}
+- {sku: PX11PXL-256, headline: '$1000 off Pixel 11 Pro XL with a new line', credit_cents: 100000, requires: new_line}
+- {sku: IP17-256, headline: 'iPhone 17 under $100, no trade-in', requires: new_line}
+- {sku: IP17E-256, headline: iPhone 17e On Us, credit_cents: 69999, requires: new_line}
+- {sku: RAZRP26-256, headline: razr+ 2026 On Us, credit_cents: 99999, requires: new_line}
+- {sku: GS26FE-128, headline: Galaxy S26 FE On Us, credit_cents: 79999, requires: new_line}
+- {sku: AWS12-42, headline: 'Up to $300 off a second Apple Watch Series 12', credit_cents: 30000}
+- {sku: AWSE3-40, headline: Apple Watch SE 3 On Us with a new watch line, credit_cents: 29999, requires: new_watch_line}
+- {sku: PXW5-41, headline: 'Save $300 on Pixel Watch 5', credit_cents: 30000}
+- {sku: GW9-40, headline: Galaxy Watch9 On Us with a new watch line, credit_cents: 42999, requires: new_watch_line}
+- {sku: IPAD-A16-128, headline: 'iPad (A16) for $199 with a new tablet line', effective_price_cents: 19999,
+   requires: new_tablet_line}
+- {sku: TRK-SYNCUP2, headline: SyncUP TRACKER 2 On Us, credit_cents: 5400, requires: new_line}
+- {categories: [case, screen, charger, audio], headline: 'Buy 3+ accessories, save 25% (online exclusive)',
+   percent_off: 25, min_items: 3, online_only: true}
+online_sale_prices:
+- {sku: BUDS4, price_cents: 14797}
+- {sku: CASE-GS26-SIL, price_cents: 2797}
+- {sku: CASE-IP16-MAG, price_cents: 1997}
+- {sku: MNT-IOTTIE-QI2, price_cents: 4197}
+sources:
+- https://www.t-mobile.com/offers
+- https://www.t-mobile.com/accessories

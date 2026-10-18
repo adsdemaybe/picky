@@ -1,7 +1,7 @@
 // Price intelligence (the "Phia" layer): offers across retailers, price history, good-price verdicts, cheaper swaps.
 // Deterministic code: the assistant calls these as tools and only phrases the results.
 import offersJson from "@/data/generated/offers.json";
-import { mayaDevices, tmobileUpcoming } from "@/data/stores/tmobile";
+import { mayaDevices, onlineSaleFor, tmobileUpcoming } from "@/data/stores/tmobile";
 import { STORES, allProducts, isWireless, maya, productBySku, slotsOf, type Product } from "./data";
 
 export type Offer = {
@@ -36,13 +36,13 @@ function wirelessOffers(p: Product): Offer[] {
   const base = p.price_cents;
   if (p.category === "home_internet")
     return [
-      { retailer_id: "store_tmobile", retailer: "T-Mobile, University Way", kind: "store", price_cents: 0, regular_cents: 0, pack: 1, fee_cents: 0, fee_note: "$50/mo plan, $0 gateway", eta: "take home today", in_stock: true, note: "Free with a home internet plan" },
+      { retailer_id: "store_tmobile", retailer: "T-Mobile, University Way NE", kind: "store", price_cents: 0, regular_cents: 0, pack: 1, fee_cents: 0, fee_note: "$50/mo plan, $0 gateway", eta: "take home today", in_stock: true, note: "Free with a home internet plan" },
     ];
   const r = hash(p.sku);
   const out: Offer[] = [
     {
       retailer_id: "store_tmobile",
-      retailer: "T-Mobile, University Way",
+      retailer: "T-Mobile, University Way NE",
       kind: "store",
       price_cents: slot?.deal?.price_cents ?? base,
       regular_cents: base,
@@ -52,7 +52,7 @@ function wirelessOffers(p: Product): Offer[] {
       in_stock: (slot?.qty ?? 0) > 0,
       note: slot?.deal?.reason ?? null,
     },
-    { retailer_id: "carrier_online", retailer: "T-Mobile online", kind: "carrier", price_cents: base, regular_cents: base, pack: 1, fee_cents: 0, eta: "2 days, free shipping", in_stock: true, note: null },
+    { retailer_id: "carrier_online", retailer: "T-Mobile online", kind: "carrier", price_cents: onlineSaleFor(p.sku) ?? base, regular_cents: base, pack: 1, fee_cents: 0, eta: "2 days, free shipping", in_stock: true, note: onlineSaleFor(p.sku) ? "t-mobile.com online sale (Oct 17)" : null },
     {
       retailer_id: "volt",
       retailer: "Volt Electronics",

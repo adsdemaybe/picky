@@ -1,0 +1,290 @@
+# Picky demo data (DubHacks 2026). Schema: contracts/wireless.py (WirelessFile in arms/wireless/data.py).
+# Wireless retail rules for the T-Mobile-style store `store_tmobile`: service plans, device financing, promotions,
+# trade-in values, accessory compatibility and synthetic household accounts.
+#
+# EVERYTHING HERE IS SYNTHETIC DEMO DATA. Plan prices, credits, trade-in values and financing terms are illustrative,
+# loosely shaped like US carrier retail in 2026; they are NOT real T-Mobile offers, approved financing or real
+# trade-in quotes. People and accounts are fictional. Device / accessory list prices come from data/products.yaml.
+#
+# Read by: arms/wireless (the pricing engine, gateway /api/wireless/*) and arms/frontend/scripts/gen-data.mjs
+# (the web app's offline fallback). Never copy these numbers into code.
+schema_version: 1
+store_id: store_tmobile
+today: 2026-10-18 # engine's fixed "today" for promo windows, so the demo is repeatable
+
+# Sales tax on devices + accessories (Seattle-ish combined rate) and an estimate for service taxes & fees on plans
+# whose price doesn't include them. Estimates only.
+tax_rate_bps: 1035
+service_taxes_fees_bps: 1200
+new_line_fee_cents: 3500 # one-time connection charge per new line (synthetic)
+
+financing:
+  months_options: [24, 36]
+  apr_bps: 0
+  min_down_cents: 0
+  max_financed_cents: 150000 # above this the difference is due as down payment
+  min_financed_cents: 4900
+  financeable_subcategories: [phones, tablets, wearables]
+
+plans:
+- plan_id: prepaid_10gb
+  name: Prepaid 10GB
+  tier: prepaid
+  summary: 'One line, 10 GB of high-speed data, taxes and fees included. No credit check.'
+  line_prices_cents: [4000]
+  extra_line_cents: 0
+  max_lines: 1
+  autopay_discount_cents_per_line: 0
+  data: '10 GB'
+  priority_data_gb: 10
+  hotspot_gb: 2
+  perks: []
+  taxes_and_fees_included: true
+  device_promos_eligible: false
+- plan_id: value_unlimited
+  name: Value Unlimited
+  tier: value
+  summary: 'Unlimited talk, text and data at the lowest unlimited price; data can slow when the network is busy.'
+  line_prices_cents: [6000, 9000, 11500, 13000]
+  extra_line_cents: 2500
+  max_lines: 8
+  autopay_discount_cents_per_line: 500
+  data: Unlimited
+  priority_data_gb: 0
+  hotspot_gb: 5
+  perks: ['5G access', 'Texting in 200+ countries']
+- plan_id: plus_unlimited
+  name: Plus Unlimited
+  tier: standard
+  summary: 'Unlimited with 100 GB of priority data, 15 GB hotspot and a streaming perk.'
+  line_prices_cents: [7500, 13000, 16500, 19000]
+  extra_line_cents: 3000
+  max_lines: 8
+  autopay_discount_cents_per_line: 500
+  data: Unlimited
+  priority_data_gb: 100
+  hotspot_gb: 15
+  perks: ['Streaming perk (ad-supported)', 'In-flight Wi-Fi', 'Mexico & Canada data']
+- plan_id: premium_unlimited
+  name: Premium Unlimited
+  tier: premium
+  summary: 'Unlimited priority data, 60 GB hotspot, two streaming perks and the best device promos.'
+  line_prices_cents: [9000, 16500, 21000, 24000]
+  extra_line_cents: 3500
+  max_lines: 8
+  autopay_discount_cents_per_line: 500
+  data: Unlimited
+  priority_data_gb: null
+  hotspot_gb: 60
+  perks: ['Two streaming perks', 'In-flight Wi-Fi', 'Satellite texting', 'Upgrade-ready device promos']
+- plan_id: unlimited_55
+  name: 55+ Unlimited
+  tier: value
+  summary: 'Unlimited for customers 55 and older, up to 2 lines.'
+  line_prices_cents: [5500, 8000]
+  extra_line_cents: 0
+  max_lines: 2
+  autopay_discount_cents_per_line: 500
+  data: Unlimited
+  priority_data_gb: 50
+  hotspot_gb: 5
+  perks: ['5G access']
+  requires: [age_55]
+
+promotions:
+- promo_id: px10_new_line
+  name: 'Pixel 10 on us with a new line'
+  kind: device_credit
+  skus: [PX10-128]
+  credit_cents: 69999
+  credit_months: 24
+  requires: [new_line, plan_standard_or_better, financed]
+  terms: 'Credits over 24 months; stop if you cancel the line. Synthetic demo offer.'
+- promo_id: ip18p_trade_in
+  name: 'Up to $800 off iPhone 18 Pro with trade-in'
+  kind: trade_in_bonus
+  skus: [IP18PRO-256]
+  credit_cents: 80000
+  credit_months: 24
+  requires: [trade_in, plan_premium, financed]
+  terms: 'Credit in place of the trade-in value, over 24 months. Synthetic demo offer.'
+- promo_id: gs26_switcher
+  name: '$500 off Galaxy S26 when you switch'
+  kind: device_credit
+  skus: [GS26-256]
+  credit_cents: 50000
+  credit_months: 24
+  requires: [port_in, financed]
+  terms: 'Bring your number from another carrier. Synthetic demo offer.'
+- promo_id: third_line_on_us
+  name: 'Third line on us'
+  kind: line_discount
+  credit_cents: 3000
+  credit_months: 1
+  min_lines: 3
+  plan_ids: [plus_unlimited, premium_unlimited]
+  requires: [new_line]
+  terms: '$30/mo off the account while it has 3+ lines on Plus or Premium. Synthetic demo offer.'
+- promo_id: charger_with_phone
+  name: '20% off the Belkin 67W charger with any phone'
+  kind: accessory_bundle
+  skus: [CHG-45W]
+  with_skus: [IP18PRO-256, IP17PRO-256, IP17-256, IP16-128, GS26U-256, GS26-256, GS25-128, GZF8-256, PX11P-256, PX10-128, PX9-128, REVVL8P-256, MOTOG26-128]
+  percent_off: 20
+  requires: [with_device]
+  terms: 'Optional. Synthetic demo offer.'
+- promo_id: protection_360
+  name: 'Device protection'
+  kind: protection
+  monthly_cents: 1800
+  terms: 'Optional add-on per protected phone: loss, theft, damage. $99 deductible. Synthetic demo pricing.'
+- promo_id: home_internet_bundle
+  name: '5G Home Internet with a voice line'
+  kind: home_internet
+  skus: [GW-5G]
+  monthly_cents: 4000
+  requires: [plan_standard_or_better]
+  terms: 'Optional. $40/mo with Plus or Premium; gateway included. Synthetic demo pricing.'
+- promo_id: buds4_weekend
+  name: 'Weekend sale: $40 off Galaxy Buds4'
+  kind: sale
+  skus: [BUDS-RUN]
+  credit_cents: 4000
+  starts: 2026-10-23
+  ends: 2026-10-26
+  terms: 'Starts Fri Oct 23. Synthetic demo offer.'
+- promo_id: px9_holiday
+  name: 'Holiday: $200 off Pixel 9'
+  kind: sale
+  skus: [PX9-128]
+  credit_cents: 20000
+  starts: 2026-11-27
+  ends: 2026-12-01
+  terms: 'Expected holiday promo. Synthetic demo offer.'
+
+# Illustrative trade-in values (cents) by condition. excellent = like new; good = light wear; fair = visible wear,
+# works; broken = cracked screen or doesn't power on.
+trade_in_models:
+- {model_id: iphone-12, name: iPhone 12, brand: Apple, release_year: 2020, values_cents: {excellent: 9000, good: 6500, fair: 3500, broken: 1000}}
+- {model_id: iphone-13, name: iPhone 13, brand: Apple, release_year: 2021, values_cents: {excellent: 16000, good: 12000, fair: 7000, broken: 2000}}
+- {model_id: iphone-14, name: iPhone 14, brand: Apple, release_year: 2022, values_cents: {excellent: 23000, good: 18000, fair: 11000, broken: 3000}}
+- {model_id: iphone-15, name: iPhone 15, brand: Apple, release_year: 2023, values_cents: {excellent: 34000, good: 27000, fair: 17000, broken: 5000}}
+- {model_id: iphone-16, name: iPhone 16, brand: Apple, release_year: 2024, values_cents: {excellent: 44000, good: 36000, fair: 23000, broken: 7000}}
+- {model_id: galaxy-s22, name: Galaxy S22, brand: Samsung, release_year: 2022, values_cents: {excellent: 14000, good: 10000, fair: 6000, broken: 1500}}
+- {model_id: galaxy-s23, name: Galaxy S23, brand: Samsung, release_year: 2023, values_cents: {excellent: 21000, good: 16000, fair: 9500, broken: 2500}}
+- {model_id: galaxy-s24, name: Galaxy S24, brand: Samsung, release_year: 2024, values_cents: {excellent: 30000, good: 24000, fair: 15000, broken: 4000}}
+- {model_id: pixel-6, name: Pixel 6, brand: Google, release_year: 2021, values_cents: {excellent: 6000, good: 4000, fair: 2000, broken: 500}}
+- {model_id: pixel-7, name: Pixel 7, brand: Google, release_year: 2022, values_cents: {excellent: 11000, good: 8000, fair: 4500, broken: 1000}}
+- {model_id: pixel-8, name: Pixel 8, brand: Google, release_year: 2023, values_cents: {excellent: 19000, good: 14500, fair: 8500, broken: 2000}}
+- {model_id: moto-g-2022, name: moto g 2022, brand: Motorola, release_year: 2022, values_cents: {excellent: 2500, good: 1500, fair: 500, broken: 0}}
+
+# Accessory sku -> device skus it fits ('*' = any phone in the catalog; ids that aren't catalog skus, like PX7, are
+# older devices customers own). Accessories not listed here are not offered as compatible with anything.
+compatibility:
+  CASE-IP16-MAG: [IP16-128]
+  CASE-IP17P-PEL: [IP17PRO-256]
+  CASE-IP17-ZAG: [IP17-256]
+  CASE-GS26-CM: [GS26-256]
+  CASE-GS26-GOTO: [GS26-256]
+  CASE-PX9-CLR: [PX9-128]
+  CASE-PX9-RUG: [PX9-128]
+  CASE-PX7-BLK: [PX7]
+  GLASS-IP18P-ZAG: [IP18PRO-256, IP17PRO-256]
+  GLASS-GS25-GOTO: [GS25-128]
+  GLASS-PX9: [PX9-128]
+  CHG-20W: ['*']
+  CHG-45W: ['*']
+  CHG-PXSNAP: [PX10-128, PX11P-256]
+  CHG-AW: [AW12-42, AWSE3-40]
+  CBL-USBC-2M: ['*']
+  CBL-APPLE-1M: ['*']
+  CBL-USBC-GOTO: ['*']
+  PB-10K: ['*']
+  PB-MOPHIE: ['*']
+  APP3: ['*']
+  AP4: ['*']
+  GBUDS4PRO: ['*']
+  BUDS-RUN: ['*']
+  BUDS-PRO: ['*']
+
+# Synthetic household accounts. maya and jordan are the demo users in data/fixtures/users.yaml; the rest are
+# wireless-only personas. current_monthly_cents = what they pay for service today (before taxes).
+accounts:
+- account_id: acct_maya
+  user_id: maya
+  persona: 'Existing customer who should probably wait'
+  carrier: T-Mobile
+  plan_id: value_unlimited
+  autopay: true
+  current_monthly_cents: 9000
+  priorities: [price, camera]
+  owned_accessories: [CHG-20W, CASE-PX7-BLK]
+  notes: 'Pixel 7 has 4 installments left; a Pixel 9 holiday promo is expected Nov 27.'
+  lines:
+  - {line_id: maya-1, label: Maya, device_name: Pixel 7, device_model_id: pixel-7, device_sku: PX7, device_age_months: 34, installments_left: 4, monthly_installment_cents: 1650, usage_gb_month: 18, hotspot_gb_month: 2}
+  - {line_id: maya-2, label: Sam, device_name: iPhone 14, device_model_id: iphone-14, device_age_months: 30, usage_gb_month: 9, hotspot_gb_month: 0}
+- account_id: acct_jordan
+  user_id: jordan
+  persona: 'Photography enthusiast'
+  carrier: T-Mobile
+  plan_id: plus_unlimited
+  autopay: true
+  current_monthly_cents: 7500
+  priorities: [camera, performance]
+  lines:
+  - {line_id: jordan-1, label: Jordan, device_name: iPhone 13, device_model_id: iphone-13, device_age_months: 48, usage_gb_month: 35, hotspot_gb_month: 4}
+- account_id: acct_priya
+  user_id: priya
+  persona: 'Budget-conscious student'
+  carrier: 'Other carrier'
+  autopay: true
+  current_monthly_cents: 4500
+  priorities: [price, battery]
+  lines:
+  - {line_id: priya-1, label: Priya, device_name: moto g 2022, device_model_id: moto-g-2022, device_age_months: 40, usage_gb_month: 7, hotspot_gb_month: 1}
+- account_id: acct_dev
+  user_id: dev
+  persona: 'Heavy data user'
+  carrier: T-Mobile
+  plan_id: value_unlimited
+  autopay: true
+  current_monthly_cents: 6000
+  priorities: [data, performance]
+  lines:
+  - {line_id: dev-1, label: Dev, device_name: Galaxy S23, device_model_id: galaxy-s23, device_age_months: 26, usage_gb_month: 140, hotspot_gb_month: 45}
+- account_id: acct_garcia
+  user_id: garcia
+  persona: 'Family with four lines'
+  carrier: T-Mobile
+  plan_id: premium_unlimited
+  autopay: true
+  current_monthly_cents: 24000
+  priorities: [price]
+  notes: 'Pays for Premium but every line uses under 25 GB.'
+  lines:
+  - {line_id: garcia-1, label: Elena, device_name: iPhone 15, device_model_id: iphone-15, device_age_months: 24, usage_gb_month: 22, hotspot_gb_month: 3}
+  - {line_id: garcia-2, label: Marco, device_name: Galaxy S22, device_model_id: galaxy-s22, device_age_months: 36, installments_left: 0, usage_gb_month: 15, hotspot_gb_month: 2}
+  - {line_id: garcia-3, label: Lucia, device_name: iPhone 12, device_model_id: iphone-12, device_age_months: 48, usage_gb_month: 12, hotspot_gb_month: 0}
+  - {line_id: garcia-4, label: Teo, device_name: Pixel 6, device_model_id: pixel-6, device_age_months: 44, usage_gb_month: 6, hotspot_gb_month: 0}
+- account_id: acct_alex
+  user_id: alex
+  persona: 'New customer switching from another carrier'
+  carrier: 'Other carrier'
+  autopay: true
+  current_monthly_cents: 13500
+  priorities: [price, camera]
+  lines:
+  - {line_id: alex-1, label: Alex, device_name: Galaxy S22, device_model_id: galaxy-s22, device_age_months: 38, usage_gb_month: 28, hotspot_gb_month: 6}
+  - {line_id: alex-2, label: Robin, device_name: iPhone 13, device_model_id: iphone-13, device_age_months: 44, usage_gb_month: 14, hotspot_gb_month: 0}
+- account_id: acct_ruth
+  user_id: ruth
+  persona: 'Customer who should keep her current phone'
+  carrier: T-Mobile
+  plan_id: value_unlimited
+  autopay: true
+  current_monthly_cents: 6000
+  eligibility: [age_55]
+  priorities: [price, battery]
+  notes: 'iPhone 15 in excellent shape; no need to upgrade. Eligible for 55+.'
+  lines:
+  - {line_id: ruth-1, label: Ruth, device_name: iPhone 15, device_model_id: iphone-15, device_age_months: 24, usage_gb_month: 6, hotspot_gb_month: 0}

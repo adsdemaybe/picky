@@ -1,6 +1,7 @@
 // Generates the app's demo data from the repo's source-of-truth YAML (CLAUDE.md rule 5).
-//   data/products.yaml, data/planograms/store_ave.yaml, data/online_store.yaml, data/fixtures/users.yaml
-//   -> src/data/generated/{products,store_ave,online,maya}.json
+//   data/products.yaml, data/planograms/{store_ave,store_tmobile}.yaml, data/online_store.yaml,
+//   data/fixtures/{users,wireless,tmobile_directions}.yaml, data/wireless.yaml
+//   -> src/data/generated/{products,store_ave,store_tmobile,wireless,directions,online,maya}.json
 // Purchase history beyond the fixture trips is synthesized deterministically (seeded) and flagged synthetic=true.
 // Run: pnpm gen-data   (never hand-edit the output)
 
@@ -19,14 +20,26 @@ const write = (name, obj) => writeFileSync(join(out, name), JSON.stringify(obj, 
 
 // ---- products ----
 const { products } = load("data/products.yaml");
+// Wireless products are `category: wireless` + a subcategory in data/products.yaml, and what fits what lives in
+// data/wireless.yaml `compatibility` ('*' = any phone). The web app's T-Mobile code reads a category per kind of item
+// (phone, case, screen, charger, ...) and `compatible_with`, so map them here.
+const COMPAT = load("data/wireless.yaml").compatibility ?? {};
+const WIRELESS_CAT = { phones: "phone", cases: "case", screen_protectors: "screen", chargers: "charger", audio: "audio", wearables: "wearable", tablets: "tablet", home_internet: "home_internet", trackers: "connected", sim: "connected" };
+const wirelessSub = (p) => {
+  if (p.subcategory === "phones") return p.brand === "Apple" ? "ios" : "android";
+  if (p.subcategory !== "chargers") return p.subcategory;
+  if (p.sku.startsWith("CBL-")) return "cable";
+  if (p.sku.startsWith("PB-")) return "power_bank";
+  return /wireless|magsafe|snap|watch/i.test(`${p.name} ${p.sku}`) ? "wireless_charger" : "wall_charger";
+};
 write(
   "products.json",
   products.map((p) => ({
     sku: p.sku,
     name: p.name,
     brand: p.brand ?? null,
-    category: p.category,
-    subcategory: p.subcategory ?? null,
+    category: p.category === "wireless" ? (WIRELESS_CAT[p.subcategory] ?? "connected") : p.category,
+    subcategory: p.category === "wireless" ? wirelessSub(p) : (p.subcategory ?? null),
     tags: p.tags ?? [],
     dietary: p.dietary ?? [],
     price_cents: p.price_cents,
@@ -36,13 +49,16 @@ write(
     label_color: p.asset?.label_color ?? "#cccccc",
     shape: p.asset?.shape ?? "box",
     dims_m: p.asset?.dims_m ?? [0.15, 0.08, 0.2],
+    description: p.description ?? null,
+    // fit: data/wireless.yaml compatibility ('*' = universal = no list), else legacy `fits:<sku>` tags
+    compatible_with: COMPAT[p.sku] ? COMPAT[p.sku].filter((x) => x !== "*") : (p.tags ?? []).filter((t) => t.startsWith("fits:")).map((t) => t.slice(5).toUpperCase()),
+    requires: (p.tags ?? []).includes("requires_ios") ? "ios" : (p.tags ?? []).includes("requires_android") ? "android" : null,
   })),
 );
 const bySku = Object.fromEntries(products.map((p) => [p.sku, p]));
 
-// ---- store layout ----
-const store = load("data/planograms/store_ave.yaml");
-write("store_ave.json", {
+// ---- store layouts ----
+const storeJson = (store) => ({
   store_id: store.store_id,
   name: store.name,
   address: store.address,
@@ -74,6 +90,48 @@ write("store_ave.json", {
     deal: s.deal ?? null,
   })),
 });
+const store = load("data/planograms/store_ave.yaml");
+write("store_ave.json", storeJson(store));
+const tmo = load("data/planograms/store_tmobile.yaml");
+write("store_tmobile.json", storeJson(tmo));
+
+// ---- wireless account signals + promo calendar (Cart Whisperer, T-Mobile track) ----
+const wireless = load("data/fixtures/wireless.yaml");
+write("wireless.json", {
+  as_of: wireless.as_of,
+  accounts: wireless.accounts,
+  upcoming_promos: wireless.upcoming_promos ?? [],
+  line_promos: wireless.line_promos ?? [],
+  online_sale_prices: wireless.online_sale_prices ?? [],
+  purchases: load("data/fixtures/users.yaml").users.find((u) => u.user_id === "maya").purchases.filter((p) => p.store_id === "store_tmobile"),
+  sources: wireless.sources ?? [],
+});
+
+// ---- the other four T-Mobile challenge directions (Matchmaker, Next Best Moment, Timekeeper, Household Mix) ----
+// Plans, financing, trade-in values and households: data/wireless.yaml (the wireless arm's rules). Extra signals:
+// data/fixtures/tmobile_directions.yaml. All synthetic.
+{
+  const rules = load("data/wireless.yaml");
+  const dir = load("data/fixtures/tmobile_directions.yaml");
+  const promo = (id) => rules.promotions.find((p) => p.promo_id === id) ?? null;
+  write("directions.json", {
+    as_of: dir.as_of,
+    today: rules.today,
+    service_taxes_fees_bps: rules.service_taxes_fees_bps,
+    new_line_fee_cents: rules.new_line_fee_cents,
+    financing: rules.financing,
+    plans: rules.plans,
+    trade_in_models: rules.trade_in_models,
+    accounts: rules.accounts,
+    add_ons: { protection: promo("protection_360"), home_internet: promo("home_internet_bundle"), third_line: promo("third_line_on_us") },
+    phone_traits: dir.phone_traits,
+    matchmaker_presets: dir.matchmaker_presets,
+    retention_accounts: dir.retention_accounts,
+    retention_actions: dir.retention_actions,
+    upgrade_cases: dir.upgrade_cases,
+    households: dir.households,
+  });
+}
 
 // ---- online store ----
 const online = load("data/online_store.yaml");
@@ -174,13 +232,14 @@ while (t < Date.parse("2026-10-15T00:00:00Z")) {
   }
   t += (6 + Math.floor(rand() * 4)) * DAY;
 }
-for (const p of maya.purchases) purchases.push({ ...p, rating: p.rating ?? null, synthetic: false });
+// T-Mobile purchases belong to the separate T-Mobile site (wireless.json), not the grocery history
+for (const p of maya.purchases.filter((q) => q.store_id !== "store_tmobile")) purchases.push({ ...p, rating: p.rating ?? null, synthetic: false });
 purchases.sort((a, b) => a.ts.localeCompare(b.ts));
 
 write("maya.json", { profile: maya.profile, mandate: maya.mandate, purchases });
 
 console.log(
-  `gen-data: ${products.length} products, ${store.slots.length} slots, ${purchases.length} purchases (${purchases.filter((p) => p.synthetic).length} synthetic) -> ${out}`,
+  `gen-data: ${products.length} products, ${store.slots.length} + ${tmo.slots.length} slots, ${purchases.length} purchases (${purchases.filter((p) => p.synthetic).length} synthetic) -> ${out}`,
 );
 
 // ---- retailer offers + price history (Find / price check) ----

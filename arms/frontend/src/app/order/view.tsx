@@ -2,7 +2,7 @@
 import { Ban, Bot, Check, Clock, Info, PackageCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState, useTransition } from "react";
+import { Suspense, useEffect, useMemo, useState, useTransition } from "react";
 import { GroceryTrips } from "@/components/GroceryTrips";
 import { TripRoutePreview } from "@/components/TripRoutePreview";
 import { groupFoodLines } from "@/lib/grocery-trips";
@@ -35,7 +35,9 @@ export default function OrderPage() {
 function OrderBuilder() {
   const params = useSearchParams();
   const add = params.get("add");
-  const initialStoreId: StoreId = params.get("store") === "store_tmobile" ? "store_tmobile" : "store_ave";
+  // the T-Mobile store has its own site (/tmobile); this page plans grocery trips. ?store=store_tmobile links go there.
+  const tmoLink = params.get("store") === "store_tmobile";
+  const initialStoreId: StoreId = "store_ave";
   const initial = params.get("intent")?.slice(0, 2000) || (PRESETS[initialStoreId].find((preset) => preset.id === params.get("preset"))?.text ?? PRESETS[initialStoreId][0].text);
   const [text, setText] = useState<string>(initial);
   const [draft, setDraft] = useState<Draft>(() => expandIntent(initial, initialStoreId, add));
@@ -48,6 +50,9 @@ function OrderBuilder() {
   const [sending, setSending] = useState(false);
   const placeOrder = useTrip((s) => s.placeOrder);
   const router = useRouter();
+  useEffect(() => {
+    if (tmoLink) router.replace("/tmobile/shop");
+  }, [tmoLink, router]);
   const gatewayLive = useGateway((s) => s.status === "live");
   const live = gatewayLive && store.kind === "grocery";
 
@@ -134,6 +139,7 @@ function OrderBuilder() {
                 whileTap={{ scale: 0.985 }}
                 onClick={() => {
                   if (on) return;
+                  if (!grocery) return router.push("/tmobile/shop");
                   submit(PRESETS[id][0].text, id);
                 }}
                 className={cn(
