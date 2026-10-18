@@ -8,6 +8,7 @@ import { productBySku } from "@/lib/data";
 import { fmt } from "@/lib/money";
 import { suggest } from "@/lib/whisperer";
 import { niceDate } from "./bits";
+import { Face } from "./store/face";
 
 export default function TmoHome() {
   const ph = mayaDevices.phone;
@@ -79,6 +80,20 @@ export default function TmoHome() {
           </div>
         </Panel>
       </section>
+
+      <Panel className="flex flex-col items-start gap-4 overflow-hidden bg-[#17141a] p-5 text-white sm:flex-row sm:items-center">
+        <Face mode="idle" size={110} />
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-semibold text-magenta">In the store</div>
+          <div className="text-[20px] leading-tight font-semibold">Magenta meets you at the door</div>
+          <p className="mt-1 text-[14px] text-white/75">Talk to the robot like a store rep: it walks you to the right wall, brings a sealed phone from the back, and tells you when to skip or wait. Your basket from here comes with you.</p>
+        </div>
+        <Button asChild size="lg" className="shrink-0 bg-magenta text-white hover:bg-magenta-deep">
+          <Link href="/tmobile/store">
+            Talk to Magenta <ArrowRight className="size-4" aria-hidden />
+          </Link>
+        </Button>
+      </Panel>
 
       <section>
         <SectionTitle>Honest advice before you go</SectionTitle>

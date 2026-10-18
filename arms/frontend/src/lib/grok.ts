@@ -1,5 +1,6 @@
 // Grok (xAI) over its OpenAI-compatible chat API, server side only. XAI_API_KEY in arms/frontend/.env.local (or the
-// Vercel project env); PICKY_GROK_MODEL overrides the model (same knob as the team's /api/chat).
+// Vercel project env); PICKY_GROK_MODEL overrides the model (same knob as the team's /api/chat); XAI_BASE_URL points
+// at another OpenAI-compatible endpoint (tests use a local mock).
 export type GrokMsg = { role: "system" | "user" | "assistant" | "tool"; content: string; tool_calls?: GrokCall[]; tool_call_id?: string };
 export type GrokCall = { id: string; type?: "function"; function: { name: string; arguments: string } };
 export type GrokTool = { name: string; description: string; parameters: Record<string, unknown> };
@@ -8,7 +9,7 @@ export const hasGrok = () => !!process.env.XAI_API_KEY;
 export const grokModel = () => process.env.PICKY_GROK_MODEL || "grok-4.20-0309-non-reasoning";
 
 export async function grok(messages: GrokMsg[], opts: { tools?: GrokTool[]; maxTokens?: number; timeoutMs?: number; json?: boolean } = {}) {
-  const r = await fetch("https://api.x.ai/v1/chat/completions", {
+  const r = await fetch(`${process.env.XAI_BASE_URL || "https://api.x.ai/v1"}/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${process.env.XAI_API_KEY}`, "Content-Type": "application/json" },
     signal: AbortSignal.timeout(opts.timeoutMs ?? 12000),

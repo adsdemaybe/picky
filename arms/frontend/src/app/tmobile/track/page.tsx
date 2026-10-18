@@ -14,6 +14,7 @@ const RUBRIC = [
       `At most ${MAX_CARDS} cards per phase, and zero is a valid answer ("Nothing worth adding today")`,
       "Explicit SKIP (you own a charger that works; that Pixel 7 case won't fit) and WAIT (Beats Flex $20 off Fri Oct 23; 4 payments left on the Pixel 7 and $200 off expected Nov 27)",
       "Every card shows the dollars saved, avoided (estimate) or added, and one tap accepts or declines it",
+      "In store, Magenta does the floor associate's job: walks you to the right wall, brings a sealed phone from the back room, and pages a person for account work",
     ],
   },
   {
@@ -22,7 +23,7 @@ const RUBRIC = [
     proof: [
       `Commerce: cart, ${tmobileProducts.length}-product catalog with real prices, shelf deals, stock, compatibility (fits: tags), promo calendar, real line offers`,
       "Customer: the phone she owns (34 months, 4 installments left), items she owns + purchase dates, lines on the account, budget, tech mandate, past declines",
-      "Physical: the slot each item sits in, detour from the planned route (+0 m when it's on the same wall), what the robot just picked, checkout leg",
+      "Physical: the slot each item sits in, demo unit vs. sealed back-room stock, where the shopper is standing, detour from the planned route (+0 m when it's on the same wall), what the robot just picked, checkout leg",
     ],
   },
   {
@@ -30,7 +31,8 @@ const RUBRIC = [
     weight: 20,
     proof: [
       "Deterministic reason codes on every card (ALREADY_OWNED, INCOMPATIBLE, PROMO_SOON, INSTALLMENTS_LEFT, OVER_BUDGET, ...) plus a \"Why am I seeing this?\" signal list and the score",
-      "Claude only re-phrases the sentence; code checks every number against the card's signals and falls back to the template",
+      "The LLM (Grok, or Claude) only re-phrases the sentence; code checks every number against the card's signals and falls back to the template",
+      "Talking in store, Grok chooses the tools, but every dollar amount in a spoken reply must appear in a tool result, or Magenta uses the built-in answer instead",
       "Nothing is sponsored, nothing is ranked by margin, and accepting a card is a normal cart change that still goes through the mandate and checkout approval",
     ],
   },
@@ -38,7 +40,8 @@ const RUBRIC = [
     name: "Feasibility & demo",
     weight: 25,
     proof: [
-      "Runs with no API key and no backend: the same cards every run (deterministic engine in lib/whisperer.ts)",
+      "Runs with no API key and no backend: the same cards every run (deterministic engine in lib/whisperer.ts) and a built-in in-store brain (lib/associate.ts); add XAI_API_KEY for Grok",
+      "Voice in and out in the browser (speech recognition + natural TTS), hands-free mode, works on a phone or the robot's screen",
       "The robot shops the store in the web app replay and in Isaac Sim with physics (rover + lift + SO-101 picking phones into the basket)",
       "Same data the backend uses: data/planograms/store_tmobile.yaml + data/fixtures/wireless.yaml, generated into the app",
     ],
@@ -50,15 +53,19 @@ const CHECK = [
   "Shows a phone-shopping store: T-Mobile, University Way NE (demo layout, 91 real products)",
   "Shows SKIP and WAIT moments live, on the shop page and during the robot trip",
   "Says it plainly: synthetic shopper, devices and promo calendar",
+  "In person too: a talking robot associate on the floor (In store), same brain, data and basket as the website",
 ];
 
 const SCRIPT = [
   ["Shop → \"New Pixel 9 setup\"", "Case $29.99 + ZAGG glass $39.99 (20% off with a Pixel 9 case). Cards: SKIP a new charger (she owns a USB-C 20W from March), WAIT on the phone itself (4 payments left, $200 off expected Nov 27)."],
-  ["Add the UAG rugged case", "SWAP card: same fit, save $19.96. Tap Swap: the cart and the metrics update."],
+  ["Add the UAG rugged case", "Quantity card: two cases for one Pixel 9? Keep the $29.99 Case-Mate, drop the $49.95 UAG. One tap: the cart and the metrics update."],
   ["Add the $9.99 Pixel 7 clearance case", "SKIP: it's made for the Pixel 7, it won't fit the Pixel 9. Clearance isn't a deal if it doesn't fit."],
   ["Add a Belkin power bank", "Over budget: \"Drop the power bank? It puts you $9.96 over $100.\""],
   ["\"Running earbuds\"", "Beats Flex $69.99 + WAIT: $49.99 from Fri Oct 23. Accept → \"I'll text you\". Then zero cards: Cart Whisperer stays quiet."],
   ["Shop with robot", "Magenta drives the store; tap \"grab the clearance case too\" → live SKIP. At checkout, the Before-you-pay pass and the metrics: accepted, saved, avoided."],
+  ["In store → \"Tap to talk to me\"", "Ask \"where are the AirPods?\" out loud. Magenta answers and walks you to the audio wall on the live floor map."],
+  ["Check in, then \"I'll take the Pixel 9\"", "She brings a sealed box from the back, then is honest: 4 payments left and $200 off expected Nov 27, so wait. \"Do I need a charger?\" Skip it, you own one."],
+  ["\"Can I port my number?\" → \"Check out\"", "Account work needs a person, so she pages a T-Mobile expert. Checkout: pay with the app, she walks you to the counter."],
 ];
 
 export default function TmoTrack() {
@@ -73,6 +80,9 @@ export default function TmoTrack() {
         <div className="mt-4 flex gap-2">
           <Button asChild className="bg-magenta text-white hover:bg-magenta-deep">
             <Link href="/tmobile/shop">Try it</Link>
+          </Button>
+          <Button asChild variant="outline">
+            <Link href="/tmobile/store">Talk to the robot</Link>
           </Button>
           <Button asChild variant="outline">
             <Link href="/tmobile/trip">Robot trip</Link>
@@ -122,7 +132,7 @@ export default function TmoTrack() {
             ["1 Candidates", "complete · swap/save · qty fix · over budget · skip · wait, each from code over the cart, account and store"],
             ["2 Hard gates", "in stock, fits the device, not owned, mandate per-item cap, not already declined, not already in the cart"],
             ["3 Score + reason codes", `deterministic [0, 1]; below ${MIN_SCORE} nothing is shown; ties break by SKU`],
-            ["4 Phrasing", "Claude rewrites the sentence from derived signals only; numbers are validated, else the template"],
+            ["4 Phrasing", "Grok or Claude rewrites the sentence from derived signals only; numbers are validated, else the template"],
             [`5 Top 0–${MAX_CARDS}`, "one card per SKU; accept = normal cart change → mandate → approval; decline = never re-asked this trip"],
           ].map(([h, b]) => (
             <li key={h} className="rounded-xl bg-card p-3 ring-1 ring-foreground/[0.07]">
@@ -134,7 +144,7 @@ export default function TmoTrack() {
       </section>
 
       <section>
-        <SectionTitle>Demo script (about 2 minutes)</SectionTitle>
+        <SectionTitle>Demo script (about 3 minutes)</SectionTitle>
         <Panel className="divide-y divide-border">
           {SCRIPT.map(([a, b], i) => (
             <div key={a} className="grid gap-1 p-4 md:grid-cols-[28px_260px_1fr]">
@@ -152,7 +162,7 @@ export default function TmoTrack() {
           <ul className="space-y-1.5">
             <li><b>Synthetic:</b> the shopper (Maya), her devices, owned items, installments and lines; the promo calendar; the store floor plan.</li>
             <li><b>Real (public snapshot, Oct 17 2026):</b> product names, brands and prices; the line offers, which are bill credits that need a new line or upgrade, so we never show them as shelf prices.</li>
-            <li><b>Privacy:</b> the full shopper context stays on the server side; cards carry derived signals only, and that is all the LLM sees. Model calls do go to the Claude API.</li>
+            <li><b>Privacy:</b> cards carry derived signals only, and that is all the LLM sees. In store, Magenta uses your account only after you check in with the app, and forgets it when you check out or end the visit. Model calls go to xAI (Grok) or Anthropic when a key is set.</li>
             <li><b>Sources:</b> {wireless.sources.join(" · ")}. Trademarks belong to their owners; no affiliation or sponsorship.</li>
           </ul>
         </Panel>

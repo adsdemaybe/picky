@@ -270,6 +270,8 @@ export default function InStore() {
     stopSpeaking();
     if (mic.listening) mic.stop();
     setStarted(false);
+    // privacy: a visit's check-in ends with the visit
+    setKnown(false);
     setMsgs([]);
     setTask(null);
     setExpert(null);
@@ -277,7 +279,7 @@ export default function InStore() {
     focus.current = null;
     setDevice(null);
     walker.reset();
-    setChips(chipsFor({ cart: [], budget_cents: budget, known }));
+    setChips(chipsFor({ cart: [], budget_cents: budget, known: false }));
   };
 
   // ---- basket + Cart Whisperer (account-based cards only after check-in)
