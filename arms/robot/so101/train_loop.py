@@ -10,7 +10,7 @@ final one:
                        Q_grasp[g] += alpha * (gamma * max_d' Q_drop[d'] - Q_grasp[g])      (Q-learning backup)
 
 A failed attempt is learned from immediately and retried (up to 3 per episode) with the updated values. Actions are
-epsilon-greedy. Every episode is logged; successes also keep their video, frames and a replayable recipe.
+epsilon-greedy. Only successes are saved (log, video, frames, replayable recipe); failures only update q_policy.json.
 
     python -m arms.robot.so101.train_loop "pick up the gum and put it on the plate" [--record]
 
@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import shutil
 import sys
 import threading
 import time
@@ -239,10 +240,7 @@ def main() -> None:
                 print(f"not running this episode: {last.note if last else 'no plan'} (fix the scene, press Enter)")
                 if rec:
                     rec.stop()
-                for f in ("video.mp4",):
-                    (ep / f).unlink(missing_ok=True)
-                if not any(ep.iterdir()):
-                    ep.rmdir()
+                shutil.rmtree(ep, ignore_errors=True)
                 if quit_after:
                     break
                 continue
@@ -284,17 +282,18 @@ def main() -> None:
                 "duration_s": round(time.time() - t0, 1),
                 "attempts": [a.summary() for a in attempts],
             }
-            (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
-            if success:  # every success becomes a replayable recipe, with its first view and final view
+            if success:  # only successes are kept: log, video, first and final view, replayable recipe
+                (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
                 cv2.imwrite(str(ep / "scene.jpg"), last.scene)
                 if last.after is not None:
                     cv2.imwrite(str(ep / "after.jpg"), last.after)
                 save_recipe(f"success_{ep.name}", last.plan, last.traj, rest)
-            else:  # failures keep only episode.json (what the Q-learning used): no video or frames
-                (ep / "video.mp4").unlink(missing_ok=True)
+            else:  # failures leave nothing on disk; what was learned from them is in q_policy.json
+                shutil.rmtree(ep, ignore_errors=True)
             rate = policy.successes / max(1, policy.episodes)
             print(
-                f"saved {ep.name}: {'SUCCESS' if success else 'failure'} after {len(attempts)} attempt(s) | "
+                f"{'SUCCESS saved to ' + ep.name if success else 'failure (not saved)'} "
+                f"after {len(attempts)} attempt(s) | "
                 f"{policy.successes}/{policy.episodes} ({rate:.0%}) | {policy.summary()}",
                 flush=True,
             )
@@ -305,8 +304,8 @@ def main() -> None:
     finally:
         from . import camera
 
-        if camera._ACTIVE is not None:  # quit mid-episode: close the video so it stays playable
-            print(f"video: {camera._ACTIVE.stop()}")
+        if camera._ACTIVE is not None:  # quit mid-episode: unlabelled, so not a success - drop its folder
+            shutil.rmtree(Path(camera._ACTIVE.stop()).parent, ignore_errors=True)
         go_home(robot, rest, GRIP_OPEN)
         robot.disconnect()
         print("arm released")

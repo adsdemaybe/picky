@@ -424,16 +424,18 @@ def main() -> None:
         policy.learn(last.actions, held, success if held is not False else None)
         policy.finish(success)
         policy.save()
+        if not success:  # failures leave nothing on disk; what was learned from them is in q_policy.json
+            if args.record:
+                vid.unlink(missing_ok=True)
+            print(f"failure (not saved) | policy {policy.successes} successes / {policy.episodes} runs")
+            return
         ep = DATA_DIR / time.strftime("%Y%m%d-%H%M%S")
         ep.mkdir(parents=True, exist_ok=True)
-        if success:  # failures keep only episode.json: no video or frames
+        if success:
             cv2.imwrite(str(ep / "scene.jpg"), last.scene)
             if last.after is not None:
                 cv2.imwrite(str(ep / "after.jpg"), last.after)
             save_recipe(f"success_{ep.name}", last.plan, last.traj, rest)
-        elif args.record:
-            vid.unlink(missing_ok=True)
-            print("failure: video not kept")
         record = {
             "command": args.command,
             "success": success,
@@ -442,8 +444,7 @@ def main() -> None:
         }
         (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
         print(
-            f"{'SUCCESS' if success else 'failure'} saved to {ep} | policy {policy.successes} successes / "
-            f"{policy.episodes} runs | {policy.summary()}"
+            f"SUCCESS saved to {ep} | policy {policy.successes} successes / {policy.episodes} runs | {policy.summary()}"
         )
     finally:
         go_home(robot, dict(cfg.home_deg), GRIP_OPEN)
