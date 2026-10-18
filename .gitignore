@@ -31,7 +31,7 @@ out/
 generated/
 outputs/
 recordings/
-runs/
+runs/steer_policy.json
 pitch/
 last_*.jpg
 
