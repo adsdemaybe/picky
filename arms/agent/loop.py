@@ -636,6 +636,11 @@ class PlanLoop:
                 )
                 assert f is not None
                 return await self._recover(run, i, f, att, baseline=baseline)
+        # 3a. the shopper's chosen unit (pick_choice): a grasp (T1) that took ANOTHER unit of the SKU is a wrong target
+        if isinstance(step, GraspStep) and from_shelf and run.mode == "plan" and step.target.instance_id:
+            held = await self._held_unit(run)
+            if held is not None and held.instance_id != step.target.instance_id:
+                return await self._not_the_chosen_unit(run, i, att, held, baseline)
         # 3b. 0.2.4: the shopper checks a photo of the unit in the gripper (correct / wrong; auto-accept on silence)
         if isinstance(step, GraspStep) and from_shelf and run.mode == "plan" and self._verify_on():
             answer = await self._verify_item(run, step, att)
@@ -2072,6 +2077,43 @@ class PlanLoop:
         run.set_aside.add(place.step_id)
         plan.steps[j + 1 : j + 1] = [*redo, again]
         return True
+
+    async def _not_the_chosen_unit(
+        self, run: _Run, i: int, att: StepAttempt, held: ItemInstance, baseline: VerifyBaseline | None
+    ) -> str:
+        """The gripper holds a unit of the right SKU but not the one the shopper chose: put it back when the backend
+        can (then re-ground + re-grasp THAT unit), else set it aside for staff (never counted / charged) and grab the
+        chosen unit with the scripted (T0) grasp, which takes an exact instance."""
+        step = run.plan.steps[i]
+        assert isinstance(step, GraspStep)
+        chosen = step.target.instance_id
+        caps = await self._caps(run)
+        t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
+        await self._mirror(run, step, f"grabbed {held.instance_id}, not the chosen {chosen}", ok=False)
+        if t0 is not None and not t0.place_back and self._set_aside(run, i):
+            for s in run.plan.steps:
+                if s.inserted_by == step.step_id and s.status == StepStatus.PENDING:
+                    if isinstance(s, GraspStep | GroundTargetStep):
+                        s.target = s.target.model_copy(update={"instance_id": chosen})
+                    if isinstance(s, GraspStep):
+                        run.next_tier[s.step_id] = "t0_scripted"
+            return await self._succeed(run, step, att, note="not the chosen unit: set aside for staff; grabbing it")
+        f = StepFailure(
+            plan_id=run.plan.plan_id,
+            step_id=step.step_id,
+            step_kind=step.kind,
+            attempt=step.attempts,
+            kind="postcondition",
+            code="wrong_item_grasped",
+            message=f"grabbed {held.instance_id}, not the shopper's chosen {chosen}: putting it back",
+            item_id=step.item_id,
+        )
+        out = await self._recover(run, i, f, att, baseline=baseline)
+        run.next_tier[step.step_id] = "t0_scripted"
+        for s in run.plan.steps:  # the re-ground after a put-back keeps the shopper's unit
+            if s.inserted_by == step.step_id and s.status == StepStatus.PENDING and isinstance(s, GroundTargetStep):
+                s.target = s.target.model_copy(update={"instance_id": chosen})
+        return out
 
     async def _counter_card(self, run: _Run, step: PlanStep, att: StepAttempt) -> None:
         """Unload: the photo of the unit on the counter as a verification card (non-blocking: it is bought already;
