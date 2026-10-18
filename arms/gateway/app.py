@@ -32,6 +32,7 @@ from pydantic import ValidationError
 from arms.gateway.loop_api import mount_loop_routes
 from arms.gateway.orchestrator import OrchestratorConfig, TripOrchestrator
 from arms.gateway.registry import NOT_WIRED, Registry, build_registry
+from arms.gateway.wireless_api import mount_wireless_routes
 from contracts import CONTRACTS_VERSION
 from contracts.api import (
     ApprovalDecisionRequest,
@@ -630,6 +631,7 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
 
     # ------------------------------------------------------------------------- planner -> VLA -> verifier loop
     mount_loop_routes(app, reg)
+    mount_wireless_routes(app, reg)
 
     @app.get("/api/_schema/events")
     async def events_schema() -> dict[str, Any]:
