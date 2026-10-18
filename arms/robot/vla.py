@@ -47,6 +47,7 @@ fallback mid-run: the runner's RetryPolicy downgrades to T0 (``policy`` category
 
 import asyncio
 import base64
+import contextlib
 import math
 import time
 from collections.abc import AsyncIterator
@@ -438,16 +439,22 @@ class T0Vla:
                     await asyncio.Event().wait()
                 claim = await self._act(ex, robot, st, effects)
             ended = ex.ended_at or utcnow()
-            hb.cancel()
             final = await robot.state(req.robot_id)
             overlay = self._overlay()
             virtual = overlay.virtual_holding.get(req.robot_id) if overlay is not None else None
+            # The heartbeat keeps running through the evidence capture: on a loaded GPU host one render can take
+            # seconds, and a silent capture used to trip the runner's stall detector ("the VLA stopped reporting
+            # progress") after a motion that had already succeeded (measured on vhagar 2026-10-18).
+            frames = await self._capture_after(ex)
+            hb.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await hb
             outcome = VlaOutcome(
                 self_report=ex.self_report,
                 self_confidence=0.9 if tier != T0 else None,
                 final_state=final,
                 holding_instance_id=virtual.instance_id if virtual else final.holding,
-                frames=await self._capture_after(ex),
+                frames=frames,
                 ended_at=ended,
                 duration_ms=(time.monotonic() - t0) * 1000,
                 chunks_executed=ex.chunk or None,

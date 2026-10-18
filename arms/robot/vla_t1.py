@@ -238,7 +238,8 @@ async def blur_pair(perception: Any, robot_id: RobotId, side: bytes, wrist: byte
     out: list[bytes] = []
     for cam, data in (("front", side), ("wrist", wrist)):
         frame = CameraFrame(
-            frame_id=f"t1-{robot_id}-{cam}-{time.monotonic_ns()}",
+            # 'sim-' = rendered by the Isaac worker's policy cameras (perception's synthetic-frame convention)
+            frame_id=f"sim-t1-{robot_id}-{cam}-{time.monotonic_ns()}",
             camera=cam,  # type: ignore[arg-type]
             robot_id=robot_id,
             jpeg_b64=base64.b64encode(data).decode("ascii"),
@@ -246,6 +247,8 @@ async def blur_pair(perception: Any, robot_id: RobotId, side: bytes, wrist: byte
             h=480,
         )
         blurred = await blur(frame)
+        if not blurred.blurred:  # never send a frame perception did not clear to a policy (CLAUDE.md section 8)
+            raise _Stop("policy_unavailable", f"perception did not blur the {cam} policy frame; not sent to the policy")
         out.append(base64.b64decode(blurred.jpeg_b64))
     return out[0], out[1]
 
