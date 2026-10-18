@@ -143,8 +143,9 @@ def held_position(
     item_dims: Vec3 = (0.08, 0.08, 0.15),
 ) -> Point3:
     """Center of the unit held by the magic grasp: just ahead of the jaws (its near face HELD_CLEARANCE_M in front of
-    the TCP; a held unit is yawed pose.theta + pi/2, so its depth item_dims[1] lies along the robot's x). Centered ON
-    the TCP the wrist camera sat inside the unit and Isaac showed the aisle through a wash of the unit's color."""
+    the TCP; a held unit is yawed pose.theta - pi/2, label toward the robot, so its depth item_dims[1] lies along the
+    robot's x). Centered ON the TCP the wrist camera sat inside the unit and Isaac showed the aisle through a wash of
+    the unit's color."""
     x, y, z = gripper_local(lift_height_m, arm_ext_m)
     return to_store(pose, (x + item_dims[1] / 2 + HELD_CLEARANCE_M, y, z))
 

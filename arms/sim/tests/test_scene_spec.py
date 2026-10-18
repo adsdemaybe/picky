@@ -5,6 +5,7 @@ import pytest
 from arms.sim import build_scene_spec
 from arms.sim.scene_spec import (
     BASKET_OFFSET_M,
+    BASKET_SIZE_M,
     FRESHNESS_JITTER,
     STORE_GAP_M,
     basket_drop_position,
@@ -12,6 +13,7 @@ from arms.sim.scene_spec import (
     build_world_spec,
     default_robots,
     item_yaw_for,
+    slot_lateral_room,
     store_offsets,
     usd_name,
 )
@@ -129,6 +131,42 @@ def test_slot_layout_positions_front_first(spec):
     assert len(layout.positions) >= 6
     assert layout.position(0) == spec.prim_for_instance("s_salsa#00").center
     assert layout.position(len(layout.positions) + 3)  # overflow still has a position
+
+
+def test_shelf_slot_fills_wide_from_the_center(spec):
+    """6 salsa jars (2 facings in the data) spread across the slot's room in ONE front row, rank 0 on the tag."""
+    plan = planogram()
+    slot = plan.slot("s_salsa")
+    room = slot_lateral_room(plan, slot, plan.fixture("f1"))
+    assert 0.3 < room <= 0.6
+    layout = spec.slot_layouts["s_salsa"]
+    ip = slot.item_position
+    front = [layout.position(k) for k in range(slot.qty)]
+    assert len({round(p[0], 4) for p in front}) == 1  # every unit in the front row (same depth)
+    assert front[0][1] == pytest.approx(ip.y)  # rank 0 = the unit on the tag (a default pick, straight ahead)
+    ys = sorted(p[1] for p in front)
+    assert ys[-1] - ys[0] <= room
+    assert abs((ys[0] + ys[-1]) / 2 - ip.y) <= 0.08 / 2 + 0.01  # centered block (+- half a unit)
+    assert len({round(y, 4) for y in ys}) == slot.qty  # side by side, no overlap
+
+
+def test_neighbouring_slots_bound_the_room():
+    plan = planogram()
+    first = plan.slot("s_tort_w")
+    moved = first.item_position.model_copy(update={"y": 6.3})
+    plan.slots.append(first.model_copy(update={"slot_id": "s_tort_w2", "item_position": moved}))
+    assert slot_lateral_room(plan, plan.slot("s_tort_w"), plan.fixture("g1")) == pytest.approx(0.3)
+    # the beans slot faces the other side of the gondola (and sits on another level): not a neighbour
+    assert slot_lateral_room(plan, plan.slot("s_beans_e"), plan.fixture("g1")) == pytest.approx(0.6)
+
+
+def test_basket_drop_keeps_big_units_inside_the_basket():
+    pose = Pose2D(x=0, y=0, theta=0.0)
+    bx, by, _ = BASKET_SIZE_M
+    for k in range(12):
+        p = basket_drop_position(pose, k, (0.2, 0.05, 0.25))  # a tortilla pack: 0.2 m wide along the robot's y
+        assert abs(p.y - BASKET_OFFSET_M[1]) + 0.2 / 2 <= by / 2 + 1e-9
+        assert abs(p.x - BASKET_OFFSET_M[0]) + 0.05 / 2 <= bx / 2 + 1e-9
 
 
 def test_basket_drop_is_behind_the_robot():
