@@ -103,7 +103,9 @@ def test_event_schema_marks_envelope_required():
 def test_event_registry_and_producers():
     assert set(EVENT_PRODUCERS) == set(EVENT_TYPES)
     assert EVENT_PRODUCERS["agent.message"] == "agent" and EVENT_PRODUCERS["route.planned"] == "gateway"
-    assert LIVE_ONLY_EVENT_TYPES == {"frame"}
+    assert EVENT_PRODUCERS["goal.assigned"] == "fleet" and EVENT_PRODUCERS["brain.step"] == "agent"
+    assert EVENT_PRODUCERS["stock.alert"] == "catalog" and EVENT_PRODUCERS["error"] == "any"
+    assert LIVE_ONLY_EVENT_TYPES == {"frame", "camera.frame"}
     recs = RecsReady(trip_id="t", recs=[], checkout_recs=[])
     assert isinstance(parse_event(recs.model_dump_json()), RecsReady)
     ev = make_event("stop.updated", trip_id="t", stop_id="s1", status="declined", rec_id="r1")
@@ -117,7 +119,7 @@ def test_wire_models_ignore_unknown_fields():
     assert msg.pose.x == 1
     cmd = parse_gateway_to_sim({"type": "navigate", "cmd_id": "c", "waypoints": [{"x": 0, "y": 0}], "new": True})
     assert isinstance(cmd, NavigateCmd) and cmd.yaw_tolerance_rad == pytest.approx(0.05)
-    assert versions_compatible("0.1.0", "0.1.7") and not versions_compatible("0.1.0", "0.2.0")
+    assert versions_compatible("0.2.0", "0.2.7") and not versions_compatible("0.1.0", "0.2.0")
     assert not versions_compatible(None, "0.1.0")
 
 
@@ -172,7 +174,7 @@ def test_planogram_hash_ignores_stock_and_reset_can_push_it():
 
 
 def test_geometry_helpers_and_robot_radius():
-    assert GridSpec(store_id="s", width=1, height=1).robot_radius_m == ROBOT_RADIUS_M == 0.6
+    assert GridSpec(store_id="s", width=1, height=1).robot_radius_m == ROBOT_RADIUS_M == 0.3
     r = Rect2D(x=0, y=0, w=2, h=1)
     assert r.distance_to(1, 0.5) == 0 and r.distance_to(3, 1) == pytest.approx(1.0)
     assert r.inflated(0.5).contains(-0.4, 1.4)
@@ -256,6 +258,11 @@ def test_pick_choice_cap():
 
 class DummyTrips:
     async def get_trip(self, trip_id): ...
+    async def create_trip(self, request): ...
+    async def assign_robot(self, trip_id, robot_id, goal_id=None): ...
+    async def set_stop_status(self, trip_id, stop_id, status, reason=""): ...
+    async def check_line(self, trip_id, line): ...
+    async def ask(self, trip_id, request): ...
     async def update_list(self, trip_id, shopping_list): ...
     async def add_line(self, trip_id, line, approval_id=None): ...
     async def remove_line(self, trip_id, line_id): ...

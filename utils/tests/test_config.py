@@ -27,6 +27,7 @@ EXPECTED = {
     "PHOTON_PROJECT_ID": "",
     "DEEPGRAM_API_KEY": "",
     "PICKY_REC_MAX_STOPS": 3,
+    "PICKY_SCRIPTED_SHOPPER": False,
 }
 
 
