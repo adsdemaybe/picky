@@ -87,6 +87,10 @@ CEILING_SLAB_GAP_M = 0.08
 ceiling height (robots.yaml) otherwise start inside the slab and render its unlit inside (black band in Isaac)."""
 OBSTACLE_HEIGHT_M = 3.0
 ITEM_GAP_M = 0.01
+SLOT_ROOM_FILL = 0.9
+"""Share of a slot's lateral room (``slot_lateral_room``) its front row may use (gap to the neighbouring SKU)."""
+SLOT_ROOM_DEFAULT_M = 0.6
+"""Lateral room of a slot with no neighbour on its fixture level (still capped by the fixture's ends)."""
 MAX_UNITS_PER_SLOT = 120
 """Hard cap on spawned units per slot (catalog capacities are <= 60)."""
 MARKER_SIZE_M = 0.8
@@ -114,7 +118,7 @@ SO101_LINKS_M: tuple[tuple[str, float], ...] = (("upper_arm", 0.116), ("forearm"
 """SO-101 link lengths (approx., from the SO-ARM100 URDF) used for the primitive arm."""
 
 FIXTURE_COLORS: dict[str, str] = {
-    "shelf": "#b8bcc4",
+    "shelf": "#d3d6db",
     "fridge": "#dfe9f2",
     "freezer": "#cfe0f5",
     "produce_bin": "#8b6a43",
@@ -326,11 +330,18 @@ def to_world(pose: Pose2D, local: Vec3) -> Point3:
 
 
 def basket_drop_position(pose: Pose2D, index: int, item_dims: Vec3 = (0.08, 0.08, 0.15)) -> Point3:
-    """Center of the ``index``-th item dropped in the basket (2 x 3 grid per layer, then stacked)."""
+    """Center of the ``index``-th item dropped in the basket (2 x 3 grid per layer, then stacked). Basket units are
+    yawed pose.theta + pi/2 (width along the robot's y, depth along its x); a big unit is pulled in so its footprint
+    stays inside the basket walls instead of hanging over them."""
     bx, by, _ = BASKET_SIZE_M
     col, row, layer = index % 2, (index // 2) % 3, index // 6
-    lx = BASKET_OFFSET_M[0] + (col - 0.5) * bx / 2
-    ly = BASKET_OFFSET_M[1] + (row - 1) * by / 3
+    w, d = item_dims[0], item_dims[1]
+    ox, oy = BASKET_OFFSET_M[0], BASKET_OFFSET_M[1]
+    lx = ox + (col - 0.5) * bx / 2
+    ly = oy + (row - 1) * by / 3
+    hx, hy = max(0.0, (bx - d) / 2), max(0.0, (by - w) / 2)
+    lx = min(ox + hx, max(ox - hx, lx))
+    ly = min(oy + hy, max(oy - hy, ly))
     lz = BASKET_OFFSET_M[2] + item_dims[2] / 2 + layer * min(item_dims[2], 0.08)
     return to_world(pose, (lx, ly, lz))
 
@@ -527,11 +538,45 @@ def unit_lots(lots: Sequence[Lot], n: int) -> list[tuple[str | None, float | Non
     return out[:n]
 
 
+def slot_lateral_room(planogram: Planogram, slot: Slot, fx: Fixture) -> float:
+    """Width (m) along the shelf the units of ``slot`` may spread over: the distance to the nearest other slot on the
+    same fixture, level and pick face (``SLOT_ROOM_DEFAULT_M`` without one), capped by the fixture's ends."""
+    pick = pick_face_dir(slot)
+    yaw = item_yaw_for(slot)
+    lat = (math.cos(yaw), math.sin(yaw))
+    p = slot.item_position
+    gaps = [
+        abs((o.item_position.x - p.x) * lat[0] + (o.item_position.y - p.y) * lat[1])
+        for o in planogram.slots
+        if o.slot_id != slot.slot_id
+        and o.fixture_id == slot.fixture_id
+        and o.level == slot.level
+        and abs(_wrap(pick_face_dir(o) - pick)) <= 0.3  # not the other face of a double-sided gondola
+    ]
+    gaps = [g for g in gaps if g > 1e-3]
+    room = min(gaps) if gaps else SLOT_ROOM_DEFAULT_M
+    r = fx.rect
+    ax, _ = _axis(yaw)
+    lo, hi, c = (r.x, r.x_max, p.x) if ax != 0 else (r.y, r.y_max, p.y)
+    to_end = min(c - lo, hi - c)
+    if to_end > 0:
+        room = min(room, 2 * to_end)
+    return max(0.0, room)
+
+
 def slot_layout(
-    slot: Slot, fx: Fixture, product: Product, dims: Vec3 | None = None, render: UnitRender = "primitive"
+    slot: Slot,
+    fx: Fixture,
+    product: Product,
+    dims: Vec3 | None = None,
+    render: UnitRender = "primitive",
+    lateral_room_m: float | None = None,
 ) -> SlotLayout:
     """Grid positions for the units of ``slot`` (store-local centers), front row first. ``dims`` overrides the
-    products.yaml unit size (a per-item model's ``target_dims_m``)."""
+    products.yaml unit size (a per-item model's ``target_dims_m``). ``lateral_room_m`` (``slot_lateral_room``): shelf
+    slots then fill WIDE first, like a stocked store: as many front-row facings as fit in that room (at least
+    ``slot.facings``, at most what the slot's capacity / qty needs), each row ordered from the center out, so rank 0
+    stays on the slot's tag (what a default pick takes) and a partly sold-out slot keeps a centered block."""
     asset = product.asset
     w, d, h = dims or asset.dims_m
     pick_dir = pick_face_dir(slot)
@@ -540,19 +585,26 @@ def slot_layout(
     lateral = (math.cos(yaw), math.sin(yaw))  # item-local +x in world (left -> right when facing the shelf)
 
     cols = max(slot.facings, 4) if fx.kind == "produce_bin" else slot.facings
+    if lateral_room_m is not None and fx.kind != "produce_bin":
+        fit = int((lateral_room_m * SLOT_ROOM_FILL + ITEM_GAP_M) // (w + ITEM_GAP_M))
+        cols = max(slot.facings, min(fit, max(slot.capacity, slot.qty, 1)))
     rows = max(1, int(_available_depth(fx, pick_dir) // (d + ITEM_GAP_M)))
     room = _vertical_room(fx, slot.level)
     layers = max(1, int(room // h)) if room > 0 else 1
     if fx.kind == "produce_bin":
         layers = max(layers, 2)  # produce is piled
+    # wide fill: one column sits ON the tag (rank 0, the default pick, straight ahead of the arm), the rest alternate
+    # left / right of it; without a room the grid stays centered on the tag
+    center = (cols - 1) // 2 if lateral_room_m is not None else (cols - 1) / 2
+    order = sorted(range(cols), key=lambda c: (abs(c - center), c)) if lateral_room_m is not None else range(cols)
     positions: list[Vec3] = []
     base = slot.item_position
     for layer in range(layers):
         for row in range(rows):
-            for col in range(cols):
+            for col in order:
                 if len(positions) >= MAX_UNITS_PER_SLOT:
                     break
-                lat = (col - (cols - 1) / 2) * (w + ITEM_GAP_M)
+                lat = (col - center) * (w + ITEM_GAP_M)
                 dep = d / 2 + row * (d + ITEM_GAP_M)
                 x = base.x + lateral[0] * lat + inward[0] * dep
                 y = base.y + lateral[1] * lat + inward[1] * dep
@@ -606,12 +658,18 @@ def unit_prim(
     )
 
 
-def layout_for(slot: Slot, fx: Fixture, product: Product, assets: SkuAssets | None = None) -> SlotLayout:
+def layout_for(
+    slot: Slot,
+    fx: Fixture,
+    product: Product,
+    assets: SkuAssets | None = None,
+    lateral_room_m: float | None = None,
+) -> SlotLayout:
     """``slot_layout`` with the SKU's per-item model (when ``assets`` resolves it): its dims + render mode."""
     ua = assets.resolve(product.sku) if assets is not None else None
     if ua is None:
-        return slot_layout(slot, fx, product)
-    return slot_layout(slot, fx, product, dims=ua.dims, render=ua.render)
+        return slot_layout(slot, fx, product, lateral_room_m=lateral_room_m)
+    return slot_layout(slot, fx, product, dims=ua.dims, render=ua.render, lateral_room_m=lateral_room_m)
 
 
 def unit_instance(store_id: str, layout: SlotLayout, iid: str, rank: int, lot_id: str | None, fresh: float | None):
@@ -661,7 +719,7 @@ def build_scene_spec(
         if fx is None:  # unreachable with a validated Planogram, kept for safety
             warnings.append(f"{slot.slot_id}: unknown fixture {slot.fixture_id!r}")
             continue
-        layout = layout_for(slot, fx, product, assets)
+        layout = layout_for(slot, fx, product, assets, slot_lateral_room(planogram, slot, fx))
         layouts[slot.slot_id] = layout
         stocked[product.sku] = product
         n = min(slot.qty, MAX_UNITS_PER_SLOT)
@@ -856,6 +914,18 @@ def _puppet_prims(prims: list[PrimSpec], prim: Any, color: str) -> list[PrimSpec
     )
     out += [by_name[n] for n in ("basket_floor", "basket_front", "basket_back", "basket_left", "basket_right")]
     out.append(by_name["basket_cam"])
+    # bracket from the lift column to the basket camera (it floated in mid-air above the basket)
+    bc = by_name["basket_cam"]
+    bx0, bx1 = bc.center[0], mx
+    out.append(
+        prim(
+            "basket_cam_arm",
+            "base",
+            ((bx0 + bx1) / 2, 0.0, bc.center[2] + bc.size[2] / 2 + 0.01),
+            (abs(bx1 - bx0), 0.02, 0.02),
+            "#d0d4da",
+        )
+    )
     shoulder_x = ARM_MOUNT_X_M + puppet.ARM_PAN_FORWARD_M
     x0, x1 = mx + 0.025, shoulder_x + 0.02
     out.append(

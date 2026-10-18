@@ -96,6 +96,15 @@ RT_WARMUP_STEPS = 2
 IDLE_UPDATE_S = 0.25
 """Idle ``app.update()`` period (4 Hz) when no frame was rendered this tick (frames come from synchronous steps)."""
 CEILING_EMISSIVE = 0.6
+AMBIENT_ENV = "PICKY_SIM_AMBIENT"
+AMBIENT_DEFAULT = 0.1
+"""RTX ambient term (``/rtx/sceneDb/ambientLightIntensity``): the stores are closed boxes lit by ceiling RectLights
+only, so real-time RTX leaves the shelf interiors (under each board) dark grey; a small uniform ambient lifts them.
+``PICKY_SIM_AMBIENT=0`` = Isaac's default (none)."""
+WRIST_NEAR_CLIP_PUPPET_M = 0.01
+"""Near clip of a USD-puppet rover's wrist camera: the SO-101 jaw tips sit ~5 cm ahead of / 3 cm below the eye, and
+NEAR_CLIP_M (0.05) sliced them into two black cross-sections in every wrist frame. The primitive rig keeps NEAR_CLIP_M
+(its wrist-camera housing prim must stay clipped)."""
 DEFAULT_LABEL_DIR = "/tmp/picky-sim-labels"
 TAG_SIZE_M = (0.08, 0.06)
 """Shelf-edge price tag in front of SKUs whose model carries no label (loose produce)."""
@@ -322,6 +331,7 @@ class IsaacBackend:
         UsdGeom.Xform.Define(self.stage, "/World/Stores")
         dome = UsdLux.DomeLight.Define(self.stage, "/World/Lights/Dome")
         dome.CreateIntensityAttr(600.0)
+        self._set_ambient()
         self.label_dir = Path(label_dir)
         self.label_dir.mkdir(parents=True, exist_ok=True)
         self.so101_urdf = so101_urdf
@@ -340,6 +350,21 @@ class IsaacBackend:
         self._last_update = 0.0
         self._stats_n = 0
         self._stats_s = 0.0
+
+    @staticmethod
+    def _set_ambient() -> None:
+        try:
+            ambient = float(os.environ.get(AMBIENT_ENV, AMBIENT_DEFAULT))
+        except ValueError:
+            ambient = AMBIENT_DEFAULT
+        try:
+            import carb.settings  # type: ignore[import-not-found]
+
+            settings = carb.settings.get_settings()
+            settings.set("/rtx/sceneDb/ambientLightIntensity", ambient)
+            settings.set("/rtx/sceneDb/ambientLightColor", [1.0, 0.98, 0.95])
+        except Exception as exc:  # noqa: BLE001 - cosmetic
+            log.warning("cannot set the RTX ambient light (%s)", exc)
 
     # -- materials -----------------------------------------------------------------------------------------------------
     def _color_material(self, hex_color: str, emissive: float = 0.0) -> Any:
@@ -1045,7 +1070,9 @@ class IsaacBackend:
         c.CreateFocalLengthAttr(h_ap / (2 * math.tan(cam.hfov / 2)))
         # near clip = the sketch / bbox math's NEAR_CLIP_M; it also hides the camera's own housing prim (the front
         # camera eye sits inside front_cam_head, the wrist eye 1-2 cm in front of so101_wrist_cam)
-        c.CreateClippingRangeAttr(Gf.Vec2f(NEAR_CLIP_M, 200.0))
+        robot_id, _, kind = camera_id.rpartition(".")
+        puppet_wrist = kind == "wrist" and (self._robots.get(robot_id) or {}).get("puppet") is not None
+        c.CreateClippingRangeAttr(Gf.Vec2f(WRIST_NEAR_CLIP_PUPPET_M if puppet_wrist else NEAR_CLIP_M, 200.0))
         op = UsdGeom.Xformable(c).AddTransformOp()
         rows = cam.usd_matrix_rows()
         op.Set(Gf.Matrix4d(*[v for row in rows for v in row]))

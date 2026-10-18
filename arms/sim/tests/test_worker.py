@@ -401,3 +401,33 @@ def test_parsed_wire_commands_round_trip(rig):
     assert run_until(core, out, clock, "w1").ok
     core.submit(parse_gateway_to_sim('{"type":"welcome","ok":true}'))  # ignored, no result
     assert "w1" in results(out)
+
+
+def test_pick_reaches_to_the_unit_without_a_jump(rig):
+    """The arm stops HELD_CLEARANCE_M short of the front unit (not at ARM_FULL_EXT_M, inside it): at the attach the
+    held unit is still where it stood, and the held label faces the robot (the wrist camera reads it)."""
+    from arms.sim.geometry import ARM_FULL_EXT_M, ARM_STOW_EXT_M
+
+    core, out, clock, backend = rig
+    drive(core, out, clock, R1, SALSA_AP)
+    scene = core.stores["store_test"]
+    start = scene.instances["s_salsa#00"].position
+    core.submit(PickCmd(cmd_id="p", robot_id=R1, slot_id="s_salsa", sku="salsa_hot"))
+    rover = core.rovers[R1]
+    exts, attach = [], None
+    for _ in range(400):
+        clock.t += 0.05
+        core.tick(0.05)
+        exts.append(rover.arm_ext)
+        if attach is None and rover.holding is not None:
+            attach = scene.instances[rover.holding].position
+        if "p" in results(out):
+            break
+    assert results(out)["p"].ok and attach is not None
+    assert ARM_STOW_EXT_M < max(exts) < ARM_FULL_EXT_M
+    c, s = math.cos(rover.pose.theta), math.sin(rover.pose.theta)
+    along = (attach.x - start.x) * c + (attach.y - start.y) * s
+    assert abs(along) < 0.01  # no jump toward / away from the robot at the grasp (lateral = the rover's docking error)
+    yaw = backend.yaws[("store_test", "s_salsa#00")] if hasattr(backend, "yaws") else None
+    if yaw is not None:
+        assert math.cos(yaw - (rover.pose.theta - math.pi / 2)) > 0.99

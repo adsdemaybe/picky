@@ -39,6 +39,7 @@ from arms.sim.assets import SkuAssets
 from arms.sim.geometry import (
     ARM_FULL_EXT_M,
     ARM_STOW_EXT_M,
+    HELD_CLEARANCE_M,
     LIFT_REST_M,
     CameraPose,
     clamp_lift,
@@ -63,6 +64,7 @@ from arms.sim.scene_spec import (
     instance_id_for,
     instance_index,
     layout_for,
+    slot_lateral_room,
     store_offsets,
     unit_instance,
     unit_lots,
@@ -72,6 +74,7 @@ from contracts import CONTRACTS_VERSION
 from contracts.cameras import ROBOT_CAMERA_KINDS, CameraInfo, parse_camera_id, robot_camera_id, store_camera_id
 from contracts.catalog import Product
 from contracts.common import (
+    ARM_MOUNT_X_M,
     BATTERY_CHARGE_PCT_PER_MIN,
     BATTERY_DRAIN_PCT_PER_M,
     BATTERY_IDLE_DRAIN_PCT_PER_MIN,
@@ -452,6 +455,13 @@ class _Pick(_Action):
         )
         self.lift_target = clamp_lift(self.target.position.z)
         self.t_lift = abs(self.lift_target - rover.lift) / LIFT_SPEED_MPS
+        # reach only as far as the unit: the TCP stops HELD_CLEARANCE_M short of its near face, so the held position
+        # at the attach equals where the unit stood (no jump) and the wrist camera never drives into it (at a fixed
+        # ARM_FULL_EXT_M it ended up inside the front unit)
+        pose, tp = rover.pose, self.target.position
+        along = (tp.x - pose.x) * math.cos(pose.theta) + (tp.y - pose.y) * math.sin(pose.theta)
+        depth = scene.item_dims(self.target.instance_id)[1]
+        self.reach_ext = max(ARM_STOW_EXT_M, min(ARM_FULL_EXT_M, along - depth / 2 - HELD_CLEARANCE_M - ARM_MOUNT_X_M))
         self.attached = False
 
     def step(self, dt: float) -> CommandResult | None:
@@ -464,9 +474,9 @@ class _Pick(_Action):
         if t <= self.t_lift:
             r.arm_ext = ARM_STOW_EXT_M
         elif t <= t1:
-            r.arm_ext = ARM_STOW_EXT_M + (ARM_FULL_EXT_M - ARM_STOW_EXT_M) * (t - self.t_lift) / GRASP_REACH_S
+            r.arm_ext = ARM_STOW_EXT_M + (self.reach_ext - ARM_STOW_EXT_M) * (t - self.t_lift) / GRASP_REACH_S
         elif t <= t2:
-            r.arm_ext = ARM_FULL_EXT_M
+            r.arm_ext = self.reach_ext
         else:
             if not self.attached:
                 scene = self.core.scene_of(r)
@@ -475,7 +485,7 @@ class _Pick(_Action):
                 r.holding = self.target.instance_id
                 self.attached = True
             r.arm_ext = max(
-                ARM_STOW_EXT_M, ARM_FULL_EXT_M - (ARM_FULL_EXT_M - ARM_STOW_EXT_M) * (t - t2) / GRASP_RETRACT_S
+                ARM_STOW_EXT_M, self.reach_ext - (self.reach_ext - ARM_STOW_EXT_M) * (t - t2) / GRASP_RETRACT_S
             )
         self.core.sync_carried(r)
         if t < t3:
@@ -830,7 +840,10 @@ class WorkerCore:
         yaw = rover.pose.theta + math.pi / 2
         if rover.holding is not None and rover.holding in scene.instances:
             dims = scene.item_dims(rover.holding)
-            self.move_instance(scene, rover.holding, held_position(rover.pose, rover.lift, rover.arm_ext, dims), yaw)
+            # held: label (item -y) toward the robot, as it faced the robot on the shelf, so the wrist camera reads it
+            # (yaw + pi flipped it at the grasp and the wrist camera only saw the unit's blank back)
+            pos = held_position(rover.pose, rover.lift, rover.arm_ext, dims)
+            self.move_instance(scene, rover.holding, pos, rover.pose.theta - math.pi / 2)
         for k, iid in enumerate(rover.basket):
             if iid in scene.instances:
                 self.move_instance(scene, iid, basket_drop_position(rover.pose, k, scene.item_dims(iid)), yaw)
@@ -1156,7 +1169,8 @@ class WorkerCore:
             fx = scene.planogram.fixture(slot.fixture_id)
             if fx is None:
                 raise _Fail("unknown_slot", f"slot {cmd.slot_id} has no fixture")
-            layout = layout_for(slot, fx, product, self.assets)  # same dims / model as the build (restocks match)
+            # same dims / model / width as the build (restocks match)
+            layout = layout_for(slot, fx, product, self.assets, slot_lateral_room(scene.planogram, slot, fx))
             scene.spec.slot_layouts[cmd.slot_id] = layout
             if product.sku not in scene.spec.products:
                 scene.spec.products[product.sku] = product
