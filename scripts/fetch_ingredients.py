@@ -31,8 +31,11 @@ UA = "PickyHackathon/0.1 (+https://github.com/adsdemaybe/picky)"
 SEARCH = "https://search.openfoodfacts.org/search?q={q}&page_size=12&fields=code,product_name,brands"
 PRODUCT = "https://world.openfoodfacts.org/api/v2/product/{code}?fields=product_name,brands,ingredients_text_en,allergens_tags"
 FRESH_CATEGORIES = {"produce"}
-FRESH_WORDS = re.compile(r"\b(lime|lemon|avocado|banana|apple|onion|garlic|cilantro|tomato|pepper|carrot|potato|lettuce"
-                         r"|berries|strawberr|grape|orange|cucumber|broccoli|spinach|egg|eggs)\b", re.I)
+FRESH_WORDS = re.compile(
+    r"\b(lime|lemon|avocado|banana|apple|onion|garlic|cilantro|tomato|pepper|carrot|potato|lettuce"
+    r"|berries|strawberr|grape|orange|cucumber|broccoli|spinach|egg|eggs)\b",
+    re.I,
+)
 
 
 def _get(url: str) -> dict | None:
@@ -122,16 +125,27 @@ def main() -> int:
             continue
         if sku in entries and not only:
             continue  # resume
-        single = (p.category in FRESH_CATEGORIES or p.perishable) and FRESH_WORDS.search(p.name) and len(_words(p.name)) <= 3
+        single = (
+            (p.category in FRESH_CATEGORIES or p.perishable) and FRESH_WORDS.search(p.name) and len(_words(p.name)) <= 3
+        )
         hit = None if single else match(p, args.pause)
         if hit is None and (single or p.category in FRESH_CATEGORIES):
-            hit = {"ingredients": [_query(p.name)], "ingredients_text": _query(p.name), "allergens": [],
-                   "matched_product": None, "source": "fresh, single ingredient", "source_url": None}
+            hit = {
+                "ingredients": [_query(p.name)],
+                "ingredients_text": _query(p.name),
+                "allergens": [],
+                "matched_product": None,
+                "source": "fresh, single ingredient",
+                "source_url": None,
+            }
         if hit is None:
             print(f"{sku}: no match", flush=True)
             continue
         entries[sku] = hit
-        print(f"{sku}: {hit['source']} {hit.get('matched_product') or ''} ({len(hit['ingredients'])} ingredients)", flush=True)
+        print(
+            f"{sku}: {hit['source']} {hit.get('matched_product') or ''} ({len(hit['ingredients'])} ingredients)",
+            flush=True,
+        )
         OUT.write_text(_dump(entries))
     OUT.write_text(_dump(entries))
     print(f"done: {len(entries)}/{len(products)} products have ingredients", flush=True)
