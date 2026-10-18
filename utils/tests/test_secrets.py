@@ -118,6 +118,8 @@ def test_registry_names_descriptions_and_settings_fields():
     for s in sv.REGISTRY.values():
         assert s.description and s.where, s.name
     assert {n.lower() for n in sv.NAMES} <= set(Settings.model_fields)
+    for s in sv.REGISTRY.values():  # dev values mirror Settings' dev-only defaults
+        assert s.dev_value == (Settings.model_fields[s.name.lower()].default if s.dev_value else ""), s.name
     assert sv.spec("perceptron_robotics_api_key").name == "PERCEPTRON_ROBOTICS_API_KEY"
     with pytest.raises(sv.VaultError, match="unknown secret"):
         sv.spec("OPENAI_API_KEY")
@@ -438,6 +440,144 @@ def test_push_errors_are_clear(vault, repo, capsys):
     assert sv.main(["push"]) == 2
     assert "invalid age public key" in capsys.readouterr().err
     assert sv.main(["push", "GEMINI_API_KEY"]) == 2
-    assert "not set locally" in capsys.readouterr().err
+    assert "not in your local vault" in capsys.readouterr().err
     assert sv.main(["pull"]) == 2
     assert "no team bundle" in capsys.readouterr().err
+
+
+# --- review hardening: nothing echoes a value, dev defaults, push/pull edges --------------------------------------
+
+
+def _exit_code(argv: list[str]) -> int:
+    try:
+        return sv.main(argv)
+    except SystemExit as e:  # argparse usage errors
+        return int(e.code or 0)
+
+
+def test_cli_never_echoes_values_typed_in_the_wrong_place(vault, kr, capsys):
+    for argv in (
+        ["set", "HF_TOKEN", "hf_TypedOnTheCommandLine0000"],  # value as an argument
+        ["set", "hf_TypedOnTheCommandLine0000", "--from-stdin"],  # value where the NAME goes
+        ["hf_TypedOnTheCommandLine0000"],  # value as the command
+        ["list", "hf_TypedOnTheCommandLine0000"],  # stray extra argument
+    ):
+        assert _exit_code(argv) == 2, argv
+        captured = capsys.readouterr()
+        assert "TypedOnTheCommandLine" not in captured.out + captured.err, argv
+    assert not kr.store
+    assert sv.main(["set", "OPENAI_API_KEY", "--from-stdin"]) == 2
+    assert "'OPENAI_API_KEY'" in capsys.readouterr().err  # a NAME-shaped typo is still shown
+
+
+def test_reprs_never_show_values(vault, tmp_path, monkeypatch):
+    r = sv.Resolved("ANTHROPIC_API_KEY", SENTINEL, "env")
+    assert SENTINEL not in repr(r) and r.is_set
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SENTINEL)
+    s = Settings(_env_file=None)
+    assert s.anthropic_api_key == SENTINEL
+    assert SENTINEL not in repr(s) and SENTINEL not in str(s) and "gateway_port=8000" in repr(s)
+
+
+def test_settings_survive_an_unreadable_vault_file(home, repo, tmp_path, caplog):
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root reads mode-000 files")
+    v = sv.Vault(keyring_backend=None, home=home, repo_root=repo)
+    v.set("HF_TOKEN", "hf_unreadable_123456789")
+    sv.set_vault(v)
+    os.chmod(v.secrets_file, 0)
+    try:
+        dotenv = tmp_path / "x.env"
+        dotenv.write_text("HF_TOKEN=hf_from_dotenv\n")
+        assert Settings(_env_file=dotenv).hf_token == "hf_from_dotenv"  # degrades, doesn't crash the gateway
+        assert "key vault read failed for HF_TOKEN" in caplog.text
+    finally:
+        os.chmod(v.secrets_file, 0o600)
+
+
+def test_chained_or_plaintext_keyrings_are_never_used():
+    class Chainer:
+        __module__ = "keyring.backends.chainer"
+
+        def __init__(self, backends):
+            self.backends = backends
+
+    class Plaintext(MemoryKeyring):
+        __module__ = "keyrings.alt.file"
+
+    real = MemoryKeyring()
+    assert sv._pick_keyring(Chainer([Plaintext(), real])) is real
+    assert sv._pick_keyring(Chainer([Plaintext()])) is None
+    assert sv._pick_keyring(Plaintext()) is None
+    assert sv._pick_keyring(real) is real
+
+
+def test_dev_defaults_count_as_dev_not_set(vault, repo, capsys):
+    (repo / ".env").write_text("PICKY_SIM_TOKEN=dev-sim-token\nPICKY_SIGNING_KEY=dev-signing-key\n")  # cp .env.example
+    assert sv.main(["list"]) == 0
+    row = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("PICKY_SIM_TOKEN"))
+    assert row.split()[1:3] == ["dev", ".env"]
+    assert sv.main(["check", "--arms", "", "--env", "dev"]) == 0
+    assert sv.main(["check", "--arms", "", "--env", "prod"]) == 1  # the dev default doesn't pass a prod check
+    assert "MISSING  PICKY_SIM_TOKEN" in capsys.readouterr().out
+    assert vault.shareable() == []  # and is never pushed to the team
+
+
+def test_push_shares_vault_and_dotenv_but_not_shell_env(tmp_path, repo, capsys, monkeypatch):
+    pytest.importorskip("pyrage")
+    lead = sv.Vault(keyring_backend=MemoryKeyring(), home=tmp_path / "lead", repo_root=repo)
+    pub, _ = sv.create_identity(lead)
+    (repo / "secrets" / "recipients.txt").write_text(f"{pub}  # lead macbook\n")
+    (repo / ".env").write_text("HF_TOKEN=hf_from_dotenv_123456789\nSTRIPE_SECRET_KEY=sk_live_nope_123456789\n")
+    lead.set("PERCEPTRON_ROBOTICS_API_KEY", ROBOTICS)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", SENTINEL)  # e.g. exported in ~/.zshrc: personal, not shared
+    assert sv.main(["push"], vault=lead) == 0
+    captured = capsys.readouterr()
+    assert "lead macbook" in captured.out and "<- you" in captured.out
+    assert "HF_TOKEN (from .env)" in captured.out
+    assert "not shared (only in your shell env): ANTHROPIC_API_KEY" in captured.out
+    assert "not pushing STRIPE_SECRET_KEY (from .env): live keys" in captured.err
+    assert SENTINEL not in captured.out + captured.err and "sk_live_nope" not in captured.out + captured.err
+    team = sv.decrypt_bundle(lead)
+    assert team == {"PERCEPTRON_ROBOTICS_API_KEY": ROBOTICS, "HF_TOKEN": "hf_from_dotenv_123456789"}
+    assert sv.main(["push", "ANTHROPIC_API_KEY"], vault=lead) == 2
+    assert "only in your shell environment" in capsys.readouterr().err
+
+
+def test_pull_from_stdin_and_clear_errors_for_damaged_bundles(tmp_path, repo, capsys, monkeypatch):
+    pytest.importorskip("pyrage")
+    lead = sv.Vault(keyring_backend=MemoryKeyring(), home=tmp_path / "lead", repo_root=repo)
+    mate = sv.Vault(keyring_backend=None, home=tmp_path / "mate", repo_root=tmp_path / "elsewhere")
+    pub_l, _ = sv.create_identity(lead)
+    pub_m, _ = sv.create_identity(mate)
+    (repo / "secrets" / "recipients.txt").write_text(f"{pub_l} # lead\n{pub_m} # mate\n")
+    lead.set("PERCEPTRON_ROBOTICS_API_KEY", ROBOTICS)
+    assert sv.main(["push"], vault=lead) == 0
+    blob = (repo / "secrets" / "team.age").read_bytes()
+
+    # pull before the PR merges: git show origin/BRANCH:secrets/team.age | ... pull --bundle -
+    monkeypatch.setattr(sys, "stdin", io.TextIOWrapper(io.BytesIO(blob)))
+    assert sv.main(["pull", "--bundle", "-"], vault=mate) == 0
+    assert mate.get_local("PERCEPTRON_ROBOTICS_API_KEY") == (ROBOTICS, "file")
+    capsys.readouterr()
+
+    conflicted = tmp_path / "conflict.age"
+    conflicted.write_bytes(b"<<<<<<< HEAD\n" + blob + b"=======\n" + blob + b">>>>>>> origin/main\n")
+    assert sv.main(["pull", "--bundle", str(conflicted)], vault=mate) == 2
+    assert "merge-conflict markers" in capsys.readouterr().err
+    damaged = tmp_path / "damaged.age"
+    damaged.write_bytes(blob[:120])
+    assert sv.main(["pull", "--bundle", str(damaged)], vault=mate) == 2
+    err = capsys.readouterr().err
+    assert "not a valid age bundle" in err and "isn't a recipient" not in err
+
+
+def test_recipients_file_rejects_a_pasted_private_key(vault, repo, capsys):
+    pytest.importorskip("pyrage")
+    sv.create_identity(vault)
+    vault.set("HF_TOKEN", "hf_value_123456789")
+    secret_line = vault.identity_file.read_text().splitlines()[-1]
+    (repo / "secrets" / "recipients.txt").write_text(secret_line + "  # oops\n")
+    assert sv.main(["push"]) == 2
+    err = capsys.readouterr().err
+    assert "PRIVATE age key" in err and secret_line not in err and not vault.bundle_file.exists()

@@ -18,7 +18,8 @@ CLI (values are never logged or printed, except by ``env``, which exists to feed
     uv run --extra secrets python -m utils.secrets identity | push [NAME...] | pull
 
 Team bundle: ``secrets/team.age`` is committed, age-encrypted to every public key in ``secrets/recipients.txt``.
-``identity`` creates your age key (``~/.config/picky/age.key``), ``push`` encrypts, ``pull`` decrypts into your local
+``identity`` creates your age key (``~/.config/picky/age.key``), ``push`` encrypts what you stored on purpose (local
+vault + repo ``.env``, never the shell env or dev defaults) merged into the bundle, ``pull`` decrypts into your local
 vault. The age bindings (``pyrage``) are in the optional ``secrets`` extra; everything else needs base deps only.
 
 Process-env knob (not in Settings, not read from ``.env``): ``PICKY_SECRETS_BACKEND=auto|keyring|file|off``.
@@ -30,12 +31,13 @@ import argparse
 import getpass
 import io
 import os
+import re
 import shlex
 import stat
 import sys
 import tempfile
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -64,8 +66,9 @@ class SecretSpec:
     where: str
     used_by: tuple[str, ...] = ()
     needed_by: tuple[str, ...] = ()
-    dev_default: bool = False
-    """Settings has a dev-only default; ``check`` requires a real value when ``PICKY_ENV`` is not dev."""
+    dev_value: str = ""
+    """Settings' dev-only default (also in ``.env.example``). That value counts as "dev", not set: ``check`` wants a
+    real one when ``PICKY_ENV`` is not dev, and ``push`` never shares it."""
     prefixes: tuple[str, ...] = ()
     """Expected value prefixes; ``set`` warns (never refuses) on a mismatch, e.g. a key pasted into the wrong name."""
     forbidden_prefixes: tuple[str, ...] = ()
@@ -140,14 +143,14 @@ REGISTRY: dict[str, SecretSpec] = {
             "Shared token the Isaac worker sends on /ws/sim",
             "make one: python -c 'import secrets; print(secrets.token_urlsafe(24))' (same on gateway + vhagar)",
             used_by=("gateway", "sim"),
-            dev_default=True,
+            dev_value="dev-sim-token",
         ),
         SecretSpec(
             "PICKY_SIGNING_KEY",
             "HMAC key for mandates, cart hashes, receipts",
             "make one: python -c 'import secrets; print(secrets.token_urlsafe(32))'",
             used_by=("trust",),
-            dev_default=True,
+            dev_value="dev-signing-key",
         ),
         SecretSpec(
             "HF_TOKEN",
@@ -168,15 +171,27 @@ class VaultError(Exception):
 
 @dataclass(frozen=True)
 class Resolved:
-    """Where a name resolved. ``source``: env | keychain | file | .env | None (unset). ``value`` stays in memory."""
+    """Where a name resolved. ``source``: env | keychain | file | .env | None (unset). ``value`` stays in memory
+    (and out of ``repr``, so a stray log line or a traceback can't show it)."""
 
     name: str
-    value: str | None
+    value: str | None = field(repr=False)
     source: str | None
 
     @property
     def is_set(self) -> bool:
         return bool(self.value)
+
+    @property
+    def is_dev(self) -> bool:
+        """The value is Settings' dev-only default (e.g. ``dev-sim-token`` from a copied ``.env.example``)."""
+        dev = REGISTRY[self.name].dev_value if self.name in REGISTRY else ""
+        return bool(dev) and self.value == dev
+
+    @property
+    def is_real(self) -> bool:
+        """Set to something other than the dev default."""
+        return self.is_set and not self.is_dev
 
 
 def mask(value: str | None) -> str:
@@ -186,12 +201,26 @@ def mask(value: str | None) -> str:
     return MASK + value[-4:] if len(value) >= 12 else MASK
 
 
+_NAME_LIKE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+
+
 def spec(name: str) -> SecretSpec:
-    """Registry entry for ``name`` (case-insensitive); :class:`VaultError` for unknown names."""
+    """Registry entry for ``name`` (case-insensitive); :class:`VaultError` for unknown names.
+
+    An unknown name is echoed only when it looks like an env var name (``OPENAI_API_KEY``): people paste the key
+    where the name goes (``set sk-ant-...``), and the error must not print it back.
+    """
     key = (name or "").strip().upper()
     if key not in REGISTRY:
-        raise VaultError(f"unknown secret {name!r}; known names: {', '.join(NAMES)}")
+        shown = repr(name) if _NAME_LIKE.fullmatch(name or "") else "(not shown: it doesn't look like a NAME)"
+        raise VaultError(f"unknown secret name {shown}; known names: {', '.join(NAMES)}")
     return REGISTRY[key]
+
+
+def redact_repr_args(args: Iterable[tuple[str | None, Any]]) -> Iterator[tuple[str | None, Any]]:
+    """For ``Settings.__repr_args__``: registry fields show as ``••••`` so ``repr(settings)`` never leaks a key."""
+    for key, value in args:
+        yield key, (MASK if value and key and key.upper() in REGISTRY else value)
 
 
 def clean_value(name: str, raw: str | None) -> str:
@@ -214,6 +243,12 @@ def prefix_warning(name: str, value: str) -> str | None:
         expected = " or ".join(s.prefixes)
         return f"{s.name} usually starts with {expected}; stored anyway, double-check you pasted the right key"
     return None
+
+
+def _why(exc: BaseException) -> str:
+    """Loggable reason for an exception: OSError text (errno + path) or just the type, never a message that might
+    carry a value."""
+    return str(exc) if isinstance(exc, OSError) else type(exc).__name__
 
 
 # --- dotenv-style files (secrets.env, the team bundle plaintext) ----------------------------------------------------
@@ -253,8 +288,12 @@ def _check_private_file(path: Path) -> None:
         return
     mode = stat.S_IMODE(path.stat().st_mode)
     if mode & 0o077:
-        log.warning("%s was mode %o; tightened to 600", path, mode)
-        os.chmod(path, 0o600)
+        try:
+            os.chmod(path, 0o600)
+        except OSError as e:  # e.g. created by another user (sudo): say so, keep reading
+            log.warning("%s is mode %o and can't be tightened (%s); fix it: chmod 600 %s", path, mode, e, path)
+        else:
+            log.warning("%s was mode %o; tightened to 600", path, mode)
 
 
 def _atomic_write(path: Path, text: str, mode: int = 0o600) -> None:
@@ -280,24 +319,39 @@ def _keyring_label(kr: Any) -> str:
     mod = type(kr).__module__
     if mod.endswith("macOS"):
         return "macOS Keychain"
-    if "SecretService" in mod:
+    if "SecretService" in mod or mod.endswith("libsecret"):
         return "Secret Service"
+    if mod.endswith("kwallet"):
+        return "KWallet"
     if mod.endswith("Windows"):
         return "Windows Credential Locker"
     return f"keyring ({type(kr).__name__})"
 
 
 def _usable_keyring(kr: Any) -> bool:
-    """A real, persistent backend: not keyring's fail/null ones, not keyrings.alt (plaintext or prompt-y)."""
+    """A real, persistent backend: not keyring's fail/null/chainer ones, not keyrings.alt (plaintext or prompt-y)."""
     if kr is None:
         return False
     mod = type(kr).__module__
-    if mod.startswith("keyrings.alt") or mod.endswith(("backends.fail", "backends.null")):
+    if mod.startswith("keyrings.alt") or mod.endswith(("backends.fail", "backends.null", "backends.chainer")):
         return False
     try:
         return float(type(kr).priority) > 0
     except Exception:  # backends signal "not viable" by raising from priority
         return False
+
+
+def _pick_keyring(candidate: Any) -> Any:
+    """The concrete backend to use, or None. keyring returns a ChainerBackend when several backends are viable; it
+    would fall through to whatever comes next (keyrings.alt's plaintext file, if installed), so unwrap it and take
+    the best usable one ourselves."""
+    if type(candidate).__module__.endswith("backends.chainer"):
+        try:
+            chained = list(candidate.backends)
+        except Exception:
+            return None
+        return next((b for b in chained if _usable_keyring(b)), None)
+    return candidate if _usable_keyring(candidate) else None
 
 
 def _headless_linux() -> bool:
@@ -375,8 +429,7 @@ class Vault:
                 try:
                     import keyring
 
-                    candidate = keyring.get_keyring()
-                    kr = candidate if _usable_keyring(candidate) else None
+                    kr = _pick_keyring(keyring.get_keyring())
                 except Exception as e:  # keyring missing or broken -> file fallback
                     log.debug("keyring unavailable: %s", type(e).__name__)
             if kr is None and wanted == "keyring":
@@ -403,6 +456,13 @@ class Vault:
         log.warning(
             "keychain %s failed for %s (%s); using %s for this session", op, name, type(exc).__name__, self.secrets_file
         )
+        if op == "write":
+            log.warning(
+                "if the keychain already holds an older %s, that one wins again once the keychain is unlocked: "
+                "unlock it (or log in on the Mac) and run make secret NAME=%s again",
+                name,
+                name,
+            )
         self._kr_broken = True
 
     # file store -----------------------------------------------------------------------------------------------------
@@ -478,6 +538,20 @@ class Vault:
             if not value and repo.get(n):
                 value, source = repo[n], ".env"
             out.append(Resolved(n, value or None, source if value else None))
+        return out
+
+    def shareable(self) -> list[Resolved]:
+        """What ``push`` may share: the local vault, else repo ``.env``. Never the process env (a key exported in your
+        shell profile is personal until you ``make secret`` it), never a dev default."""
+        repo = self._repo_env_values()
+        out = []
+        for n in NAMES:
+            value, source = self.get_local(n)
+            if not value and repo.get(n):
+                value, source = repo[n], ".env"
+            r = Resolved(n, value or None, source if value else None)
+            if r.is_real:
+                out.append(r)
         return out
 
     # writes ---------------------------------------------------------------------------------------------------------
@@ -560,13 +634,23 @@ class VaultSettingsSource(PydanticBaseSettingsSource):
         return value, field_name, False
 
     def __call__(self) -> dict[str, Any]:
-        vault = self._vault or get_vault()
-        if vault.mode == "off":
+        """Never raises: a broken vault (unreadable file, odd keyring) must not stop the gateway from booting; the
+        affected keys just fall through to ``.env`` / defaults and a warning says why (no values)."""
+        try:
+            vault = self._vault or get_vault()
+            if vault.mode == "off":
+                return {}
+        except Exception as e:
+            log.warning("key vault unavailable (%s); settings use env/.env only", type(e).__name__)
             return {}
         out: dict[str, Any] = {}
         for field_name in self.settings_cls.model_fields:
             if field_name.upper() in REGISTRY:
-                value, _ = vault.get_local(field_name)
+                try:
+                    value, _ = vault.get_local(field_name)
+                except Exception as e:
+                    log.warning("key vault read failed for %s (%s); using env/.env", field_name.upper(), _why(e))
+                    continue
                 if value:
                     out[field_name] = value
         return out
@@ -631,34 +715,61 @@ def load_identity(vault: Vault, path: Path | None = None) -> Any:
     raise VaultError(f"{path}: no AGE-SECRET-KEY line found")
 
 
-def read_recipients(path: Path) -> list[str]:
-    """Public keys from ``secrets/recipients.txt``: one ``age1...`` per line, ``#`` comments allowed."""
+def recipient_entries(path: Path) -> list[tuple[str, str]]:
+    """``(public key, label)`` from ``secrets/recipients.txt``: one ``age1...  # label`` per line, deduplicated."""
     if not path.is_file():
         return []
-    keys: list[str] = []
+    out: dict[str, str] = {}
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        line = raw.split("#", 1)[0].strip()
+        line, _, label = raw.partition("#")
+        line = line.strip()
         if not line:
             continue
         token = line.split()[0]
+        if token.upper().startswith("AGE-SECRET-KEY-"):
+            raise VaultError(
+                f"{path}:{lineno} is a PRIVATE age key. Delete that line now and never commit it; if it was already "
+                "committed or pushed, treat it as leaked: make a new identity (move ~/.config/picky/age.key away, "
+                "make secrets-identity) and rotate the keys (docs/secrets.md, Rotation)"
+            )
         if not token.startswith("age1"):
-            raise VaultError(f"{path}:{lineno}: expected an age public key (age1...), got {token[:12]!r}")
-        keys.append(token)
-    return list(dict.fromkeys(keys))
+            raise VaultError(f"{path}:{lineno}: expected an age public key (age1...), got {token[:8]!r}...")
+        out.setdefault(token, label.strip())
+    return list(out.items())
 
 
-def decrypt_bundle(vault: Vault, identity_path: Path | None = None) -> dict[str, str]:
+def read_recipients(path: Path) -> list[str]:
+    """Public keys from ``secrets/recipients.txt`` (see :func:`recipient_entries`)."""
+    return [key for key, _ in recipient_entries(path)]
+
+
+def decrypt_bundle(vault: Vault, identity_path: Path | None = None, bundle: Path | None = None) -> dict[str, str]:
+    """Decrypt the team bundle (default ``secrets/team.age``; ``bundle=Path("-")`` reads stdin) with your identity."""
     pyrage = _pyrage()
-    if not vault.bundle_file.is_file():
-        raise VaultError(f"no team bundle at {vault.bundle_file} yet; someone runs make secrets-push first")
+    if bundle is not None and str(bundle) == "-":
+        blob, where = sys.stdin.buffer.read(), "the bundle on stdin"
+    else:
+        path = bundle or vault.bundle_file
+        if not path.is_file():
+            raise VaultError(f"no team bundle at {path} yet; someone runs make secrets-push first")
+        blob, where = path.read_bytes(), str(path)
     ident = load_identity(vault, identity_path)
-    try:
-        plain = pyrage.decrypt(vault.bundle_file.read_bytes(), [ident])
-    except Exception as e:  # pyrage.DecryptError
+    if b"\n<<<<<<< " in b"\n" + blob or b"\n>>>>>>> " in blob:
         raise VaultError(
-            f"can't decrypt {vault.bundle_file} with your identity: your public key isn't a recipient yet. Add it to "
-            f"{vault.recipients_file}, commit, and ask a teammate who can decrypt to run make secrets-push"
-        ) from e
+            f"{where} has git merge-conflict markers (two people pushed at once). Take one side: "
+            "git checkout --theirs secrets/team.age, then make secrets-pull and make secrets-push to merge your keys "
+            "back in, then git add secrets/team.age"
+        )
+    try:
+        plain = pyrage.decrypt(blob, [ident])
+    except Exception as e:  # pyrage.DecryptError: "No matching keys found" vs a damaged file
+        if "no matching keys" in str(e).lower():
+            raise VaultError(
+                f"can't decrypt {where}: your public key isn't a recipient yet. Send it to whoever can decrypt "
+                f"(make secrets-identity prints it); they add it to {vault.recipients_file.name} and run "
+                "make secrets-push"
+            ) from e
+        raise VaultError(f"{where} is not a valid age bundle ({type(e).__name__}: {e})") from e
     return loads_env(plain.decode("utf-8"))
 
 
@@ -683,6 +794,12 @@ def _err(msg: str) -> None:
 
 
 def _cmd_set(vault: Vault, args: argparse.Namespace) -> int:
+    if args.value is not None:  # never echoed back; it is already in shell history, so say so
+        raise VaultError(
+            "don't put the value on the command line (it lands in shell history and in `ps`). Nothing was stored. "
+            "Run `make secret NAME=...` for a hidden prompt, or pipe it: pbpaste | uv run python -m utils.secrets "
+            "set NAME --from-stdin. If you typed a real key, remove that line from your shell history"
+        )
     s = spec(args.name)
     if args.from_stdin:
         raw = sys.stdin.read()
@@ -716,13 +833,15 @@ def _cmd_list(vault: Vault, args: argparse.Namespace) -> int:
     rows = [("NAME", "SET", "SOURCE", "VALUE", "DESCRIPTION")]
     for r in vault.resolve_all():
         s = REGISTRY[r.name]
-        if r.is_set:
+        if r.is_dev or (not r.is_set and s.dev_value and r.source != "env"):
+            state = "dev"
+        elif r.is_set:
             state = "yes"
         elif r.source == "env":
             state = "blank"
         else:
-            state = "dev" if s.dev_default else "-"
-        rows.append((r.name, state, r.source or "", mask(r.value), s.description))
+            state = "-"
+        rows.append((r.name, state, r.source or "", "" if r.is_dev else mask(r.value), s.description))
     widths = [max(len(row[i]) for row in rows) for i in range(4)]
     for row in rows:
         print("  ".join(c.ljust(w) for c, w in zip(row[:4], widths, strict=True)) + "  " + row[4])
@@ -731,12 +850,12 @@ def _cmd_list(vault: Vault, args: argparse.Namespace) -> int:
             print(" " * (sum(widths) + 8) + f"get it: {s.where}" + (f" | used by: {', '.join(s.used_by)}"))
     ident = "present" if vault.identity_file.is_file() else "none (make secrets-identity)"
     try:
-        n_rec = len(read_recipients(vault.recipients_file))
+        recipients = f"{len(read_recipients(vault.recipients_file))} recipient(s)"
     except VaultError:
-        n_rec = -1
+        recipients = "secrets/recipients.txt is INVALID (make secrets-push says why)"
     bundle = "present" if vault.bundle_file.is_file() else "not pushed yet"
-    print(f"team bundle: secrets/team.age {bundle}, {n_rec} recipient(s); your age identity: {ident}")
-    print("dev = unset, Settings uses its dev-only default.  Add one: make secret NAME=<NAME>")
+    print(f"team bundle: secrets/team.age {bundle}, {recipients}; your age identity: {ident}")
+    print("dev = Settings' dev-only default (fine on laptops).  Add a key: make secret NAME=<NAME>")
     return 0
 
 
@@ -769,11 +888,11 @@ def _cmd_check(vault: Vault, args: argparse.Namespace) -> int:
         needers = sorted(a for a in s.needed_by if "all" in arms or a in arms)
         if needers:
             why = f"needed by real {', '.join(needers)}"
-        elif s.dev_default and not is_dev:
+        elif s.dev_value and not is_dev:
             why = "PICKY_ENV is not dev: replace the dev default"
         else:
             why = ""
-        if r.is_set:
+        if r.is_real or (r.is_set and not why):
             print(f"  ok       {r.name:<28} ({r.source})" + (f"  {why}" if why else ""))
         elif why:
             missing += 1
@@ -798,30 +917,50 @@ def _cmd_identity(vault: Vault, args: argparse.Namespace) -> int:
         print("already in secrets/recipients.txt; " + ("run make secrets-pull" if has_bundle else "make secrets-push"))
     elif has_bundle:
         print(
-            f"next: add this line to secrets/recipients.txt:  {public}  # <your name> <machine>\n"
-            "      commit + push it, then a teammate who can decrypt runs make secrets-push; then you make secrets-pull"
+            "next: send that age1... line to whoever can already decrypt (the lead); a public key is safe to paste "
+            "in chat.\n"
+            f"      They add `{public}  # <your name> <machine>` to secrets/recipients.txt and run make secrets-push;\n"
+            "      then you: git pull && make secrets-pull   (docs/secrets.md, Quick start)"
         )
     else:
         print(
-            f"next: add this line to secrets/recipients.txt:  {public}  # <your name> <machine>\n"
-            "      (no bundle yet: you start it) make secret NAME=..., then make secrets-push and commit secrets/"
+            "no team bundle yet. Teammate: send that age1... line to the lead (safe to paste in chat) and wait for\n"
+            "      their push. Lead (starting the bundle): add this line to secrets/recipients.txt\n"
+            f"      {public}  # <your name> <machine>\n"
+            "      then make secret NAME=... for each key, make secrets-push, and commit secrets/ in a PR"
         )
     return 0
 
 
 def _cmd_push(vault: Vault, args: argparse.Namespace) -> int:
-    recipients = read_recipients(vault.recipients_file)
+    entries = recipient_entries(vault.recipients_file)
+    recipients = [key for key, _ in entries]
+    if not recipients:
+        raise VaultError(f"no recipients in {vault.recipients_file}; add age public keys (make secrets-identity)")
     explicit = [spec(n).name for n in args.names]
-    local = {r.name: r.value for r in vault.resolve_all() if r.is_set and r.value}
+    local: dict[str, str] = {}
+    origin: dict[str, str] = {}
+    for r in vault.shareable():
+        try:
+            local[r.name] = clean_value(r.name, r.value)
+        except VaultError as e:  # e.g. a live Stripe key or a multi-line value sitting in .env
+            _err(f"not pushing {r.name} (from {r.source}): {str(e).split(': ', 1)[-1]}")
+            continue
+        origin[r.name] = r.source or ""
+    env_only = sorted(n for n in NAMES if n not in local and os.environ.get(n))
     for n in explicit:
         if n not in local:
-            raise VaultError(f"{n} is not set locally; make secret NAME={n} first")
+            where = " (it is only in your shell environment, which push never shares)" if n in env_only else ""
+            raise VaultError(f"{n} is not in your local vault{where}; make secret NAME={n} first")
     existing: dict[str, str] = {}
     if vault.bundle_file.is_file() and not args.replace:
         try:
             existing = decrypt_bundle(vault, args.identity)
         except VaultError as e:
-            raise VaultError(f"{e}. (Or --replace to overwrite the bundle with only your local secrets.)") from e
+            raise VaultError(
+                f"{e}. Push merges into the current bundle, so you need to be able to read it first. (--replace "
+                "rebuilds it from ONLY your local keys and drops everyone else's: last resort.)"
+            ) from e
     merged = dict(existing)
     added, updated, conflicts = [], [], []
     for name, value in local.items():
@@ -837,10 +976,10 @@ def _cmd_push(vault: Vault, args: argparse.Namespace) -> int:
                 conflicts.append(name)
     if conflicts:
         _err("refusing to push: your local value differs from the bundle for: " + ", ".join(sorted(conflicts)))
-        _err("  make secrets-pull first (take the team's), or push NAME... / --force to overwrite with yours")
+        _err("  make secrets-pull ARGS=--force to take the team's, or make secrets-push NAME=X to overwrite with yours")
         return 1
     if not merged:
-        raise VaultError("nothing to push: no registry secrets set locally (make secret NAME=...)")
+        raise VaultError("nothing to push: no registry secrets in your local vault (make secret NAME=...)")
     encrypt_bundle(vault, merged, recipients)
     try:
         me = str(load_identity(vault, args.identity).to_public())
@@ -850,19 +989,27 @@ def _cmd_push(vault: Vault, args: argparse.Namespace) -> int:
         _err("warning: your own public key is not in secrets/recipients.txt; you won't be able to decrypt this")
     kept = sorted(set(merged) - set(added) - set(updated))
     rel = vault.bundle_file.relative_to(vault.repo_root)
-    print(f"wrote {rel}: {len(merged)} secret(s) for {len(recipients)} recipient(s)")
+    print(f"wrote {rel}: {len(merged)} secret(s), readable by these {len(recipients)} recipient(s):")
+    for key, label in entries:
+        print(f"  {key[:12]}...{key[-6:]}  {label or '(no label)'}" + ("  <- you" if key == me else ""))
     for label, names in (("added", added), ("updated", updated), ("kept", kept)):
         if names:
-            print(f"  {label}: {', '.join(sorted(names))}")
-    print("commit it: git add secrets/team.age && git commit -m 'chore: update team secrets bundle'")
+            shown = [n + (" (from .env)" if origin.get(n) == ".env" else "") for n in sorted(names)]
+            print(f"  {label}: {', '.join(shown)}")
+    if env_only:
+        print(f"  not shared (only in your shell env): {', '.join(env_only)}; make secret NAME=X to share one")
+    print(
+        "commit it on a branch + PR (main is PR-only): git switch -c chore/secrets-<who> && "
+        "git add secrets/ && git commit -m 'chore: update team secrets bundle'"
+    )
     return 0
 
 
 def _cmd_pull(vault: Vault, args: argparse.Namespace) -> int:
     if vault.mode == "off":
         raise VaultError(f"the vault is off ({BACKEND_ENV}=off); nothing to pull into")
-    data = decrypt_bundle(vault, args.identity)
-    stored, same, skipped = [], [], []
+    data = decrypt_bundle(vault, args.identity, args.bundle)
+    stored, same, skipped, failed = [], [], [], []
     for name, value in sorted(data.items()):
         if name not in REGISTRY:
             _err(f"skipping {name}: not in this checkout's registry (git pull to get the newer utils.secrets)")
@@ -874,22 +1021,44 @@ def _cmd_pull(vault: Vault, args: argparse.Namespace) -> int:
         if current and not args.force:
             skipped.append(name)
             continue
-        vault.set(name, value)
+        try:
+            vault.set(name, value)
+        except VaultError as e:  # one bad entry must not stop the rest
+            _err(f"not stored {name}: {str(e).split(': ', 1)[-1]}")
+            failed.append(name)
+            continue
         stored.append(name)
         env_value = os.environ.get(name)
         if env_value is not None and env_value != value:
             _err(f"note: {name} is also set in this shell's environment, which wins over the vault")
-    print(f"pulled {len(data)} secret(s) from {vault.bundle_file.relative_to(vault.repo_root)} into {vault.describe()}")
+    source = "stdin" if args.bundle is not None and str(args.bundle) == "-" else str(args.bundle or "secrets/team.age")
+    print(f"pulled {len(data)} secret(s) from {source} into {vault.describe()}")
     for label, names in (("stored", stored), ("unchanged", same)):
         if names:
             print(f"  {label}: {', '.join(names)}")
     if skipped:
-        print(f"  kept your different local value for: {', '.join(skipped)} (--force to take the team's)")
-    return 0
+        print(
+            f"  kept your different local value for: {', '.join(skipped)} "
+            "(make secrets-pull ARGS=--force takes the team's)"
+        )
+    return 1 if failed else 0
+
+
+class _Parser(argparse.ArgumentParser):
+    """argparse echoes stray arguments ("unrecognized arguments: sk-ant-..."); a stray argument here is often a key,
+    so usage errors never repeat what was typed."""
+
+    def error(self, message: str) -> Any:  # type: ignore[override]
+        if message.startswith("unrecognized arguments"):
+            message = (
+                "unexpected extra argument(s) (not shown, in case one is a key); values never go on the command line"
+            )
+        message = re.sub(r"invalid choice: '.*?' \(", "invalid choice (not shown) (", message)
+        return super().error(message)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    p = _Parser(
         prog="python -m utils.secrets",
         description="Picky key vault. Resolution: env > OS keychain > ~/.config/picky/secrets.env > repo .env. "
         "Values are never printed (except by `env`, for eval).",
@@ -906,6 +1075,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("set", help="store a secret in your local vault (hidden prompt or --from-stdin)")
     s.add_argument("name", metavar="NAME", help="a registry name, e.g. PERCEPTRON_ROBOTICS_API_KEY")
+    s.add_argument("value", nargs="?", default=None, help=argparse.SUPPRESS)  # only to refuse it without echoing
     s.add_argument("--from-stdin", action="store_true", help="read the value from stdin (for piping)")
     s.set_defaults(func=_cmd_set)
 
@@ -940,6 +1110,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("pull", help="decrypt secrets/team.age into your local vault")
     s.add_argument("--force", action="store_true", help="overwrite local values that differ from the bundle")
     s.add_argument("--identity", type=Path, default=None, help="age identity file (default ~/.config/picky/age.key)")
+    s.add_argument(
+        "--bundle",
+        type=Path,
+        default=None,
+        help="decrypt this file instead of secrets/team.age; - = stdin (git show origin/BRANCH:secrets/team.age | ...)",
+    )
     s.set_defaults(func=_cmd_pull)
     return p
 
@@ -949,6 +1125,9 @@ def main(argv: Sequence[str] | None = None, vault: Vault | None = None) -> int:
     try:
         return int(args.func(vault or get_vault(), args))
     except VaultError as e:
+        _err(f"error: {e}")
+        return 2
+    except OSError as e:  # errno + path only
         _err(f"error: {e}")
         return 2
     except (KeyboardInterrupt, EOFError):

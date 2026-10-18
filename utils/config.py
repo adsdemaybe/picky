@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
 
-from utils.secrets import settings_sources
+from utils.secrets import redact_repr_args, settings_sources
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,6 +78,10 @@ class Settings(BaseSettings):
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """env > vault (OS keychain, ~/.config/picky/secrets.env) > repo .env; ``_env_file=None`` skips the vault."""
         return settings_sources(settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings)
+
+    def __repr_args__(self) -> Any:
+        """``repr(settings)`` / ``str(settings)`` / tracebacks show API keys as ``••••`` (utils.secrets registry)."""
+        return list(redact_repr_args(super().__repr_args__()))
 
     # --- helpers -------------------------------------------------------------------------------------------------
     def real_arms(self) -> set[str]:
