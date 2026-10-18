@@ -67,6 +67,7 @@ from arms.sim.assets import (
     label_meshes,
     rover_usd_from_env,
 )
+from arms.sim.director import Director
 from arms.sim.geometry import ARM_FULL_EXT_M, ARM_STOW_EXT_M, NEAR_CLIP_M, CameraPose
 from arms.sim.labels import label_png
 from arms.sim.scene_spec import (
@@ -1220,6 +1221,7 @@ def run(
     core: WorkerCore,
     is_running: Any = lambda: True,
     max_seconds: float | None = None,
+    director: Director | None = None,
 ) -> None:
     """Drain commands, step actions, render due camera streams. Returns when ``is_running()`` is False."""
     period = 1.0 / LOOP_HZ
@@ -1246,6 +1248,7 @@ def run(
                     core.on_disconnected(str(item))
         core.tick(dt)
         rendered = False
+        director_jobs = director.prepare(backend, core) if director is not None and director.due() else []
         if link is not None and link.connected.is_set():
             due = core.stream_due()
             if prepare is not None and len(due) > 1:
@@ -1265,6 +1268,10 @@ def run(
                 rendered = True
                 if frame is not None:
                     link.offer_frame(frame)
+                    if director is not None:
+                        director.tee(frame)
+        if director is not None and director_jobs:
+            rendered = director.capture(backend, director_jobs) or rendered
         if step is not None and not rendered:
             step()
         spent = time.monotonic() - now
@@ -1349,9 +1356,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     link: GatewayLink | None = None
+    director = Director.from_env()  # dev-only chase camera + frame tee for demo videos (PICKY_SIM_DIRECTOR)
+
+    def emit(msg: Any) -> None:
+        if director is not None:
+            director.tee(msg)
+        if link is not None:
+            link.send(msg)
+
     core = WorkerCore(
         backend,
-        emit=lambda msg: link.send(msg) if link else None,
+        emit=emit,
         default_store=settings.picky_default_store,
         assets=assets,
         rover_usd=rover_usd,
@@ -1383,6 +1398,7 @@ def main(argv: list[str] | None = None) -> int:
             core,
             is_running=(sim_app.is_running if sim_app else lambda: True),
             max_seconds=args.max_seconds,
+            director=director,
         )
     except KeyboardInterrupt:
         pass
