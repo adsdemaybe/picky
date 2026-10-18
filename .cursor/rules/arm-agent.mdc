@@ -65,7 +65,8 @@ the same rules / scripted executor). Claude paths are unit-tested with a mocked 
   the first unit; v0.2 events (`robot.arrived`, `scan.result`, `pick.choices`, `item.picked`, `basket.verified`) + the
   loop events + one mirrored `brain.step(status)` per step; stop status mirrored onto the trip route; degrade to
   state-only checks when the verifier is down / slow; cancel-safe commits; tools-mode `run_tool_step` (fake: over the
-  test stubs; the gateway does not wire the loop services yet)
+  test stubs); a full basket before a grasp inserts a verified drop-off (checkout -> handoff -> back, max 3 per run,
+  the audit then expects only later units), like the v0.2 brain; in the pipeline via the gateway (`make demo`)
 - [x] **P0** Brain plan-mode hook: `loop.resolve_exec_mode` (PICKY_EXEC_MODE=plan, default when `Services.vla` +
   `Services.verifier` are wired; `direct` = exact v0.2) -> `runner.run_goal` -> `fleet.update_goal(goal_update_from_
   outcome)`; RobotError propagates (fleet reassigns); a planner / runner crash falls back to the v0.2 executor; cancel
@@ -156,15 +157,14 @@ uv run pytest arms/agent                       # tests (base deps, no network)
 make demo                                      # all fakes
 PICKY_REAL_ARMS=agent make demo                # real agent + real brain (needs GEMINI_API_KEY; else rules / scripted)
 PICKY_REAL_ARMS=brain make demo                # real robot brain only (Claude tool loop), fake shopper agent
-# planner -> VLA -> verifier loop (needs the gateway to wire the loop services; robot + perception loop fakes):
-PICKY_EXEC_MODE=plan PICKY_FAULTS=drop_on_first_grasp make demo   # "Verifier caught it" + retry
-PICKY_REAL_ARMS=planner PICKY_EXEC_MODE=plan make demo            # LLM planner (GEMINI_API_KEY; else scripted draft)
-PICKY_EXEC_MODE=direct make demo                                  # kill switch: exact v0.2 brain path
+# planner -> VLA -> verifier loop (the gateway wires it; plan mode is the default, drop_on_first_grasp injected):
+make demo                                                         # "Verifier caught it" + retry, in the summary
+PICKY_REAL_ARMS=planner make demo                                 # LLM planner (GEMINI_API_KEY; else scripted draft)
+make demo ARGS="--exec-mode direct"                               # kill switch: exact v0.2 brain path
 ```
 
-Loop env vars (read at call time): `PICKY_EXEC_MODE` (direct | plan | tools; unset = plan when the VLA + verifier are
-wired), `PICKY_PLAN_TIMEOUT_S` (20), `PICKY_VERIFY_TIMEOUT_S` (8; the verifier gets 1 s less). Until the utils PR adds
-them to `Settings`, `loop.setting()` falls back to the process env var of the same name, so the kill switch always works.
+Loop env vars (`utils.config.Settings`, read at call time): `PICKY_EXEC_MODE` (direct | plan | tools; blank = plan when
+the VLA + verifier are wired), `PICKY_PLAN_TIMEOUT_S` (20), `PICKY_VERIFY_TIMEOUT_S` (8; the verifier gets 1 s less).
 
 ## Demo-ready checklist (CLAUDE.md §6)
 
@@ -184,7 +184,7 @@ them to `Settings`, `loop.setting()` falls back to the process env var of the sa
 - Loop: the LLM planner has never run against the API (no key this weekend; mocked-call tests). `replan` is always
   scripted (mid-trip latency). An end_at='dock' plan drives to the robot's dock from robots.yaml.
 - Loop tests run over contract-level stubs in `tests/loop_world/` (copies of the API draft's fakes), not the robot /
-  perception arms' fakes (arms never import each other); the pipeline wiring is the gateway's job.
+  perception arms' fakes (arms never import each other); `make demo` / the gateway tests run the real arms' fakes.
 
 - Robot brain (real) has never run against the API (no key this weekend); it is tested with a mocked client. Each
   goal costs up to 25 Sonnet turns plus a Haiku `observe` per checkpoint; the scripted executor takes over on any

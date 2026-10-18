@@ -47,6 +47,7 @@ from contracts.plan import (
     GripperEmpty,
     GripperHolding,
     GroundTargetStep,
+    HandoffStep,
     NavigateToStep,
     PlaceStep,
     PlannerInfo,
@@ -113,6 +114,18 @@ log = get_logger(__name__)
 AnswerFn = Callable[[ApprovalRequest], Awaitable[ApprovalResponse]]
 BrainStepHook = Callable[[BrainStep], None]
 DONE_ITEM_OK = ("in_basket", "online", "substituted", "declined", "skipped")
+DEFAULT_BASKET_CAPACITY = 12
+MAX_DROPOFFS = 3
+"""Basket drop-offs per run (a full basket before a grasp: checkout, unload, back), as in the v0.2 brain."""
+
+
+def _basket_capacity(robot_id: str) -> int:
+    try:
+        from utils.data import load_robot
+
+        return int(load_robot(robot_id).basket_capacity)
+    except Exception:  # noqa: BLE001 - unknown robot / no fixtures: the default rover basket
+        return DEFAULT_BASKET_CAPACITY
 
 
 async def _run_to_completion(coro: Awaitable[Any]) -> Any:
@@ -170,6 +183,8 @@ class _Run:
         self.answers: dict[str, bool] = {}  # approval_id -> approved (approval_granted atoms)
         self.stop_status: dict[str, str] = {}  # stop_id -> last status mirrored onto the trip route
         self.scan_frames: dict[str, Any] = {}  # slot_id -> last BLURRED scan frame (pick_choice ranking)
+        self.unloaded: Counter[str] = Counter()  # sku -> units dropped off at the checkout mid-run (basket full)
+        self.dropoffs = 0
 
 
 class PlanLoop:
@@ -373,6 +388,11 @@ class PlanLoop:
                 return "next"
             if gate == "ask":
                 plan.steps.insert(i, self._threshold_question(run, step))
+                return "again"
+        if isinstance(step, GraspStep) and run.mode == "plan" and run.held is None:
+            dropoff = await self._dropoff_steps(run, step)
+            if dropoff:
+                plan.steps[i:i] = dropoff
                 return "again"
         step.attempts += 1
         attempt = step.attempts
@@ -674,7 +694,7 @@ class PlanLoop:
                 "lot_id": unit.lot_id if unit else None,
             }
             run.held = None
-            await self._basket_event(run)
+            await self._basket_event(run, pending_sku=step.sku)  # this unit's ledger record lands after we return
             return payload
         if kind == "goal_item_progress":
             if item is None:
@@ -1417,11 +1437,77 @@ class PlanLoop:
                 reason="verifier unavailable: grounded from the planogram slot (T0)",
             )
 
+    def _expected_basket(self, run: _Run) -> Counter[str]:
+        """Units verified into the basket (record_pick ledger) minus the ones dropped off at the checkout mid-run."""
+        counts = Counter(
+            r.payload.get("sku") for r in run.ledger.values() if r.kind == "record_pick" and r.payload.get("sku")
+        )
+        counts.subtract(run.unloaded)
+        return Counter({sku: n for sku, n in counts.items() if n > 0})
+
+    async def _dropoff_steps(self, run: _Run, grasp: GraspStep) -> list[PlanStep]:
+        """The basket is full before a grasp (tacos for 6 is more units than a 12-unit basket): drive to the checkout,
+        unload there (staff bag it) and come back, as real VLA steps (navigate / handoff / navigate, each verified).
+        The v0.2 brain's drop-off; the audit then expects only the units placed after it. [] = no drop-off needed."""
+        robot, catalog = getattr(self.s, "robot", None), getattr(self.s, "catalog", None)
+        if robot is None or catalog is None or run.dropoffs >= MAX_DROPOFFS:
+            return []
+        try:
+            st = await robot.state(run.plan.robot_id)
+            if st.holding or len(st.basket) < _basket_capacity(run.plan.robot_id):
+                return []
+            checkout = (await catalog.get_planogram(run.plan.store_id)).checkout
+        except Exception as exc:  # noqa: BLE001 - no drop-off: the grasp then fails honestly ('basket full')
+            log.warning("basket drop-off check failed: %s", exc)
+            return []
+        run.dropoffs += 1
+        run.unloaded.update(st.basket_skus)
+        n = run.dropoffs
+        loc = grasp.target.location
+        back = loc.approach_pose if loc is not None else st.pose
+        common: dict[str, Any] = {
+            "group_id": "dropoff",
+            "group_label": "Basket drop-off",
+            "origin": "recovery",
+            "inserted_by": grasp.step_id,
+        }
+        go_pre, go_post = default_conditions("navigate_to", goal_pose=checkout)
+        h_pre, h_post = default_conditions("handoff", goal_pose=checkout)
+        back_pre, back_post = default_conditions("navigate_to", goal_pose=back)
+        steps: list[PlanStep] = [
+            NavigateToStep(
+                step_id=f"{grasp.step_id}.d{n}.1",
+                title=f"Basket full ({len(st.basket)} items): go to the checkout",
+                target="checkout",
+                goal_pose=checkout,
+                preconditions=go_pre,
+                postconditions=go_post,
+                **common,
+            ),
+            HandoffStep(
+                step_id=f"{grasp.step_id}.d{n}.2",
+                title=f"Drop off {len(st.basket)} items at the checkout",
+                preconditions=h_pre,
+                postconditions=h_post,
+                **common,
+            ),
+            NavigateToStep(
+                step_id=f"{grasp.step_id}.d{n}.3",
+                title=f"Back to {loc.aisle_label or 'the shelf'}" if loc is not None else "Back to the shelf",
+                target="slot" if grasp.target.slot_id else "checkout",
+                slot_id=grasp.target.slot_id,
+                goal_pose=back,
+                preconditions=back_pre,
+                postconditions=back_post,
+                **common,
+            ),
+        ]
+        await self._mirror(run, grasp, f"basket full ({len(st.basket)} items): dropping it off at the checkout")
+        return steps
+
     def _audit_condition(self, run: _Run) -> Condition:
         if run.mode == "plan":
-            counts = Counter(
-                r.payload.get("sku") for r in run.ledger.values() if r.kind == "record_pick" and r.payload.get("sku")
-            )
+            counts = self._expected_basket(run)
         else:
             counts = Counter(
                 s.sku
@@ -1734,11 +1820,13 @@ class PlanLoop:
 
         return cb
 
-    async def _basket_event(self, run: _Run) -> None:
+    async def _basket_event(self, run: _Run, pending_sku: str | None = None) -> None:
         if not self.emit_v02_events:
             return
         st = await self.s.require("robot").state(run.plan.robot_id)
-        expected = Counter(r.payload.get("sku") for r in run.ledger.values() if r.kind == "record_pick")
+        expected = self._expected_basket(run)
+        if pending_sku:
+            expected[pending_sku] += 1
         await self._pub02(run, "basket.verified", check=BasketCheck.compare(expected, Counter(st.basket_skus)))
 
     async def _finish(self, run: _Run, status: str, summary: str = "") -> PlanOutcome:
