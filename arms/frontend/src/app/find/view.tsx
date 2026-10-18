@@ -16,14 +16,16 @@ import { Ingredients } from "@/components/Ingredients";
 import { usePurchases } from "@/lib/usePurchases";
 import { cn } from "@/lib/utils";
 
+// quick searches = things on the shelves of the grocery stores (each matches in-stock products at The Ave)
 const CHIPS = [
-  { label: "Coffee", q: "coffee", cat: "pantry" },
   { label: "Salsa", q: "salsa", cat: "pantry" },
+  { label: "Tortilla chips", q: "tortilla chips", cat: "snacks" },
   { label: "Avocados", q: "avocado", cat: "produce" },
+  { label: "Cheese", q: "cheese", cat: "dairy" },
+  { label: "Beans", q: "beans", cat: "pantry" },
+  { label: "Oat milk", q: "oat milk", cat: "dairy" },
+  { label: "Coffee", q: "coffee", cat: "pantry" },
   { label: "Olive oil", q: "olive oil", cat: "pantry" },
-  { label: "Phone cases", q: "case", cat: "case" },
-  { label: "Earbuds", q: "earbuds", cat: "audio" },
-  { label: "Chargers", q: "charger", cat: "charger" },
 ];
 
 export default function FindPage() {

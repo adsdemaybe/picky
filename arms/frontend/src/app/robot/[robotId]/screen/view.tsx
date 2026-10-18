@@ -89,7 +89,7 @@ export default function RobotScreen({ robotId }: { robotId: string }) {
               <ScreenTab value="checkout" icon={Receipt} label="Checkout" count={pending} />
             </TabsList>
             <TabsContent value="ask" className="flex min-h-0 flex-col data-[state=inactive]:hidden">
-              <ChatTab robot={robot} userId={trip?.user_id ?? null} speech={speech} />
+              <ChatTab robot={robot} userId={trip?.user_id ?? null} speech={speech} planogram={planogram} />
             </TabsContent>
             <TabsContent value="where" className="flex min-h-0 flex-col data-[state=inactive]:hidden">
               <WhereTab robot={robot} onTarget={setTarget} speech={speech} />
