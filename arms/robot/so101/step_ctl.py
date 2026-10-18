@@ -55,6 +55,9 @@ def main() -> None:
         f.unlink()
     cfg = RigConfig()
     caps = {int(i): cv2.VideoCapture(int(i)) for i in args.cams.split(",")}
+    for cap in caps.values():  # two full-HD streams on one USB hub tear each other's frames
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     def capture(tag: str) -> dict:
         paths = {}
@@ -120,7 +123,16 @@ def main() -> None:
             pose, grip = read_pose(robot)
             if arm_bad:
                 note = f"arm servo error {arm_bad}: going home and stopping"
-            state = {"id": cid, "cmd": cmd, "joints": pose, "gripper": grip, "servo_errors": bad, "note": note}
+            load = robot.bus.sync_read("Present_Load", normalize=False, num_retry=2)  # contact sensing
+            state = {
+                "id": cid,
+                "cmd": cmd,
+                "joints": pose,
+                "gripper": grip,
+                "servo_errors": bad,
+                "note": note,
+                "load": {k: int(v) for k, v in load.items()},
+            }
             state.update(capture(str(cid)))
             (out / f"state_{cid}.json").write_text(json.dumps(state, indent=1))
             print(f"done {cid}: {cmd}", flush=True)
