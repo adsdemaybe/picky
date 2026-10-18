@@ -645,7 +645,7 @@ class PlanLoop:
                     attempt=attempt,
                     kind="postcondition",
                     code="wrong_item_grasped",
-                    message="the shopper says it is the wrong item (photo check): putting it back",
+                    message="the shopper says it is the wrong item (photo check)",  # the recovery says what's next
                     item_id=step.item_id,
                 )
                 return await self._recover(run, i, f, att, baseline=baseline)
@@ -1299,6 +1299,10 @@ class PlanLoop:
                 sku = held or (target.sku if target else None) or getattr(step, "sku", None)
                 if sku is None:
                     continue
+                # shopper-visible title: the product's words ('Casa Verde Black Beans 15 oz'), never the raw SKU
+                label = (target.description if target is not None and target.sku == sku else None) or next(
+                    (it.name for it in plan.items if it.sku == sku and it.name), None
+                )
                 if action in ("return_item", "return_held"):
                     # back to the HELD unit's own slot (ItemInstance.slot_id), else a planned slot of that SKU
                     slot = (held_unit.slot_id if held_unit is not None else None) or next(
@@ -1308,7 +1312,7 @@ class PlanLoop:
                     out.append(
                         PlaceStep(
                             step_id=sid,
-                            title=f"Put the {sku} back",
+                            title=f"Put the {label or 'wrong item'} back",
                             sku=sku,
                             destination="shelf",
                             slot_id=slot or (target.slot_id if target else None),
@@ -1322,7 +1326,7 @@ class PlanLoop:
                     out.append(
                         PlaceStep(
                             step_id=sid,
-                            title=f"Put the held {sku} in the basket first",
+                            title=f"Put the held {label or 'item'} in the basket first",
                             sku=sku,
                             preconditions=pre,
                             postconditions=post,
@@ -2365,7 +2369,8 @@ class PlanLoop:
             if extras:
                 summary += f"; {len(extras)} suggested extra{'' if len(extras) == 1 else 's'} skipped"
             summary += (
-                f" · {m.verifier_catches} verifier catch(es) · {m.retries} retr{'y' if m.retries == 1 else 'ies'}"
+                f" · {m.verifier_catches} verifier catch{'' if m.verifier_catches == 1 else 'es'}"
+                f" · {m.retries} retr{'y' if m.retries == 1 else 'ies'}"
             )
         await self._pub(
             run, "plan.completed", plan_id=plan.plan_id, status=status, summary=summary, stats=m.model_copy()
