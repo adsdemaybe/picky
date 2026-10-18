@@ -638,6 +638,9 @@ class Recorder:
         self.on = None
 
     def render(self, on: bool):
+        # Isaac 6.0: re-enabling a render product's updates leaks its GPU textures (OOM after ~100 toggled captures),
+        # so active cameras render every step and only the set of active cameras changes (intro / main / outro)
+        on = True
         if on == self.on:
             return
         for n, rp in self.rps.items():
@@ -759,6 +762,103 @@ class Director:
         self.set_cam(self.eye, self.tgt, self.focal)
 
 
+# --- follow cameras: bird's-eye + side --------------------------------------------------------------------------------
+class FollowCams:
+    """Two extra world cameras that track the rover every captured frame: a steep bird's-eye view from just under
+    the ceiling (the top-down render at 2.55 m sees the floor, so 2.45 m is free air above the aisle) and a lateral
+    side view at arm height. Both eyes are checked against the occlusion grid (free air, line of sight to the rover)
+    and cut to a new valid spot instead of clipping through a shelf."""
+
+    BIRD_Z = 2.45
+    SIDE_AZ = (0, 25, -25, 180, 155, -155, 50, -50, 130, -130)  # 0 = the rover's left, >0 towards behind it
+    SIDE_DIST = (1.9, 1.6, 1.3, 1.05, 0.85)
+    SIDE_Z = (1.15, 1.35, 0.95)
+
+    def __init__(self, hg: HeightGrid, set_bird, set_side):
+        self.hg, self.set_bird, self.set_side = hg, set_bird, set_side
+        self.b_eye = self.b_tgt = None
+        self.s_eye = self.s_tgt = None
+        self.s_key = None  # (az, dist, z) of the current side shot
+        self.cuts = {"birdseye": 0, "side": 0}
+
+    @staticmethod
+    def _frame(x, y, yaw):
+        fwd = np.array([math.cos(yaw), math.sin(yaw), 0.0])
+        left = np.array([-math.sin(yaw), math.cos(yaw), 0.0])
+        return np.array([x, y, 0.0]), fwd, left
+
+    def bird_ok(self, eye) -> bool:
+        m, hg = self.hg.m, self.hg
+        if np.any(eye[:2] < m.lo + 0.05) or np.any(eye[:2] > m.hi - 0.05):
+            return False
+        r = int(math.ceil(0.2 / m.res))
+        i, j = m.cell(eye[:2])
+        win = hg.h[max(i - r, 0) : i + r + 1, max(j - r, 0) : j + r + 1]
+        return win.size > 0 and float(win.max()) < eye[2] - 0.2
+
+    def bird_goal(self, p, fwd, left):
+        tgt = p + fwd * 0.2 + np.array([0, 0, 0.35])
+        for back, side in ((0.7, 0.0), (0.45, 0.0), (0.7, 0.35), (0.7, -0.35), (0.2, 0.0), (0.0, 0.3), (0.0, -0.3)):
+            eye = p - fwd * back + left * side + np.array([0, 0, self.BIRD_Z])
+            if self.bird_ok(eye):
+                return eye, tgt
+        return p - fwd * 0.3 + np.array([0, 0, self.BIRD_Z]), tgt
+
+    def side_eye(self, key, p, fwd, left):
+        az, dist, z = key
+        a = math.radians(az)
+        d = math.cos(a) * left - math.sin(a) * fwd
+        eye = p + d * dist
+        eye[2] = z
+        return eye
+
+    def side_valid(self, eye, p) -> bool:
+        return self.hg.eye_ok(eye, clear=0.15) and self.hg.visible(eye, p + np.array([0, 0, 0.6]), skip_end=0.3)
+
+    def side_pick(self, p, fwd, left):
+        for az in self.SIDE_AZ:
+            for dist in self.SIDE_DIST:
+                for z in self.SIDE_Z:
+                    key = (az, dist, z)
+                    if self.side_valid(self.side_eye(key, p, fwd, left), p):
+                        return key
+        return None
+
+    def update(self, x, y, yaw):
+        p, fwd, left = self._frame(x, y, yaw)
+        # bird's-eye
+        eye, tgt = self.bird_goal(p, fwd, left)
+        if self.b_eye is None:
+            self.b_eye, self.b_tgt = eye, tgt
+        else:
+            ne = self.b_eye + (eye - self.b_eye) * 0.08
+            if not self.bird_ok(ne):
+                ne = eye
+                self.cuts["birdseye"] += 1
+            self.b_eye, self.b_tgt = ne, self.b_tgt + (tgt - self.b_tgt) * 0.15
+        self.set_bird(self.b_eye, self.b_tgt, 9.0)
+        # side
+        tgt = p + fwd * 0.05 + np.array([0, 0, 0.7])
+        key = self.s_key
+        if key is None or not self.side_valid(self.side_eye(key, p, fwd, left), p):
+            key = self.side_pick(p, fwd, left)
+            self.s_key = key
+        if key is None:  # nowhere free at arm height: fall back to a high three-quarter view
+            eye = p - fwd * 0.9 + left * 0.5 + np.array([0, 0, 2.2])
+        else:
+            eye = self.side_eye(key, p, fwd, left)
+        if self.s_eye is None:
+            self.s_eye, self.s_tgt = eye, tgt
+        else:
+            ne = self.s_eye + (eye - self.s_eye) * 0.08
+            if not self.side_valid(ne, p):
+                ne = eye
+                self.cuts["side"] += 1
+            self.s_eye, self.s_tgt = ne, self.s_tgt + (tgt - self.s_tgt) * 0.2
+        dist = float(np.linalg.norm((self.s_eye - self.s_tgt)[:2]))
+        self.set_side(self.s_eye, self.s_tgt, float(np.clip(7.0 + 3.0 * dist, 9.0, 13.0)))
+
+
 # --- the mission ------------------------------------------------------------------------------------------------------
 class Mission:
     def __init__(self, io, kin, smap, cfg, out: Path, hg: HeightGrid, set_cam=None, rec=None, log=print):
@@ -783,6 +883,8 @@ class Mission:
         self.rec = rec
         self.hg = hg
         self.director = Director(hg, set_cam) if set_cam else None
+        self.cap_every = 2  # record every Nth physics step (2 = 30 fps of sim time)
+        self.cam_hooks = []  # callables (x, y, yaw) run for every captured frame (follow cameras)
         self.drift = 0.0
         self.path = []
         self.drop_k = 0
@@ -845,11 +947,14 @@ class Mission:
             path, rel = self.held
             q_pred = {n: self.qm[n] + self.cmd_v.get(n, 0.0) * DT for n in self.qm}
             self.io.set_body_T(path, self.world_gripper(q_pred) @ rel)
-        capture = (self.k + 1) % 2 == 0
+        capture = (self.k + 1) % self.cap_every == 0
         if capture and self.director is not None:  # camera for the frame this step renders
             q = self.qm
             self.drift = min(self.drift + 0.0005, 0.12) if self.director.mode == "hold" else 0.0
             self.director.update(q["base_x"], q["base_y"], q["base_yaw"], self.drift)
+        if capture:
+            for f in self.cam_hooks:
+                f(self.qm["base_x"], self.qm["base_y"], self.qm["base_yaw"])
         if self.rec is not None:
             self.rec.render(capture)
         self.io.update()
@@ -861,7 +966,7 @@ class Mission:
             if e:
                 for n, v in e.items():
                     self.eff_max[n] = max(self.eff_max[n], abs(v))
-        if self.k % 2 == 0:
+        if self.k % self.cap_every == 0:
             q = self.qm
             if self.rec is not None:
                 self.rec.capture()
@@ -873,7 +978,7 @@ class Mission:
             self.frames.write(
                 json.dumps(
                     {
-                        "f": (self.rec.frame - 1) if self.rec else self.k // 2,
+                        "f": (self.rec.frame - 1) if self.rec else self.k // self.cap_every,
                         "t": round(self.t, 3),
                         "phase": self.gphase,
                         "shot": d.shot if d else 0,
@@ -1883,6 +1988,11 @@ def product_closeups(app, stage, items, out: Path, hide=(), look_at=None):
     ann = rep.AnnotatorRegistry.get_annotator("rgb")
     ann.attach([rp])
     shots = []
+    import carb.settings  # noqa: PLC0415
+
+    cs = carb.settings.get_settings()
+    cop = cs.get("/omni/replicator/captureOnPlay")
+    cs.set("/omni/replicator/captureOnPlay", False)  # rendered before the timeline plays
     for iid, it in items.items():
         n = np.array([*SIDE_N[it["side"]], 0.0])
         eye = it["center"] + n * 0.42 + np.array([0, 0, 0.06])
@@ -1895,6 +2005,8 @@ def product_closeups(app, stage, items, out: Path, hide=(), look_at=None):
         f = out / "items" / f"{iid}.jpg"
         Image.fromarray(np.asarray(d)[..., :3].copy()).save(f, quality=92)
         shots.append((iid, f.read_bytes()))
+    if cop is not None:
+        cs.set("/omni/replicator/captureOnPlay", cop)
     ann.detach()
     rp.destroy()
     for im in vis:
@@ -1917,6 +2029,13 @@ def run(app, args, tele):
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
+    try:
+        import carb.settings  # noqa: PLC0415
+
+        # DLSS (the default AA) crashed the renderer (NGX CreateFeature failed) once six render products were live
+        carb.settings.get_settings().set("/rtx/post/aa/op", 2)  # 2 = FXAA
+    except Exception as e:  # noqa: BLE001
+        log(f"[so101-demo] could not switch AA: {e}")
     for f in ("events.jsonl", "frames.jsonl", "llm_log.jsonl"):
         (out / f).unlink(missing_ok=True)
     cfg = json.loads(Path(args.so101_config).read_text())
@@ -2039,6 +2158,16 @@ def run(app, args, tele):
     cams = {"director": ("/World/picky_director", tuple(args.res))}
     for nm, res in (("wrist", (640, 360)), ("front", (640, 360)), ("basket", (480, 270))):
         cams[nm] = (ROBOT + kin.k["cameras"][nm][len("/Picky") :], res)
+    # bird's-eye + side follow cameras (960x540 keeps the render cost low)
+    bird_path, side_path = "/World/picky_birdseye", "/World/picky_side"
+    autopilot.look_at(stage, bird_path, [spawn[0] - 0.6, spawn[1], 2.45], [spawn[0], spawn[1], 0.35], 9.0)
+    autopilot.look_at(stage, side_path, [spawn[0], spawn[1] + 1.5, 1.15], [spawn[0], spawn[1], 0.7], 11.0)
+    cams["birdseye"] = (bird_path, (960, 540))
+    cams["side"] = (side_path, (960, 540))
+    keep = {c.strip() for c in str(getattr(args, "rec_cams", "") or "").split(",") if c.strip()}
+    if keep:  # fewer render products = less GPU memory + faster renders on a shared GPU
+        cams = {k: v for k, v in cams.items() if k in keep or k == "director"}
+    log(f"[so101-demo] recording cameras: {sorted(cams)}")
     try:
         from omni.kit.viewport.utility import get_active_viewport  # noqa: PLC0415
 
@@ -2063,6 +2192,9 @@ def run(app, args, tele):
         f"effort api {io.eff_fn}"
     )
     ms = Mission(io, kin, smap, cfg, out, hg, set_cam=set_cam, rec=rec, log=log)
+    ms.cap_every = max(1, int(getattr(args, "capture_every", 2)))
+    follow = FollowCams(hg, set_cam_factory(bird_path), set_cam_factory(side_path))
+    ms.cam_hooks.append(follow.update)
     names = {it["path"]: it["name"] for it in items.values()}
     ms.ev("plan", source=plan["source"], model=plan["model"], summary=plan["summary"], stops=plan["stops"])
     t_run = time.time()
@@ -2091,7 +2223,7 @@ def run(app, args, tele):
         ms.checkout(slot, counter_top, names)
         ms.gphase = "outro"
         if rec:
-            rec.set_active(["director", "basket"])
+            rec.set_active([c for c in ("director", "basket") if c in cams])
         q = ms.qm
         d.mode = "orbit"
         n_out = int(args.outro / DT)
@@ -2110,6 +2242,7 @@ def run(app, args, tele):
             "wall_s": round(time.time() - t_run, 1),
             "frames": rec.frame if rec else 0,
             "effort_api": io.eff_fn,
+            "follow_cam_cuts": follow.cuts,
             "effort_max_Nm": {k: round(v, 3) for k, v in ms.eff_max.items()},
             "llm_calls": sum('"response"' in ln for ln in open(out / "llm_log.jsonl"))
             if (out / "llm_log.jsonl").exists()

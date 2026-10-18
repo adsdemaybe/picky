@@ -1,10 +1,14 @@
 """Cut a `teleop_app.py --demo --record` run of the SO-101 rover (demo/so101_demo.py) into the demo videos.
 
-Reads RUN/frames/<director|wrist|front|basket>/<n>.jpg (30 fps of sim time), RUN/frames.jsonl, RUN/events.jsonl,
+Reads RUN/frames/<director|birdseye|side|wrist|front|basket>/<n>.jpg (30 fps of sim time; any camera folder may be
+missing), RUN/frames.jsonl, RUN/events.jsonl,
 RUN/plan.json and RUN/topdown.jpg. Composes: title card, intro + shopping list, the Gemini plan card, the main run
 (director camera + HUD + live mini-map with Gemini's route, visited / remaining stops, the trail and the robot +
-wrist-cam and front/basket-cam picture-in-picture + captions with Gemini's reason per leg and each pick), the "Paid"
-card and the outro. Playback speed varies by phase (driving faster than grasping). Works on a run still in progress
+wrist-cam and front/basket/side/chase-cam picture-in-picture + captions with Gemini's reason per leg and each pick),
+the "Paid" card and the outro. Camera views: bird's-eye full screen in the middle of long drives (chase cam as PiP),
+side cam PiP during reach/grasp and the checkout unload, side cam full screen while the arm swings the product into
+the basket (basket cam as PiP); every view is labelled. Playback speed varies by phase (driving faster than
+grasping). Works on a run still in progress
 (--early: cut what exists, end on a "to be continued" card).
 
     python demo/edit_so101.py RUN OUT_DIR [--only full|highlight|early] [--tag _v2]
@@ -64,6 +68,18 @@ class Run:
             if e["kind"] == "ik_grasp":
                 self.flip_from.append((e["t"], bool(e.get("wrist_flip"))))
         self.trail = [(f["t"], f["rovers"][0]["x"], f["rovers"][0]["y"]) for f in self.frames]
+        dts = np.diff([f["t"] for f in self.frames[: min(len(self.frames), 400)]])
+        # sim frames per 1/30 s (1 for a 30 fps recording, 2 for --capture-every 4) to keep playback speeds in sim time
+        self.ratio = max(1.0, float(np.median(dts)) * FPS) if len(dts) else 1.0
+        self.drives = []  # (t0, t1) of each contiguous driving stretch
+        for f in self.frames:
+            drv = f["rovers"][0]["phase"] in ("drive", "to_checkout")
+            if drv and self.drives and self.drives[-1][2]:
+                self.drives[-1][1] = f["t"]
+            elif drv:
+                self.drives.append([f["t"], f["t"], True])
+            elif self.drives:
+                self.drives[-1][2] = False
 
     def frame_path(self, cam, f):
         return self.dir / "frames" / cam / f"{f:06d}.jpg"
@@ -86,6 +102,9 @@ class Run:
         ps = self.paths[name]
         i = bisect.bisect_right([p[0] for p in ps], t) - 1
         return ps[i][1] if i >= 0 else None
+
+    def in_long_drive(self, t, min_len=4.0, pad0=1.2, pad1=1.0):
+        return any(t1 - t0 >= min_len and t0 + pad0 <= t <= t1 - pad1 for t0, t1, _ in self.drives)
 
     def wrist_flipped(self, t):
         cur = False
@@ -163,6 +182,13 @@ class Editor:
         panel(img, (x0 - 6, y0 - 36, x0 + w + 6, y0 + h + 6), 205, 10)
         img.paste(im, (x0, y0))
         ImageDraw.Draw(img).text((x0 + 6, y0 - 33), label, font=font(22, True), fill=WHITE)
+
+    def view_label(self, img, label, y=160):
+        d = ImageDraw.Draw(img)
+        tw = d.textlength(label, font=font(24, True))
+        panel(img, (24, y, 24 + tw + 64, y + 44), 190, 10)
+        d.ellipse([40, y + 15, 54, y + 29], fill=(255, 70, 70))
+        d.text((64, y + 22), label, font=font(24, True), fill=WHITE, anchor="lm")
 
     def caption_bar(self, img, title, sub, color):
         d = ImageDraw.Draw(img)
@@ -243,7 +269,21 @@ class Editor:
         r = self.r
         fr = r.frames[fi]
         t = fr["t"]
-        base = self.load("director", fi)
+        rv = fr["rovers"][0]
+        main_cam = "director"
+        if overlays and fr["phase"] == "main":
+            if rv["phase"] in ("drive", "to_checkout") and r.in_long_drive(t):
+                main_cam = "birdseye"
+            elif rv["phase"] == "basket":
+                main_cam = "side"
+        base = None
+        if main_cam != "director":
+            f = self.nearest(main_cam, fi)
+            base = self.load(main_cam, f) if f is not None else None
+            if base is None:
+                main_cam = "director"
+        if base is None:
+            base = self.load("director", fi)
         if base is None:
             f = self.nearest("director", fi, 10)
             base = self.load("director", f) if f is not None else Image.new("RGB", (W, H), (20, 20, 24))
@@ -261,12 +301,24 @@ class Editor:
                 fill=(220, 220, 220),
                 anchor="mm",
             )
-            rv = fr["rovers"][0]
+            mode = fr.get("mode", "chase")
+            label = {
+                "birdseye": "bird's-eye",
+                "side": "side cam",
+            }.get(main_cam, {"hold": "close-up cam", "orbit": "orbit cam"}.get(mode, "chase cam"))
+            self.view_label(img, label)
+            slot = (W - 384 - 30, 500, 384, 216)
             basket_view = rv["phase"] == "basket" or r.last_event(t, ("released", "in_basket"), within=1.6)
             if basket_view and r.has("basket", fi):
-                self.pip(img, "basket", fi, (W - 384 - 30, 500, 384, 216), "basket cam")
+                self.pip(img, "basket", fi, slot, "basket cam")
+            elif main_cam == "birdseye":
+                self.pip(img, "director", fi, slot, "chase cam")
+            elif rv["phase"] in PICK_PHASES + ("checkout", "unload") and self.nearest("side", fi) is not None:
+                self.pip(img, "side", fi, slot, "side cam")
+            elif main_cam == "director" and rv["phase"] in ("drive", "to_checkout") and self.nearest("birdseye", fi):
+                self.pip(img, "birdseye", fi, slot, "bird's-eye")
             else:
-                self.pip(img, "front", fi, (W - 384 - 30, 500, 384, 216), "front cam")
+                self.pip(img, "front", fi, slot, "front cam")
             self.pip(
                 img,
                 "wrist",
@@ -463,7 +515,7 @@ def main_frames(run: Run, m0: int, m1: int, mode="full", windows=None):
         fi = int(f)
         fr = run.frames[fi]
         done = len(fr["rovers"][0]["done"])
-        sp = speed_for(run, fi, done, mode)
+        sp = speed_for(run, fi, done, mode) / run.ratio
         if windows is not None:
             t = fr["t"]
             if not any(a <= t <= b for a, b in windows):

@@ -160,6 +160,6 @@ class Planner:
             "Each image below is a close-up of one product on a supermarket shelf (a 3-D model in a simulator), "
             "labelled with its item id. Name each product the way a shopper would, in 2-4 words, generic (no brand "
             "names), first letter capitalised, e.g. 'Orange soda bottle', 'Hand cream tube', 'Dish soap'. The "
-            "product of interest is the one in the centre of the image. Return JSON only: {\"<item id>\": \"<name>\"}."
+            'product of interest is the one in the centre of the image. Return JSON only: {"<item id>": "<name>"}.'
         )
         return self._call(prompt, "name_products", images=images, system="You label supermarket products from photos.")

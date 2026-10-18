@@ -66,7 +66,9 @@ def main(xml: str, out: str) -> None:
             tips.append(((w - p6) @ r6)[:, a_idx])
     tip = float(np.max(np.concatenate(tips))) if tips else 0.0
     tcp = max(0.0, tip - 0.035)  # grasp ~3.5 cm back from the very tip
-    print(f"approach axis = link6 local {a_loc}, finger axis local {np.round(f_loc, 3)}, tip {tip:.3f} m, tcp {tcp:.3f}")
+    print(
+        f"approach axis = link6 local {a_loc}, finger axis local {np.round(f_loc, 3)}, tip {tip:.3f} m, tcp {tcp:.3f}"
+    )
 
     def tcp_of(q):
         p, r = fk(q)

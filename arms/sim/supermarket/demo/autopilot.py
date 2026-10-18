@@ -55,7 +55,7 @@ class ArmIK:
         return i, float(np.clip((v - axis[i]) / (axis[i + 1] - axis[i]), 0, 1))
 
     def _interp(self, table, axes, vals, fixed=None):
-        cells = [self._cell(a, v) for a, v in zip(axes, vals)]
+        cells = [self._cell(a, v) for a, v in zip(axes, vals, strict=False)]
         acc, wsum, got = np.zeros(6), 0.0, []
         for corner in range(1 << len(axes)):
             idx, w = [], 1.0
@@ -365,7 +365,7 @@ class Rover:
             if abs(err[1]) > 0.004:
                 g = self.strafe(float(err[1]), 0.5)
                 a = self.arm_to(q, 0.5)
-                for _ in zip(g, a):
+                for _ in zip(g, a, strict=False):
                     yield
             else:
                 yield from self.arm_to(q, 0.5)
@@ -386,7 +386,9 @@ class Rover:
             for k in range(30):
                 if k % 5 == 0:
                     pos = self.p.held_body.get_world_poses()[0].numpy()[0]
-                    self.ev("held_dbg", k=k, tensor=_r2(pos), usd=_r2(self.c.world_center(self.p.held)), tcp=_r2(self.tcp()))
+                    self.ev(
+                        "held_dbg", k=k, tensor=_r2(pos), usd=_r2(self.c.world_center(self.p.held)), tcp=_r2(self.tcp())
+                    )
                 yield
         self.phase, self.sub = "lift", "lift + retract"
         yield from self.arm_line((x, zz), (x, zz + 0.04), 0.6)
@@ -574,17 +576,23 @@ def replan(rv: Rover, stop: dict, event: str):
         if st["item"] == stop["item"]:
             entry["failed"] = event
             entry["alternatives"] = []
-            for k, p in enumerate(sorted(alts.get(stop["item"], []), key=lambda p: np.linalg.norm(p.center - failed.center))[:3]):
+            for k, p in enumerate(
+                sorted(alts.get(stop["item"], []), key=lambda p: np.linalg.norm(p.center - failed.center))[:3]
+            ):
                 aid = f"{stop['item']}-alt{k + 1}"
                 c.items[aid], c.names[aid] = p, c.names[stop["item"]]
-                entry["alternatives"].append({"id": aid, "section": p.section, "pos": _r2(p.center[:2]), "side": p.side})
+                entry["alternatives"].append(
+                    {"id": aid, "section": p.section, "pos": _r2(p.center[:2]), "side": p.side}
+                )
         rem.append(entry)
     rv.phase, rv.sub = "replan", "asking Gemini to replan"
     rv.ev("replan_request", event=event)
     yield from rv.wait(0.5)
     t0 = time.time()
     try:
-        out = c.planner.replan(c.map_summary, {"name": rv.name, "pose": _r2([rv.p.x, rv.p.y])}, rem, event, c.checkout_info)
+        out = c.planner.replan(
+            c.map_summary, {"name": rv.name, "pose": _r2([rv.p.x, rv.p.y])}, rem, event, c.checkout_info
+        )
         stops = (out.get("robots") or [{}])[0].get("stops", [])
         valid = [s for s in stops if s.get("item") in c.items and s["item"] not in c.picked]
         rv.queue = valid
@@ -653,14 +661,32 @@ def topdown(app, stage, smap, out: Path, hide: list[str], px_n: int = 1024):
     dep = rep.AnnotatorRegistry.get_annotator("distance_to_image_plane")
     rgb.attach([rp])
     dep.attach([rp])
+    # annotators only capture while the timeline plays (Replicator captureOnPlay); the SO-101 demo renders this
+    # before play, so capture on every update for now and fall back to an explicit orchestrator step
+    import carb.settings
+
+    cs = carb.settings.get_settings()
+    cop = cs.get("/omni/replicator/captureOnPlay")
+    cs.set("/omni/replicator/captureOnPlay", False)
     for _ in range(40):
         app.update()
+    for k in range(200):
+        if getattr(rgb.get_data(), "size", 0) > 0 and getattr(dep.get_data(), "size", 0) > 0:
+            break
+        if k % 20 == 19:
+            try:
+                rep.orchestrator.step(rt_subframes=4, pause_timeline=False)
+            except Exception as e:  # noqa: BLE001
+                print(f"[topdown] orchestrator.step: {e}", flush=True)
+        app.update()
+    if cop is not None:
+        cs.set("/omni/replicator/captureOnPlay", cop)
     img = np.asarray(rgb.get_data())[..., :3]
     d = np.asarray(dep.get_data(), dtype=np.float32)
     rgb.detach()
     dep.detach()
     rp.destroy()
-    for im, v in vis:
+    for im, _v in vis:
         im.MakeVisible()
     h = np.where(np.isfinite(d) & (d > 0.02), cam_z - d, np.nan)  # NaN: geometry above the camera (pillar, wall)
     # a camera inside a pillar/wall that reaches the ceiling sees the floor through it (back faces) but renders black
@@ -745,13 +771,15 @@ def run_demo(app, stage, pickys, names, smap, cfg, args, step_all, world_pos):
         c.items[iid], c.names[iid] = p, nm
         c.used_paths.add(p.path)
     (out / "pickable.json").write_text(json.dumps(
-        [{"name": p.name, "sku": p.sku, "section": p.section, "side": p.side, "center": _r2(p.center), "size": _r2(p.hi - p.lo)}
+        [{"name": p.name, "sku": p.sku, "section": p.section, "side": p.side, "center": _r2(p.center), "size": _r2(p.hi - p.lo)}  # noqa: E501
          for p in c.pickable], indent=0))  # fmt: skip
-    rovers = [Rover(c, p, n) for p, n in zip(pickys, names)]
+    rovers = [Rover(c, p, n) for p, n in zip(pickys, names, strict=False)]
 
     # checkout slots
     ck = cfg["checkout"]
-    c.slots = {r.name: (ck["slots"][r.name][0], ck["slots"][r.name][1], math.radians(ck["slots"][r.name][2])) for r in rovers}
+    c.slots = {
+        r.name: (ck["slots"][r.name][0], ck["slots"][r.name][1], math.radians(ck["slots"][r.name][2])) for r in rovers
+    }
     c.slot_step = {r.name: ck["slots"][r.name][3] for r in rovers}
     c.checkout_info = {"counter_min": _r2(ck["lo"][:2]), "counter_max": _r2(ck["hi"][:2]),
                        "rover_slots": {n: _r2(v[:2]) for n, v in c.slots.items()}}  # fmt: skip
@@ -762,7 +790,9 @@ def run_demo(app, stage, pickys, names, smap, cfg, args, step_all, world_pos):
          "pos": _r2(p.center[:2]), "shelf_height_m": round(float(p.center[2]), 2), "sides": prod_sides(c, p)}
         for i, p in c.items.items()
     ]  # fmt: skip
-    robots_info = [{"name": r.name, "start": _r2([r.p.x, r.p.y]), "facing_deg": round(math.degrees(r.p.yaw))} for r in rovers]
+    robots_info = [
+        {"name": r.name, "start": _r2([r.p.x, r.p.y]), "facing_deg": round(math.degrees(r.p.yaw))} for r in rovers
+    ]
     planner = Planner(str(out / "llm_log.jsonl"))
     c.planner = planner
     c.plan_reason = {}
@@ -782,7 +812,12 @@ def run_demo(app, stage, pickys, names, smap, cfg, args, step_all, world_pos):
             c.plan_reason[rb["robot"]] = rb.get("checkout_reason", "")
         missing = [i for i in c.items if i not in seen]
         for i in missing:  # repair: give a dropped item to the robot whose last stop is closest
-            best = min(per, key=lambda n: np.linalg.norm(c.items[(per[n] or [{"item": i}])[-1]["item"]].center[:2] - c.items[i].center[:2]))
+            best = min(
+                per,
+                key=lambda n: np.linalg.norm(
+                    c.items[(per[n] or [{"item": i}])[-1]["item"]].center[:2] - c.items[i].center[:2]
+                ),
+            )
             per[best].append({"item": i, "side": c.items[i].side, "reason": "added back (the plan skipped it)"})
         summary = resp.get("summary", "")
         if missing:
@@ -797,7 +832,7 @@ def run_demo(app, stage, pickys, names, smap, cfg, args, step_all, world_pos):
     plan_doc = {
         "source": plan_src, "model": planner.model_used, "latency_s": round(plan_latency, 1), "summary": summary,
         "robots": {rv.name: rv.queue for rv in rovers}, "checkout_reason": c.plan_reason,
-        "items": {i: {"name": c.names[i], "product": p.name, "section": p.section, "section_label": sec_label.get(p.section, ""),
+        "items": {i: {"name": c.names[i], "product": p.name, "section": p.section, "section_label": sec_label.get(p.section, ""),  # noqa: E501
                       "center": _r2(p.center)} for i, p in c.items.items()},
         "sections": [{**s, "lo": _r2(s["lo"]), "hi": _r2(s["hi"])} for s in smap.sections],
         "map": smap.to_json(), "topdown": meta, "slots": {n: list(v) for n, v in c.slots.items()},
@@ -806,7 +841,10 @@ def run_demo(app, stage, pickys, names, smap, cfg, args, step_all, world_pos):
     (out / "plan.json").write_text(json.dumps(plan_doc, indent=1))
     c.event("plan", source=plan_src, model=planner.model_used, summary=summary,
             robots={rv.name: rv.queue for rv in rovers})  # fmt: skip
-    print(f"[picky-demo] setup {time.time() - t_setup:.0f}s, plan {plan_src} in {plan_latency:.1f}s: {summary}", flush=True)
+    print(
+        f"[picky-demo] setup {time.time() - t_setup:.0f}s, plan {plan_src} in {plan_latency:.1f}s: {summary}",
+        flush=True,
+    )
     if args.plan_only:
         return
 
@@ -817,7 +855,10 @@ def run_demo(app, stage, pickys, names, smap, cfg, args, step_all, world_pos):
     chase_eye = {}
     for i, rv in enumerate(rovers):
         sfx = "" if i == 0 else str(i + 1)
-        cams["chase" + sfx] = (look_at(stage, f"/World/picky_chase_{rv.name}", *chase_pose(rv), focal=15.0), tuple(args.res))
+        cams["chase" + sfx] = (
+            look_at(stage, f"/World/picky_chase_{rv.name}", *chase_pose(rv), focal=15.0),
+            tuple(args.res),
+        )
         cams["wrist" + sfx] = (add_wrist_camera(stage, str(rv.p.link6.GetPath())), (640, 360))
     r0 = rovers[0]
     look_at(stage, "/World/picky_side_cam", [r0.p.x + 1.5, r0.p.y + 1.5, 1.5], [r0.p.x, r0.p.y, 0.8], focal=16.0)
@@ -864,7 +905,10 @@ def run_demo(app, stage, pickys, names, smap, cfg, args, step_all, world_pos):
         cyw, syw = math.cos(r0.p.yaw), math.sin(r0.p.yaw)
         want = np.array([r0.p.x + cyw * 0.5 - syw * 1.7, r0.p.y + syw * 0.5 + cyw * 1.7, 1.45])
         ci = smap.cell(want[:2])
-        if not (0 <= ci[0] < smap.nx and 0 <= ci[1] < smap.ny) or smap.raw[max(ci[0] - 3, 0) : ci[0] + 4, max(ci[1] - 3, 0) : ci[1] + 4].any():
+        if (
+            not (0 <= ci[0] < smap.nx and 0 <= ci[1] < smap.ny)
+            or smap.raw[max(ci[0] - 3, 0) : ci[0] + 4, max(ci[1] - 3, 0) : ci[1] + 4].any()
+        ):
             want = np.array([r0.p.x + cyw * 0.3 - syw * 1.1, r0.p.y + syw * 0.3 + cyw * 1.1, 2.1])
         side_eye = want if side_eye is None else side_eye + (want - side_eye) * 0.06
         look_at(stage, "/World/picky_side_cam", side_eye, [r0.p.x + cyw * 0.3, r0.p.y + syw * 0.3, 0.85], focal=16.0)
