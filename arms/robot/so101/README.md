@@ -58,8 +58,10 @@ python -m arms.robot.so101.pick_place "pick up the oat milk and put it in the ba
 ## Known limitations
 
 - Fixed grasp height per run (no depth): fine for upright boxes/cans of similar height.
-- Top-down grasp only; wrist roll fixed at 0.
-- Not yet tested on hardware — the SO-101, camera and Perceptron key were not connected when this was written.
+- Approach pitch is auto-selected: straight down when reachable, tilting toward the target further out (the SO-101's
+  upper+lower arm is only ~25 cm). Wrist roll fixed at 0.
+- Tested without hardware: command parsing and IK on the real URDF (targets 15–45 cm out solve in ~0.4 s).
+  Not yet run on the arm, camera or Perceptron API.
 
 ## Stretch: SmolVLA
 

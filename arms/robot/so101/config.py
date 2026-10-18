@@ -30,9 +30,9 @@ class RigConfig:
     homography_path: Path = Path(_env("HOMOGRAPHY", str(HERE / "homography.json")))
 
     # Grasp heights above the table plane, in the robot base frame (base sits on the table, z=0).
-    hover_z: float = 0.12
+    hover_z: float = 0.08
     grasp_z: float = 0.025
-    place_z: float = 0.14
+    place_z: float = 0.10
 
     gripper_open: float = 60.0  # LeRobot gripper range is 0 (closed) .. 100 (open)
     gripper_closed: float = 5.0
