@@ -52,6 +52,17 @@ class Settings(BaseSettings):
     """Gemini thinking_level for every call (minimal | low | medium | high; blank = model default, medium)."""
     picky_llm_timeout_s: float = 60.0
     """Per-request LLM timeout in seconds (both providers; the SDKs default to minutes)."""
+    perceptron_api_key: str = ""
+    """Perceptron Mk1.5 key (the verifier's vision provider, arms/perception); blank = ground-truth fake verifier."""
+    perceptron_model: str = "perceptron-mk1.5"
+    """perceptron-mk1.5 (default) | perceptron-mk1 (fallback)."""
+    perceptron_base_url: str = "https://api.perceptron.inc/v1"
+    picky_vision_provider: str = "perceptron"
+    """Verifier vision backend: perceptron | fake (deterministic sidecar answers through the real verifier code)."""
+    picky_verifier_mode: str = ""
+    """decide | shadow | gt_only; blank = per store backend (shadow on the 2D fake, decide on Isaac)."""
+    picky_vision_call_timeout_s: float = 4.0
+    """Cap per vision-provider call inside the verifier (also bounded by the request's deadline)."""
     gateway_host: str = "0.0.0.0"
     gateway_port: int = 8000
     picky_gateway_url: str = "http://localhost:8000"
