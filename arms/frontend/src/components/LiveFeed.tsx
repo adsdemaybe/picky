@@ -229,27 +229,31 @@ function useCanvas(draw: (ctx: CanvasRenderingContext2D, W: number, H: number, n
 }
 
 /** Wrist camera: close-up of whatever the gripper is working on. */
-function WristCamera() {
+export function WristCamera() {
   const ref = useCanvas((ctx, W, H, now) => {
     const s = useTrip.getState();
     const stop = s.activeStop ? s.stops[s.activeStop] : null;
-    const working = stop?.sku && ["scanning", "picking", "waiting"].includes(s.robot.status);
+    // checkout handoff: the unit in the gripper on its way from the basket to the counter
+    const unloading = s.robot.status === "unloading" ? (s.handoff?.units.find((u) => u.state === "arm")?.sku ?? null) : null;
+    const working = unloading || (stop?.sku && ["scanning", "picking", "waiting"].includes(s.robot.status));
+    const sku = unloading ?? stop?.sku;
     ctx.fillStyle = "#1d2124";
     ctx.fillRect(0, 0, W, H);
-    if (!working || !stop?.sku) {
+    if (!working || !sku) {
       ctx.fillStyle = "#2a2f33";
       for (let i = 0; i < 9; i++) ctx.fillRect(0, i * 64 + ((now / 40) % 64), W, 2);
       ctx.fillStyle = "rgba(255,255,255,0.75)";
       ctx.font = "600 26px ui-sans-serif, system-ui";
       ctx.textAlign = "center";
-      ctx.fillText(s.phase === "idle" ? "Arm parked" : "Arm stowed while driving", W / 2, H / 2);
+      ctx.fillText(s.phase === "idle" ? "Arm parked" : s.robot.status === "unloading" ? "Reaching into the basket" : s.phase === "checkout" || s.phase === "done" ? "Arm parked at the counter" : "Arm stowed while driving", W / 2, H / 2);
       ctx.textAlign = "left";
       drawHudLine(ctx, W, H, "WRIST", "stowed");
       return;
     }
-    const p = productBySku[stop.sku];
+    const p = productBySku[sku];
     const t = (now % 4000) / 4000;
-    const zoom = s.robot.status === "picking" ? 1.15 : 1 + 0.03 * Math.sin(t * Math.PI * 2);
+    const gripping = s.robot.status === "picking" || !!unloading;
+    const zoom = gripping ? 1.15 : 1 + 0.03 * Math.sin(t * Math.PI * 2);
     const bw = 420 * zoom,
       bh = 380 * zoom;
     const x = W / 2 - bw / 2,
@@ -271,7 +275,7 @@ function WristCamera() {
       ctx.fillRect(x + 40 + i * 6, y + bh - 90 * zoom, i % 4 === 0 ? 4 : 2, 56 * zoom);
     }
     // gripper fingers
-    const close = s.robot.status === "picking" ? Math.min(1, ((now % 1500) / 1500) * 2) : 0;
+    const close = unloading ? 1 : s.robot.status === "picking" ? Math.min(1, ((now % 1500) / 1500) * 2) : 0;
     ctx.fillStyle = "#0f1214";
     ctx.fillRect(x - 70 + close * 40, 0, 60, H);
     ctx.fillRect(x + bw + 10 - close * 40, 0, 60, H);
@@ -280,7 +284,7 @@ function WristCamera() {
       ctx.fillStyle = "rgba(217,242,107,0.85)";
       ctx.fillRect(x, y + ((now / 6) % bh), bw, 3);
     }
-    drawHudLine(ctx, W, H, "WRIST", s.robot.status === "picking" ? "grip closing" : s.robot.status);
+    drawHudLine(ctx, W, H, "WRIST", unloading ? "basket → counter" : s.robot.status === "picking" ? "grip closing" : s.robot.status);
   });
   return <canvas ref={ref} className="absolute inset-0 h-full w-full" aria-label="Simulated wrist camera" />;
 }
@@ -370,6 +374,8 @@ export function SimCamera({ basketInset = true }: { basketInset?: boolean }) {
     let lastStop: string | null = null;
     let odo = 0;
     let last = { x: 0, y: 0 };
+    let armKey = "";
+    let armSince = performance.now();
     const W = 960,
       H = 540;
     cv.width = W;
@@ -389,10 +395,20 @@ export function SimCamera({ basketInset = true }: { basketInset?: boolean }) {
       const stop = activeStop ? stops[activeStop] : null;
       const atShelf = stop?.sku && slotsOf(s.storeId)[stop.sku] && (robot.status === "scanning" || robot.status === "picking" || robot.status === "waiting");
 
+      const ho = s.handoff;
+      const inArm = ho?.units.find((u) => u.state === "arm");
+      if ((inArm?.key ?? "") !== armKey) {
+        armKey = inArm?.key ?? "";
+        armSince = now;
+      }
+
       if (phase === "idle" || phase === "waiting_login") drawDock(ctx, W, H, now, s.storeId);
+      else if (ho && (robot.status === "unloading" || ho.status === "done")) drawCounter(ctx, W, H, ho.units, inArm ?? null, ((now - armSince) / 1000) * s.speed, now);
       else if (atShelf && stop?.sku) drawShelf(ctx, W, H, s.storeId, stop.sku, robot.status, t * s.speed, now);
       else drawCorridor(ctx, W, H, odo, robot, now);
-      if (basketInset && phase !== "idle" && phase !== "waiting_login") drawBasketCam(ctx, W, H, s.cart, now);
+      // during the handoff the basket camera shows what is still in the basket
+      const basket = ho ? ho.units.filter((u) => u.state === "basket").map((u) => ({ sku: u.sku, qty: 1, source: "in_store", verified: true })) : s.cart;
+      if (basketInset && phase !== "idle" && phase !== "waiting_login") drawBasketCam(ctx, W, H, basket, now);
 
       drawHud(ctx, W, H, robot, stop?.label ?? "", now);
       raf = requestAnimationFrame(draw);
@@ -747,6 +763,161 @@ function drawPick(
   ctx.lineTo(W * 0.68, H - 6);
   ctx.stroke();
   ctx.lineCap = "butt";
+}
+
+/** Checkout handoff: the counter ahead, units already set down on it, and the arm carrying the next one up out of the
+ *  basket (reach down → grip → lift → set down; `t` = seconds since this unit entered the gripper, playback-scaled). */
+function drawCounter(
+  ctx: CanvasRenderingContext2D,
+  W: number,
+  H: number,
+  units: { key: string; sku: string; state: string }[],
+  inArm: { key: string; sku: string } | null,
+  t: number,
+  now: number,
+) {
+  // wall + checkout sign
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#e9e4d8");
+  g.addColorStop(1, "#d6cfbf");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#2f6b45";
+  ctx.beginPath();
+  ctx.roundRect(W * 0.36, 26, W * 0.28, 44, 10);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.font = "700 22px ui-sans-serif, system-ui";
+  ctx.textAlign = "center";
+  ctx.fillText("CHECKOUT", W / 2, 56);
+  ctx.textAlign = "left";
+  // POS screen
+  ctx.fillStyle = "#1c2420";
+  ctx.fillRect(W * 0.8, 96, 120, 84);
+  ctx.fillStyle = "#3c6e9a";
+  ctx.fillRect(W * 0.8 + 6, 102, 108, 60);
+  ctx.fillStyle = "#1c2420";
+  ctx.fillRect(W * 0.8 + 54, 180, 12, 40);
+  // counter with a belt
+  const top = H * 0.42,
+    depth = H * 0.2;
+  ctx.fillStyle = "#b9b2a2";
+  ctx.fillRect(0, top + depth, W, H * 0.1);
+  ctx.fillStyle = "#3a3f3c";
+  ctx.fillRect(0, top, W, depth);
+  ctx.strokeStyle = "rgba(255,255,255,0.08)";
+  ctx.lineWidth = 2;
+  for (let x = -((now / 30) % 40); x < W; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, top);
+    ctx.lineTo(x + 18, top + depth);
+    ctx.stroke();
+  }
+  // slots on the belt, in unload order
+  const slotW = 74,
+    gap = 12,
+    perRow = Math.max(1, Math.floor((W * 0.74) / (slotW + gap)));
+  const slot = (i: number) => {
+    const row = Math.floor(i / perRow),
+      col = i % perRow;
+    const s = row ? 0.85 : 1;
+    return { x: W * 0.08 + col * (slotW + gap) * s + row * 24, y: top + depth * 0.82 - row * 30, s };
+  };
+  const drawUnit = (sku: string, x: number, y: number, s: number) => {
+    const p = productBySku[sku];
+    const w = slotW * s,
+      h = 88 * s;
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    ctx.fillRect(x + 4, y - 4, w, 6);
+    ctx.fillStyle = p?.label_color ?? "#999";
+    ctx.beginPath();
+    ctx.roundRect(x, y - h, w, h, 8);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.88)";
+    ctx.fillRect(x + 5, y - h * 0.62, w - 10, 18 * s);
+    ctx.fillStyle = "#1c2420";
+    ctx.font = `600 ${Math.round(10.5 * s)}px ui-sans-serif, system-ui`;
+    ctx.fillText((p?.name ?? sku).slice(0, 11), x + 8, y - h * 0.62 + 13 * s);
+  };
+  // back row first so the front row overlaps it
+  const placed = units.map((u, i) => ({ u, i })).filter(({ u }) => u.state === "counter");
+  [...placed].sort((a, b) => Math.floor(b.i / perRow) - Math.floor(a.i / perRow)).forEach(({ u, i }) => {
+    const sl = slot(i);
+    drawUnit(u.sku, sl.x, sl.y, sl.s);
+  });
+  // the arm: shoulder below the frame, reaching into the basket and carrying the unit up to its slot
+  const shoulder = { x: W * 0.5, y: H + 30 };
+  const basket = { x: W * 0.5, y: H * 0.92 };
+  const idx = inArm ? units.findIndex((u) => u.key === inArm.key) : -1;
+  const target = idx >= 0 ? slot(idx) : null;
+  const drop = target ? { x: target.x + (slotW * target.s) / 2, y: target.y - 96 * target.s } : { x: W * 0.5, y: H * 0.7 };
+  const k = Math.min(1, t / 1.15);
+  let hand = { x: W * 0.5, y: H * 0.74 };
+  let carrying = false;
+  if (inArm) {
+    if (k < 0.28) {
+      const e = ease(k / 0.28);
+      hand = { x: W * 0.5, y: H * 0.74 + (basket.y - H * 0.74) * e };
+    } else if (k < 0.4) {
+      hand = basket;
+      carrying = k > 0.34;
+    } else {
+      const e = ease((k - 0.4) / 0.6);
+      carrying = k < 0.97;
+      hand = { x: basket.x + (drop.x - basket.x) * e, y: basket.y - 70 * Math.sin(Math.PI * e) + (drop.y - basket.y) * e };
+    }
+  }
+  const mx = (shoulder.x + hand.x) / 2,
+    my = (shoulder.y + hand.y) / 2;
+  const dx = hand.x - shoulder.x,
+    dy = hand.y - shoulder.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const bend = Math.max(0, 240 - len * 0.3);
+  const elbow = { x: mx + (-dy / len) * bend * (hand.x < W / 2 ? -1 : 1), y: my + (dx / len) * bend * (hand.x < W / 2 ? -1 : 1) };
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "#1c2420";
+  ctx.lineWidth = 26;
+  ctx.beginPath();
+  ctx.moveTo(shoulder.x, shoulder.y);
+  ctx.lineTo(elbow.x, elbow.y);
+  ctx.lineTo(hand.x, hand.y);
+  ctx.stroke();
+  ctx.strokeStyle = "#e8e3d6";
+  ctx.lineWidth = 6;
+  ctx.beginPath();
+  ctx.moveTo(shoulder.x, shoulder.y);
+  ctx.lineTo(elbow.x, elbow.y);
+  ctx.lineTo(hand.x, hand.y);
+  ctx.stroke();
+  ctx.fillStyle = "#d93a30";
+  ctx.beginPath();
+  ctx.arc(elbow.x, elbow.y, 13, 0, Math.PI * 2);
+  ctx.fill();
+  if (carrying && inArm) drawUnit(inArm.sku, hand.x - slotW / 2, hand.y - 4, 1);
+  const open = carrying ? 0 : 14;
+  ctx.fillStyle = "#1c2420";
+  ctx.fillRect(hand.x - 26 - open, hand.y - 10, 12, 30);
+  ctx.fillRect(hand.x + 14 + open, hand.y - 10, 12, 30);
+  ctx.fillRect(hand.x - 26 - open, hand.y + 14, 52 + open * 2, 10);
+  // basket rim
+  ctx.strokeStyle = "#3d4640";
+  ctx.lineWidth = 8;
+  ctx.beginPath();
+  ctx.moveTo(W * 0.32, H - 6);
+  ctx.lineTo(W * 0.36, H * 0.9);
+  ctx.lineTo(W * 0.64, H * 0.9);
+  ctx.lineTo(W * 0.68, H - 6);
+  ctx.stroke();
+  ctx.lineCap = "butt";
+  // progress tag
+  const done = placed.length;
+  const label = done === units.length ? `HANDOFF DONE · ${units.length} ON THE COUNTER` : `HANDOFF · UNLOADING ${Math.min(done + 1, units.length)}/${units.length}`;
+  ctx.font = "600 13px ui-monospace, monospace";
+  const tw = ctx.measureText(label).width + 20;
+  ctx.fillStyle = done === units.length ? "rgba(15,122,74,0.95)" : "rgba(28,36,32,0.85)";
+  ctx.fillRect(14, 84, tw, 26);
+  ctx.fillStyle = "#fff";
+  ctx.fillText(label, 24, 102);
 }
 
 /** Picture-in-picture from the basket camera: what's in the basket, newest item highlighted once verified. */

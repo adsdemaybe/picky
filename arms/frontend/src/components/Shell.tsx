@@ -23,7 +23,7 @@ const NAV = [
   { href: "/", label: "Home", icon: House, match: (p: string) => p === "/" },
   { href: "/find", label: "Find", icon: ScanSearch, match: (p: string) => p.startsWith("/find") },
   { href: "/purchases", label: "Spending", icon: ChartPie, match: (p: string) => p.startsWith("/purchases") },
-  { href: "/order", label: "Robot", icon: Bot, match: (p: string) => p.startsWith("/order") || p.startsWith("/trip") },
+  { href: "/order", label: "Robot", icon: Bot, match: (p: string) => p.startsWith("/order") || p.startsWith("/trip") || p.startsWith("/watch") },
   { href: "/live", label: "Live", icon: Video, match: (p: string) => p.startsWith("/live") },
   { href: "/ask", label: "Ask", icon: Sparkles, match: (p: string) => p.startsWith("/ask") },
 ];

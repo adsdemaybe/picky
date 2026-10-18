@@ -74,6 +74,8 @@ export type Purchase = {
   ts: string;
   rating: number | null;
   synthetic: boolean;
+  /** gateway purchase history (0.2.3): the robot's photos of the exact units bought */
+  photo_urls?: string[];
 };
 
 export const products = productsJson as Product[];

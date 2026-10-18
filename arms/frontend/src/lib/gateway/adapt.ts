@@ -5,7 +5,7 @@ import { maya, productBySku } from "@/lib/data";
 import { fmt } from "@/lib/money";
 import type { Draft, ListLine, Rec } from "@/lib/order";
 import type { Approval, CartLine, Phase, Receipt, RobotStatus, StopKind, StopStatus } from "@/lib/trip";
-import type { S } from "./client";
+import { gatewayHref, type S } from "./client";
 import type {
   ApprovalRequest,
   ApprovalResponse,
@@ -267,7 +267,16 @@ export function approvalFromContract(r: ApprovalRequest, ctx: { pick?: PickChoic
   }
   if (r.kind === "pick_choice" && r.sku) {
     const cands = ctx.pick?.candidates ?? [];
+    // produce review: `multi` + payload.qty (or need) = choose that many units; payload.photos = {option_id: url}
+    const extra = r.payload as { qty?: number; need?: number; photos?: Record<string, string> };
+    const need = Math.max(1, Math.round(Number(extra.need ?? extra.qty ?? 1)) || 1);
+    const photo = (id: string) => {
+      const u = extra.photos?.[id];
+      return typeof u === "string" && u ? (u.startsWith("/") ? gatewayHref(u) : u) : undefined;
+    };
     return {
+      multi: r.multi && need > 1,
+      need: r.multi ? need : 1,
       id: r.approval_id,
       kind: "pick",
       stop_id: p.item_id ?? "",
@@ -281,6 +290,7 @@ export function approvalFromContract(r: ApprovalRequest, ctx: { pick?: PickChoic
           expiry: null,
           note: (o.detail ?? c?.reason ?? o.label).replace(/\s*\([^)]*\)\s*$/, ""),
           thumb: o.thumbnail_b64 ?? c?.thumbnail_b64 ?? undefined,
+          photo: photo(o.option_id),
         };
       }),
       recommended: cands.find((c) => c.rank === 1)?.instance_id ?? r.options[0]?.option_id,
@@ -391,7 +401,11 @@ export function summarize(ev: GatewayEvent): string {
       return `${ev.arm}: ${ev.message}`;
     case "agent.message":
       return ev.text;
-    default:
-      return "";
+    default: {
+      // events newer than this build's contracts (payment.agent_step, …): their own title / detail
+      const raw = ev as unknown as { step?: { title?: string; detail?: string; kind?: string }; title?: string; detail?: string };
+      const st = raw.step ?? raw;
+      return [st.title, st.detail].filter(Boolean).join(": ");
+    }
   }
 }
