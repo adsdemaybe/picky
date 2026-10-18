@@ -54,6 +54,7 @@ import { GATEWAY_URL, GatewayError, cameraUrl, errorText, gatewayHref, gw, produ
 import { openEventSocket } from "./eventSocket";
 import type { ApprovalRequest, BasketCheck, BrainStep, GatewayEvent, MandateDecision, PickChoice, Pose2D, ProfileUpdate, Receipt, RequestPlan, Route, Trip } from "./events";
 import { useGateway } from "./useGateway";
+import { useTripWhisper } from "@/lib/whisper";
 
 type TripApi = UseBoundStore<StoreApi<TripStore>>;
 export type FollowOptions = { tripId: string; requestId?: string | null; robotId?: string | null; mode?: Mode; title?: string };
@@ -671,6 +672,9 @@ async function handle(store: TripApi, ev: GatewayEvent) {
   if (ev.type === "trip.snapshot") {
     await hydrate(store, ev.trip);
     lastSeq = Math.max(lastSeq, ev.seq);
+    // contracts 0.2.5: the latest Cart Whisperer pass rides on the snapshot (Trip.whisper)
+    const cw = (ev.trip as { whisper?: Record<string, unknown> | null }).whisper;
+    if (cw && store.getState().tripId) useTripWhisper.getState().fromEvent(store.getState().tripId!, cw, ev.seq);
     return;
   }
   if (typeof ev.seq !== "number") return;
@@ -681,6 +685,11 @@ async function handle(store: TripApi, ev: GatewayEvent) {
     queueLog(store, ev);
   }
   if (ev.type === "brain.step") addSteps(store, [ev.step]);
+  // Cart Whisperer (contracts v0.3): replayed sets count too, the newest seq per phase wins
+  if ((ev as { type: string }).type === "whisper.cards") {
+    const tripId = store.getState().tripId;
+    if (tripId) useTripWhisper.getState().fromEvent(tripId, ev as unknown as Record<string, unknown>, ev.seq);
+  }
   if (ev.type === "pick.choices" && ev.approval_id) {
     pickChoices.set(ev.approval_id, ev.choice);
     refreshPending(store);

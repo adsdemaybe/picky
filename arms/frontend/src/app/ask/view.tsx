@@ -46,6 +46,7 @@ export default function AskPage() {
             <li>
               Your {fmt(32000)} monthly grocery budget and your rule to ask before anything over {fmt(maya.mandate.ask_above_cents)}
             </li>
+            <li>What you own and your phone&apos;s installments left (the Cart Whisperer&apos;s signals)</li>
           </ul>
         </Panel>
         <Panel className="bg-sky-wash p-5 ring-0">
@@ -53,8 +54,8 @@ export default function AskPage() {
             <Lock className="size-4" aria-hidden /> How answers work
           </div>
           <p className="mt-2 text-[14px]">
-            Claude decides which lookups to run. The prices, totals and savings come from plain code over your data, never from the AI&apos;s memory. Picky can&apos;t
-            buy anything or move money.
+            Gemini decides which lookups to run — and you can speak your question; it hears the audio directly. The prices, totals, advice cards and savings come
+            from plain code over your data, never from the AI&apos;s memory. Picky can&apos;t buy anything or move money.
           </p>
         </Panel>
       </aside>

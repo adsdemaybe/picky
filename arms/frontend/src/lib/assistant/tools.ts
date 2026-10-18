@@ -1,7 +1,8 @@
 // Assistant tools: deterministic answers over Maya's purchases, budget and the price layer.
 // The LLM picks tools and phrases results; every number comes from here ("the LLM proposes; code decides").
 import { mayaDevices } from "@/data/stores/tmobile";
-import { CATS, MONTHLY_BUDGET_CENTS, TODAY, catOf, maya, mostBought, productBySku, tripsFrom, type CatId, type Purchase } from "../data";
+import { CATS, MONTHLY_BUDGET_CENTS, STORES, TODAY, catOf, maya, mostBought, productBySku, tripsFrom, type CatId, type Purchase, type StoreId } from "../data";
+import { PRESETS, WIRELESS_MANDATE, defaultAccepted, draftTotal, expandIntent, mandateCheck } from "../order";
 import { fmt } from "../money";
 import { effective, offersFor, searchProducts, upcomingFor, verdictFor } from "../prices";
 
@@ -11,7 +12,18 @@ export type Card =
   | { type: "spend"; title: string; rows: { label: string; cents: number; color?: string }[]; total: number }
   | { type: "budget"; spent: number; budget: number; pace: number; projected: number }
   | { type: "savings"; items: { text: string; save_cents: number; sku?: string }[]; total: number }
-  | { type: "afford"; verdict: "yes" | "tight" | "no"; amount: number; left_before: number; left_after: number; note: string };
+  | { type: "afford"; verdict: "yes" | "tight" | "no"; amount: number; left_before: number; left_after: number; note: string }
+  | {
+      type: "whisper";
+      store: string;
+      title: string;
+      budget_cents: number;
+      total_cents: number;
+      lines: { name: string; qty: number; unit_cents: number; online?: boolean }[];
+      advice: WhisperAdviceCard[];
+      recs: WhisperRecCard[];
+      mandate: { verdict: string; reasons: { code: string; text: string; level: "ok" | "ask" | "block" }[] };
+    };
 
 export type ToolResult = { summary: string; card?: Card };
 const DAY = 86_400_000;
@@ -148,8 +160,76 @@ export function canIAfford(purchases: Purchase[], amount_cents: number, what: st
   };
 }
 
+// ---------------------------------------------------------------- Cart Whisperer (T-Mobile track)
+// Deterministic pass over lib/order's draft engine (the same SKIP / WAIT / detour cards the Robot order page shows):
+// the LLM picks the tool and phrases the answer; every card, price and reason code comes from this code.
+
+export type WhisperAdviceCard = { kind: "skip" | "wait"; name: string; text: string; save_cents: number | null };
+export type WhisperRecCard = { name: string; unit_cents: number; reason: string; detour_s: number; sponsored: boolean };
+
+function whisperStoreFor(text: string): StoreId {
+  return /earbud|headphone|headphones|buds|running|case|screen|protector|pixel|iphone|galaxy|charger|cable|phone|tmobile|t-mobile|wireless|watch/i.test(text) ? "store_tmobile" : "store_ave";
+}
+
+export function cartWhisperer(intent: string): ToolResult {
+  const storeId = whisperStoreFor(intent);
+  const text = intent.trim() || (storeId === "store_tmobile" ? PRESETS.store_tmobile[0].text : PRESETS.store_ave[0].text);
+  const d = expandIntent(text, storeId);
+  const accepted = defaultAccepted(d);
+  const totals = draftTotal(d, accepted);
+  const lines = [
+    ...d.lines.map((l) => ({ sku: l.sku, unit_cents: l.unit_cents })),
+    ...d.recs.filter((r) => accepted.has(r.rec_id)).map((r) => ({ sku: r.sku, unit_cents: r.unit_cents })),
+  ];
+  const m = mandateCheck(totals.total, lines, storeId);
+  const storeName = STORES[storeId].name ?? STORES[storeId].short;
+  const listTxt = d.lines.map((l) => `${l.qty}× ${productBySku[l.sku]?.name ?? l.sku} ${fmt(l.qty * l.unit_cents)}${l.sourcing === "online" ? " (online)" : ""}`).join("; ");
+  const adviceTxt = d.advice.map((a) => `${a.kind === "skip" ? "SKIP" : "WAIT"} ${productBySku[a.sku]?.name ?? a.sku}: ${a.text}${a.save_cents ? ` [${fmt(a.save_cents)}]` : ""}`).join(" | ");
+  const recsTxt = d.recs.map((r) => `${productBySku[r.sku]?.name ?? r.sku} ${fmt(r.unit_cents)} — ${r.reason} (detour +${r.detour_s}s, sponsored: ${r.sponsored ? "yes" : "no"}, kept: ${accepted.has(r.rec_id) ? "yes" : "no"})`).join(" | ");
+  const mandateTxt = `${m.verdict.toUpperCase()} (${m.reasons.map((r) => r.code).join(", ")})`;
+  const summary = [
+    `Cart Whisperer pass for "${text}" at ${storeName} (budget ${fmt(d.budget_cents)}):`,
+    `LIST: ${listTxt || "empty"}.`,
+    adviceTxt ? `ADVICE CARDS: ${adviceTxt}.` : "ADVICE CARDS: none worth showing today (zero is a valid answer).",
+    recsTxt ? `OPTIONAL STOPS: ${recsTxt}.` : "",
+    `CART: kept stops ${fmt(totals.recs)} + list ${fmt(totals.list)}${totals.shipping ? ` + shipping ${fmt(totals.shipping)}` : ""} = ${fmt(totals.total)} of ${fmt(d.budget_cents)}. MANDATE: ${mandateTxt}. Reasons: ${m.reasons.map((r) => `${r.code} = ${r.text}`).join("; ")}.`,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return {
+    summary,
+    card: {
+      type: "whisper",
+      store: storeName,
+      title: d.title,
+      budget_cents: d.budget_cents,
+      total_cents: totals.total,
+      lines: d.lines.map((l) => ({ name: productBySku[l.sku]?.name ?? l.sku, qty: l.qty, unit_cents: l.unit_cents, online: l.sourcing === "online" })),
+      advice: d.advice.map((a) => ({ kind: a.kind, name: productBySku[a.sku]?.name ?? a.sku, text: a.text, save_cents: a.save_cents ?? null })),
+      recs: d.recs.map((r) => ({ name: productBySku[r.sku]?.name ?? r.sku, unit_cents: r.unit_cents, reason: r.reason, detour_s: r.detour_s, sponsored: r.sponsored })),
+      mandate: { verdict: m.verdict, reasons: m.reasons },
+    },
+  };
+}
+
+/** Every signal the Cart Whisperer is allowed to look at (docs/cart-whisperer.md ShopperContext, demo data). */
+export function shopperContext(): ToolResult {
+  const ph = mayaDevices.phone;
+  const owned = mayaDevices.owns.map((o) => `${o.name} (bought ${o.bought})`).join(", ") || "nothing yet";
+  const top = mostBought(maya.purchases, 5).map((m) => `${productBySku[m.sku].name} ×${m.times}`).join(", ");
+  return {
+    summary: [
+      `Maya's context, by signal source.`,
+      `ABOUT HER (customer): prefs ${Object.entries(maya.profile.prefs).map(([k, v]) => `${k} ${v}`).join(", ")}; owns ${owned}; her ${ph.name} has ${ph.installments_left} installments of ${fmt(ph.monthly_installment_cents)} left (${fmt(ph.installments_left * ph.monthly_installment_cents)}).`,
+      `PRICES & STOCK (commerce): grocery ${fmt(MONTHLY_BUDGET_CENTS)}/month budget, ${fmt(maya.mandate.cap_cents)} trip cap; tech mandate cap ${fmt(WIRELESS_MANDATE.cap_cents)}, asks above ${fmt(WIRELESS_MANDATE.ask_above_cents)}; usual buys: ${top}.`,
+      `RULES: blocked categories ${maya.mandate.blocked_categories.join(", ") || "none"}; checkout always needs her approval.`,
+      `Every card she sees is scored by deterministic code from exactly these signals; nothing sponsored unless labeled.`,
+    ].join(" "),
+  };
+}
+
 // ---------------------------------------------------------------- offline responder
-// Used when no Anthropic credentials are configured, so the demo always answers.
+// Used when no LLM credentials are configured, so the demo always answers.
 
 export function localAnswer(q: string, purchases: Purchase[]): { text: string; cards: Card[] } {
   const t = q.toLowerCase();
@@ -157,6 +237,12 @@ export function localAnswer(q: string, purchases: Purchase[]): { text: string; c
   const cards: Card[] = [];
   const say = (r: ToolResult) => (r.card && cards.push(r.card), r);
 
+  if (!/afford|good (price|deal)|cheapest|price check|where.*(buy|get)|save|budget|spent/.test(t) && (/whisper|advice|skip|wait on|worth (it|waiting)|what should i (get|buy|skip)/.test(t) || /pixel|earbud|taco/.test(t))) {
+    const r = say(cartWhisperer(q));
+    const c = r.card as Extract<Card, { type: "whisper" }>;
+    const lead = c.advice.length ? c.advice[0].text : "Nothing worth a stop today — zero suggestions is a valid answer.";
+    return { text: `${lead} Cart ${fmt(c.total_cents)} of ${fmt(c.budget_cents)} at ${c.store}; the mandate says ${c.mandate.verdict.replace("_", " ")}.`, cards };
+  }
   if (/afford|can i (buy|get)|should i (buy|get|upgrade)/.test(t)) {
     const what = t.replace(/.*(afford|buy|get|upgrade to|upgrade)\s+(an?\s+|the\s+)?/, "").replace(/\?.*$/, "").replace(/for \$.*/, "").trim() || "it";
     const p = searchProducts(what, 1)[0];

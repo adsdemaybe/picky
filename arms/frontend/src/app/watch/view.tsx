@@ -15,11 +15,12 @@ import { LottieSlot } from "@/components/media";
 import { Panel, ProductTile } from "@/components/picky";
 import { CameraInset, CameraPanel, directorRungs, overheadRungs, perceivedRungs, useCeilingCameras, useSimNames, wristRungs, type Rung } from "@/components/StageCamera";
 import { VerifyStack } from "@/components/TripReview";
+import { TripWhisperPanel } from "@/components/Whisper";
 import { MapLegend, StoreMap } from "@/components/StoreMap";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { STORES, productBySku } from "@/lib/data";
+import { STORES, productBySku, type StoreId } from "@/lib/data";
 import { GATEWAY_URL } from "@/lib/gateway/client";
 import { useGateway } from "@/lib/gateway/useGateway";
 import { useTrip, type LogEvent } from "@/lib/trip";
@@ -33,8 +34,27 @@ export default function WatchPage() {
   const perceptron = useGateway((s) => !!s.health?.real_arms.includes("cameras"));
   const [mapOnStage, setMapOnStage] = useState(false);
   const [view, setView] = useState("chase");
-  const ceilings = useCeilingCameras(t.storeId, t.source === "gateway" ? GATEWAY_URL : "", t.source === "gateway" && !!t.robotId);
-  const simOf = useSimNames(t.source === "gateway" ? t.robotId : null, t.storeId, t.source === "gateway" ? GATEWAY_URL : "", isaac);
+  // Store switch: "trip" follows the active trip; a store id pins every camera to that floor (Picky Market ↔ T-Mobile)
+  const [storePick, setStorePick] = useState<"trip" | StoreId>("trip");
+  const gwLive = useGateway((s) => s.status) === "live";
+  const gwBase = gwLive ? GATEWAY_URL : "";
+  const tripStore: StoreId = STORES[t.storeId] ? (t.storeId as StoreId) : "store_ave";
+  const camStore: StoreId = storePick === "trip" ? tripStore : storePick;
+  const STORE_ROVER: Record<StoreId, string> = { store_ave: "rover-ave-1", store_tmobile: "rover-tmo-1" };
+  const camRobot = storePick === "trip" ? (t.source === "gateway" ? t.robotId : null) : STORE_ROVER[camStore];
+  const ceilings = useCeilingCameras(camStore, gwBase, gwLive);
+  const simOf = useSimNames(gwBase ? camRobot : null, camStore, gwBase, isaac);
+  // T-Mobile floor fallback: a labeled recorded Isaac run (video 12) when the live cameras aren't reachable
+  const isaacReplay: Rung | null =
+    camStore === "store_tmobile"
+      ? {
+          kind: "node",
+          title: "T-Mobile store · Isaac Sim",
+          badge: "Recorded run",
+          note: "Recorded Isaac run, labeled; the live cameras above stream when the worker is up",
+          node: <video key="tmo-replay" className="h-full w-full object-cover" src="/streams/store-tmobile-isaac.mp4" autoPlay muted loop playsInline />,
+        }
+      : null;
   const bind = (
     <Suspense fallback={null}>
       <BindTripFromUrl />
@@ -59,12 +79,12 @@ export default function WatchPage() {
   }
 
   const gateway = t.source === "gateway";
-  const robotId = gateway ? t.robotId : null;
   const base = gateway ? GATEWAY_URL : "";
-  const opts = { robotId, storeId: t.storeId, base, simOf, perceptron, waiting: gateway && !t.robotId };
-  const store = STORES[t.storeId];
+  const opts = { robotId: camRobot, storeId: camStore, base: gwLive ? GATEWAY_URL : base, simOf, perceptron, waiting: gwLive && !camRobot };
+  const store = STORES[camStore];
   const overhead = ceilings.find((c) => c.id === view);
-  const stageRungs = overhead ? overheadRungs(opts, overhead.id, `Bird's-eye · ${overhead.name.replace(/^.*·\s*/, "")}`) : directorRungs(opts);
+  const baseRungs = overhead ? overheadRungs(opts, overhead.id, `Bird's-eye · ${overhead.name.replace(/^.*·\s*/, "")}`) : directorRungs(opts);
+  const stageRungs = isaacReplay && !overhead ? [...baseRungs.slice(0, -1), isaacReplay, ...baseRungs.slice(-1)] : baseRungs;
   const views = [{ id: "chase", label: "Chase cam" }, ...ceilings.map((c, i) => ({ id: c.id, label: ceilings.length > 1 ? `Bird's-eye ${i + 1}` : "Bird's-eye" }))];
   const who = t.robotName ?? (gateway ? (t.robotId ?? "Assigning a robot") : "Demo robot");
   const phaseText =
@@ -94,6 +114,26 @@ export default function WatchPage() {
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.75fr)_minmax(340px,1fr)]">
         <div className="flex min-w-0 flex-col gap-4">
+          <div role="group" aria-label="Store cameras" className="-mb-1 flex flex-wrap items-center gap-1.5">
+            <Eye className="mr-0.5 size-3.5 text-muted-foreground" aria-hidden />
+            {([["trip", `This trip · ${STORES[tripStore].short}`], ["store_ave", "Picky Market"], ["store_tmobile", "T-Mobile"]] as [typeof storePick, string][]).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                aria-pressed={storePick === id}
+                onClick={() => {
+                  setStorePick(id);
+                  setView("chase");
+                }}
+                className={cn(
+                  "min-h-8 cursor-pointer rounded-full px-3 py-1 text-[13px] font-semibold transition-colors",
+                  storePick === id ? "bg-sky text-white" : "bg-muted text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           {views.length > 1 && (
             <div role="tablist" aria-label="Camera view" className="-mb-2 flex flex-wrap items-center gap-1.5">
               {views.map((v) => (
@@ -135,6 +175,7 @@ export default function WatchPage() {
           />
           <HandoffPanel />
           <ApprovalPanel />
+          <TripWhisperPanel />
           <VerifyStack />
           <Basket />
           <EventLog />

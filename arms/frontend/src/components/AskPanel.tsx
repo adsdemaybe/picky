@@ -1,6 +1,7 @@
 "use client";
 // Ask Picky: a chat you can open from anywhere (sheet) or full-page (/ask), plus the cards that render tool results.
-import { ArrowUp, Mic, Square, Sparkles } from "lucide-react";
+// The mic records WAV and sends it to Gemini, which hears the question and answers (browser STT stays as fallback).
+import { ArrowUp, Ban, Clock, Mic, Square, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -19,6 +20,59 @@ import { cn } from "@/lib/utils";
 import { LottieSlot } from "./media";
 import { Meter, ProductTile, VerdictChip } from "./picky";
 import { OffersTable, Sparkline } from "./PriceBits";
+
+/** Record mic audio and return it as base64 16-bit mono WAV (the format the Gemini audio input takes). */
+function useAudioRecorder() {
+  const ref = useRef<{ rec: MediaRecorder; chunks: Blob[] } | null>(null);
+  const [active, setActive] = useState(false);
+  const supported = typeof window !== "undefined" && typeof MediaRecorder !== "undefined" && !!navigator.mediaDevices?.getUserMedia;
+  const start = () => {
+    if (!supported || ref.current) return;
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((stream) => {
+        const rec = new MediaRecorder(stream);
+        const chunks: Blob[] = [];
+        rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+        rec.onstop = () => stream.getTracks().forEach((t) => t.stop());
+        ref.current = { rec, chunks };
+        rec.start();
+        setActive(true);
+      })
+      .catch(() => {});
+  };
+  const stop = (): Promise<string | null> => {
+    const c = ref.current;
+    if (!c) return Promise.resolve(null);
+    ref.current = null;
+    setActive(false);
+    return new Promise<Blob>((res) => {
+      c.rec.onstop = () => res(new Blob(c.chunks, { type: c.chunks[0]?.type || "audio/webm" }));
+      c.rec.stop();
+    }).then(async (blob) => {
+      try {
+        const ctx = new AudioContext({ sampleRate: 16000 });
+        const buf = await ctx.decodeAudioData(await blob.arrayBuffer());
+        void ctx.close();
+        const ch = buf.getChannelData(0);
+        const dv = new DataView(new ArrayBuffer(44 + ch.length * 2));
+        const w = (o: number, s: string) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+        w(0, "RIFF"); dv.setUint32(4, 36 + ch.length * 2, true); w(8, "WAVEfmt "); dv.setUint32(16, 16, true);
+        dv.setUint16(20, 1, true); dv.setUint16(22, 1, true); dv.setUint32(24, buf.sampleRate, true);
+        dv.setUint32(28, buf.sampleRate * 2, true); dv.setUint16(32, 2, true); dv.setUint16(34, 16, true);
+        w(36, "data"); dv.setUint32(40, ch.length * 2, true);
+        for (let i = 0; i < ch.length; i++) dv.setInt16(44 + i * 2, Math.max(-1, Math.min(1, ch[i])) * 0x7fff, true);
+        let bin = "";
+        const u8 = new Uint8Array(dv.buffer);
+        for (let i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+        return btoa(bin);
+      } catch {
+        return null;
+      }
+    });
+  };
+  return { supported, active, start, stop };
+}
 
 export const SUGGESTIONS = [
   "Let’s do a weekly restock",
@@ -51,11 +105,26 @@ export function AskSheet() {
 }
 
 export function Conversation({ wide }: { wide?: boolean }) {
-  const { messages, busy, ask } = useAsk();
+  const { messages, busy, ask, askAudio } = useAsk();
   const [text, setText] = useState("");
   const phase = useTripGuide((state) => state.phase);
-  const voice = useVoiceInput(setText, (transcript) => { void ask(transcript); setText(""); });
-  const recording = voice.status !== "idle";
+  const audio = useAudioRecorder();
+  // browser STT fills the box live; when the WAV path works the spoken audio goes straight to Gemini
+  const voice = useVoiceInput(setText, (transcript) => {
+    if (!audio.supported) { void ask(transcript); setText(""); }
+  });
+  const recording = voice.status !== "idle" || audio.active;
+  const toggleMic = () => {
+    if (recording) {
+      void audio.stop().then((b64) => {
+        if (b64) void askAudio(b64, text.trim() || undefined);
+        else if (text.trim()) { void ask(text); setText(""); }
+      });
+      return;
+    }
+    audio.start();
+    voice.start("");
+  };
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // scrollIntoView returns a Promise in recent Chrome; never return it from the effect
@@ -127,7 +196,7 @@ export function Conversation({ wide }: { wide?: boolean }) {
             className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
             aria-label="Message Picky"
           />
-          {voice.supported && <Button type="button" variant="ghost" size="icon" disabled={busy || voice.status === "stopping"} aria-label={recording ? "Stop voice message" : "Speak to Picky"} onClick={() => recording ? voice.stop() : voice.start("")}>{recording ? <Square className="size-4 text-tomato" /> : <Mic className="size-4" />}</Button>}
+          {(voice.supported || audio.supported) && <Button type="button" variant="ghost" size="icon" disabled={busy || voice.status === "stopping"} aria-label={recording ? "Stop voice message" : "Speak to Picky"} onClick={toggleMic}>{recording ? <Square className="size-4 text-tomato" /> : <Mic className="size-4" />}</Button>}
           <Button type="submit" size="icon" className="bg-sky hover:bg-sky/90" disabled={busy || recording || !text.trim()} aria-label="Send">
             <ArrowUp className="size-5" />
           </Button>
@@ -157,7 +226,7 @@ function Bubble({ m, wide }: { m: Msg; wide?: boolean }) {
       ))}
       {m.source && (
         <div className="text-[12px] text-muted-foreground">
-          {m.source === "claude" ? "Answered by Claude using your data" : "Answered offline from your data"}
+          {m.source === "gemini" ? "Answered by Gemini using your data" : m.source === "claude" ? "Answered by Claude using your data" : "Answered offline from your data"}
         </div>
       )}
     </motion.li>
@@ -265,6 +334,46 @@ export function AssistantCard({ card, wide }: { card: Card; wide?: boolean }) {
               );
             })}
           </ul>
+        </div>
+      );
+    case "whisper":
+      return (
+        <div className={cn(box, "overflow-hidden")}>
+          <div className="flex items-center justify-between bg-sky px-4 py-3 text-white">
+            <span className="flex items-center gap-1.5 font-semibold"><Sparkles className="size-4" aria-hidden /> Cart Whisperer · {card.store}</span>
+            <span className="tabular text-[13px]">{fmt(card.total_cents)} of {fmt(card.budget_cents)}</span>
+          </div>
+          <div className="flex flex-col gap-2 p-4">
+            {card.advice.map((a, i) => (
+              <div key={i} className={cn("rounded-xl p-3", a.kind === "skip" ? "bg-tomato-wash" : "bg-amber-wash")}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className={cn("flex items-center gap-1.5 text-[13.5px] font-semibold", a.kind === "skip" ? "text-tomato" : "text-amber-ink")}>
+                    {a.kind === "skip" ? <Ban className="size-3.5" aria-hidden /> : <Clock className="size-3.5" aria-hidden />} {a.kind === "skip" ? "Skip it" : "Worth waiting"} · {a.name}
+                  </span>
+                  {a.save_cents ? <span className="rounded-full bg-white/70 px-2 py-0.5 text-[12px] font-semibold">{a.kind === "wait" ? "Expected save" : "Avoids"} {fmt(a.save_cents)}</span> : null}
+                </div>
+                <p className="mt-1 text-[13.5px] leading-snug">{a.text}</p>
+              </div>
+            ))}
+            {card.recs.map((r, i) => (
+              <div key={i} className="rounded-xl bg-muted p-3 text-[13.5px]">
+                <div className="flex items-center justify-between gap-2 font-semibold">
+                  <span>{r.name}</span>
+                  <span className="tabular">{fmt(r.unit_cents)}{r.sponsored ? " · sponsored" : ""}</span>
+                </div>
+                <p className="mt-0.5 text-muted-foreground">{r.reason} (+{r.detour_s}s stop)</p>
+              </div>
+            ))}
+            <div className="flex flex-wrap items-center gap-1.5 border-t border-border pt-3 text-[12.5px] text-muted-foreground">
+              <span className="font-semibold text-foreground">{card.lines.length} items</span>
+              {card.lines.some((l) => l.online) && <span className="rounded-full bg-muted px-2 py-0.5">some online</span>}
+              <span aria-hidden>·</span>
+              <span>mandate: <strong className={cn(card.mandate.verdict === "deny" ? "text-tomato" : card.mandate.verdict === "needs_approval" ? "text-amber-ink" : "text-leaf-deep")}>{card.mandate.verdict.replace("_", " ")}</strong></span>
+              {card.mandate.reasons.map((r) => (
+                <code key={r.code} className="rounded-full bg-muted px-1.5 py-0.5 font-mono text-[11px]" title={r.text}>{r.code}</code>
+              ))}
+            </div>
+          </div>
         </div>
       );
     case "afford":

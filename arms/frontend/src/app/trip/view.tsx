@@ -32,6 +32,7 @@ import { LottieSlot } from "@/components/media";
 import { Confetti, CountUp } from "@/components/motion";
 import { Meter, Money, Panel, ProductTile, SectionTitle } from "@/components/picky";
 import { MapLegend, StoreMap } from "@/components/StoreMap";
+import { TripWhisperPanel } from "@/components/Whisper";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -118,6 +119,7 @@ export default function TripPage() {
           {t.phase === "waiting_login" && t.source !== "gateway" ? <LoginPanel /> : <LiveFeed />}
           <HandoffPanel />
           <ApprovalPanel />
+          <TripWhisperPanel />
           <VerifyStack />
           <StopList />
         </div>
