@@ -176,6 +176,12 @@ PICKY_ROVER_USD=.../picky_rover.usda PYTHONPATH=.:arms/sim/tools python arms/sim
   unit can float up to ~10 cm ahead of the jaws there. Clear film and clamshell wrappers are not drawn. The 2D fake
   still uses `products.yaml` dims for the 18 SKUs whose models changed size. See `ASSETS.md`.
 
+## Supermarket teleop scene (`supermarket/`)
+
+Standalone, keyboard-drivable Isaac Sim 6.x scene: AgiBot Genie Sim stocked supermarket (~500 pickable products) +
+DISCOVERSE rm2_car / AIRBOT Play robot with a basket, grab-to-basket, headless `--smoke` test and `--livestream`.
+Independent of the worker above; see [supermarket/README.md](supermarket/README.md).
+
 ## Contributing to this arm
 
 Follow CLAUDE.md §5. Work on `arm/sim` (after merge: `feat/sim-<slug>` / `fix/sim-<slug>`) and touch only `arms/sim/`.

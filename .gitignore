@@ -48,3 +48,6 @@ test-results/
 
 # purchase-history SQLite (PICKY_PURCHASES_DB)
 var/
+
+# supermarket teleop scene: generated robot build
+arms/sim/supermarket/assets/build/
