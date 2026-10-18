@@ -163,7 +163,7 @@ class LlmPlanner(ScriptedPlanner):
                 origin="scripted", mode="scripted", model=model, latency_ms=latency, fallback_reason=reason
             )
         latency = round((time.monotonic() - t0) * 1000, 1)
-        return draft, PlannerInfo(origin="llm", mode="llm", model=model, latency_ms=latency)
+        return draft, PlannerInfo(origin="llm", mode="llm", model=_served(model), latency_ms=latency)
 
     async def prompt(self, request: PlanRequest, items: Sequence[GoalItem], summary: str, end_at: str) -> str:
         """The user turn: JSON of the resolved goal (the system prompt stays frozen)."""
@@ -235,6 +235,16 @@ class LlmPlanner(ScriptedPlanner):
             )
         except Exception as exc:  # noqa: BLE001 - events are best effort
             log.warning("publish planner fallback error failed: %s", exc)
+
+
+def _served(model: str | None) -> str | None:
+    """The model that really answered (utils.llm falls back to a sibling Gemini model on 429 / 503)."""
+    try:
+        from utils import llm
+
+        return llm.served_model(model)
+    except Exception:  # noqa: BLE001 - display only
+        return model
 
 
 def _needs_steps(it: GoalItem) -> bool:

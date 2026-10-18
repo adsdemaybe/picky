@@ -130,6 +130,8 @@ export default function RulesPage() {
             </Panel>
           </section>
 
+          <Ledger user={maya.profile.user_id} />
+
           <section>
             <SectionTitle>Your recent answers</SectionTitle>
             <Panel className="p-2">
@@ -253,5 +255,55 @@ function SliderRow(props: {
         aria-label={props.label}
       />
     </div>
+  );
+}
+
+/** Gateway mode: the trust ledger (GET /api/trust/ledger?user_id=): every mandate decision the engine made, with its
+ *  verdict and reason, plus receipts. Hidden without a gateway (the demo data has no ledger). */
+function Ledger({ user }: { user: string }) {
+  const live = useGateway((s) => s.status === "live");
+  const [led, setLed] = useState<S["TrustLedger"] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!live) return;
+    let on = true;
+    const load = () =>
+      gw
+        .ledger({ user_id: user })
+        .then(({ data }) => on && (setLed(data), setErr(null)))
+        .catch((e) => on && setErr(errorText(e)));
+    void load();
+    const t = setInterval(load, 10_000);
+    return () => {
+      on = false;
+      clearInterval(t);
+    };
+  }, [live, user]);
+  if (!live) return null;
+  const decisions = [...(led?.decisions ?? [])].sort((a, b) => b.evaluated_at.localeCompare(a.evaluated_at)).slice(0, 8);
+  return (
+    <section>
+      <SectionTitle>Rule checks (ledger)</SectionTitle>
+      <Panel className="divide-y divide-border text-[14px]" data-testid="trust-ledger">
+        {err && <p className="p-4 text-tomato">{err}</p>}
+        {led && decisions.length === 0 && <p className="p-4 text-muted-foreground">No rule checks yet. Every cart and item the robot adds is checked here.</p>}
+        {decisions.map((d) => (
+          <div key={d.decision_id} className="flex items-center gap-3 px-4 py-3">
+            <Badge variant={d.verdict === "approve" ? "secondary" : d.verdict === "deny" ? "tomato" : "outline"}>
+              {d.verdict === "approve" ? "OK" : d.verdict === "deny" ? "Blocked" : "Asked you"}
+            </Badge>
+            <span className="min-w-0 flex-1 truncate">
+              {d.scope === "line" && d.sku ? d.sku : "Whole cart"} · {d.messages[0] ?? d.reasons.join(", ")}
+            </span>
+            <Money cents={d.total_cents ?? 0} className="text-muted-foreground" />
+          </div>
+        ))}
+        {led && led.receipts.length > 0 && (
+          <p className="px-4 py-3 text-[13px] text-muted-foreground">
+            {led.receipts.length} test-mode receipt{led.receipts.length === 1 ? "" : "s"} on file.
+          </p>
+        )}
+      </Panel>
+    </section>
   );
 }
