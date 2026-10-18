@@ -178,9 +178,11 @@ version, sim vs 2D fake, real arms), **Demo data**, or **Reconnecting** while a 
   (substitute "Instead of …", complement "Goes with …", deal text).
 - **Checkout handoff (basket → counter):** at checkout the projector and trip pages show **Unloading at the counter**
   (Basket | Gripper | Counter, tiles fly across, "Unloading 2/7" on the plan's last stop, `SO-101 arm · <tier>` badge).
-  Gateway: the loop's `step.started` / `step.completed` with `step.kind` `handoff` (whole basket) or a per-unit
-  `unload*` step / `place` with `destination` `counter|checkout` and a `sku`; units also move when they leave
-  `robot.state.basket_skus`. Replay: the arm carries each unit out of the basket onto the counter in the simulated
+  Gateway (0.2.4): `checkout.unload` drives it unit by unit (`started` = basket → gripper, `placed` / `verified` =
+  counter, `done` = basket empty) and its `text` is the card's line ("Unloading 3/9: Mild Chunky Salsa → counter ✓");
+  the loop's `grasp` (`source: basket`) / `place` (`destination: counter`) steps open the card, and a `handoff` step
+  alone (worker without `basket_unload`) moves the whole basket; units also leave the basket with
+  `robot.state.basket_skus`. A multi-option "Want any of these before checkout?" card has a **No thanks** answer. Replay: the arm carries each unit out of the basket onto the counter in the simulated
   front and wrist cameras before the payment agent runs.
 - **Photo review cards:** produce review (`pick_choice`; `multi` + `payload.qty` = choose N units, `payload.photos` /
   `thumbnail_b64` = photos) and per-item purchase checks (`verify_item` approvals and `item.verification` events:
