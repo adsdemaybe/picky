@@ -3,7 +3,7 @@ import productsJson from "@/data/generated/products.json";
 import storeJson from "@/data/generated/store_ave.json";
 import onlineJson from "@/data/generated/online.json";
 import mayaJson from "@/data/generated/maya.json";
-import { tmobileProducts, tmobileStore } from "@/data/stores/tmobile";
+import { tmobileStore } from "@/data/stores/tmobile";
 
 export type Pose = { x: number; y: number; theta?: number };
 export type Rect = { x: number; y: number; w: number; h: number };
@@ -122,9 +122,9 @@ export const STORES: Record<StoreId, Store & { kind: "grocery" | "wireless"; sho
 /** The demo stores, fixed before registerStore() adds gateway stores to STORES (the order page offers only these). */
 export const STORE_IDS = Object.keys(STORES) as StoreId[];
 
-/** Every product the assistant can help with: groceries + wireless store. */
-export const allProducts: (Product & { compatible_with?: string[] })[] = [...products, ...tmobileProducts];
-export const productBySku: Record<string, Product & { compatible_with?: string[] }> = Object.fromEntries(allProducts.map((p) => [p.sku, p]));
+/** Every product the assistant can help with: groceries + the wireless store (all from data/products.yaml). */
+export const allProducts: Product[] = products;
+export const productBySku: Record<string, Product> = Object.fromEntries(allProducts.map((p) => [p.sku, p]));
 /** Grocery store slots (store_ave). Use slotsOf() for any store. */
 export const slotBySku: Record<string, Slot> = Object.fromEntries(store.slots.map((s) => [s.sku, s]));
 const slotIdx: Record<string, Record<string, Slot>> = {};
@@ -139,10 +139,12 @@ export function registerProduct(p: Product) {
 }
 export function registerStore(planogram: { store_id: string; name: string; entrance: Pose; robot_home?: Pose | null }) {
   const id = planogram.store_id as StoreId;
-  STORES[id] = { ...(planogram as unknown as Store), robot_home: planogram.robot_home ?? planogram.entrance, kind: "grocery", short: planogram.name };
+  const kind = STORES[id]?.kind ?? (id === "store_tmobile" ? "wireless" : "grocery");
+  STORES[id] = { ...(planogram as unknown as Store), robot_home: planogram.robot_home ?? planogram.entrance, kind, short: STORES[id]?.short ?? planogram.name };
   delete slotIdx[id];
 }
-export const isWireless = (sku: string) => tmobileProducts.some((p) => p.sku === sku);
+/** Wireless-store products (category "wireless"; phones, cases, chargers, ... are its subcategories). */
+export const isWireless = (sku: string) => productBySku[sku]?.category === "wireless";
 
 /** The demo's "today" (Sat Oct 17, 2026). Fixed so prerendering is deterministic. */
 export const TODAY = new Date("2026-10-17T12:00:00-07:00");

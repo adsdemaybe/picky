@@ -1,6 +1,6 @@
 // Deterministic stand-in for the agent's intent expansion + recommender, for the demo presets.
 // The real path is POST /api/trips on the gateway; this produces the same shapes so the UI is identical.
-import { mayaDevices } from "@/data/stores/tmobile";
+import { fits, mayaDevices } from "@/data/stores/tmobile";
 import { STORES, maya, online, productBySku, slotsOf, type StoreId } from "./data";
 import { upcomingFor } from "./prices";
 
@@ -45,7 +45,7 @@ export const PRESETS: Record<StoreId, { id: string; label: string; text: string 
   ],
   store_tmobile: [
     { id: "pixel", label: "New Pixel 9 setup", text: "case and screen protector for my new Pixel 9, under $90" },
-    { id: "run", label: "Running earbuds", text: "earbuds for running, under $100" },
+    { id: "run", label: "Running earbuds", text: "earbuds for running, under $200" },
   ],
 };
 
@@ -85,28 +85,44 @@ function expandWireless(text: string): Draft {
   const t = text.toLowerCase();
   const budget = Number(t.match(/\$(\d+)/)?.[1] ?? 90) * 100;
   const ph = mayaDevices.phone;
+  const name = (sku: string) => productBySku[sku]?.name ?? sku;
   if (t.includes("earbud") || t.includes("run")) {
     const up = upcomingFor("BUDS-RUN");
+    const now = priceOf("BUDS-RUN");
     return {
       store_id: "store_tmobile",
       intent: text,
       title: "Running earbuds",
       budget_cents: budget,
-      lines: [line("BUDS-RUN", 1, { note: "Sweat-proof with a secure fit, 4.5 stars from runners" })],
+      lines: [line("BUDS-RUN", 1, { note: "Bluetooth: works with any phone" })],
       recs: [],
-      advice: up
-        ? [{ kind: "wait", sku: "BUDS-RUN", text: `${up.reason}: $${(up.price_cents / 100).toFixed(2)} instead of $79.99. Picky can text you Friday morning.`, save_cents: 7999 - up.price_cents }]
-        : [],
+      advice:
+        up && up.price_cents < now
+          ? [{ kind: "wait", sku: "BUDS-RUN", text: `${up.reason}: ${fmtUsd(up.price_cents)} instead of ${fmtUsd(now)}. Picky can text you that morning.`, save_cents: now - up.price_cents }]
+          : [],
     };
   }
+  // Pixel 9 setup: every SKU, price, deal and fit below comes from data/ (store_tmobile planogram + wireless.yaml).
+  const skip = mayaDevices.owns.find((o) => fits(o.sku, "PX9-128") && productBySku[o.sku]?.subcategory === "chargers");
+  const phoneWait = upcomingFor("PX9-128");
+  const advice: Advice[] = [];
+  if (skip)
+    advice.push({ kind: "skip", sku: skip.sku, text: `Skip the charger: you already have the ${skip.name} and it works with the Pixel 9.`, save_cents: priceOf(skip.sku) });
+  if (phoneWait)
+    advice.push({
+      kind: "wait",
+      sku: "PX9-128",
+      text: `About the phone itself: your ${ph.name} has ${ph.installments_left} installments left (${fmtUsd(ph.installments_left * ph.monthly_installment_cents)}). ${phoneWait.reason}. Picky will remind you.`,
+      save_cents: priceOf("PX9-128") - phoneWait.price_cents,
+    });
   return {
     store_id: "store_tmobile",
     intent: text,
     title: "Pixel 9 setup",
     budget_cents: budget,
     lines: [
-      line("CASE-PX9-CLR", 1, { note: "Fits the Pixel 9, clear and slim" }),
-      line("GLASS-PX9", 1, { note: "20% off with a Pixel 9 case" }),
+      line("CASE-PX9-CLR", 1, { note: "Fits the Pixel 9" }),
+      line("GLASS-PX9", 1, { note: slotsOf("store_tmobile")["GLASS-PX9"]?.deal?.reason ?? "Cut for the Pixel 9 screen" }),
     ],
     recs: [
       {
@@ -114,8 +130,8 @@ function expandWireless(text: string): Draft {
         sku: "CBL-USBC-2M",
         unit_cents: priceOf("CBL-USBC-2M"),
         interest: 0.55,
-        reason: "Pixel 9 ships with a 1 m cable. Yours is from 2023 and you charge at the desk; a 2 m braided one reaches.",
-        signals: { owns_cable_age_months: 34, same_wall: "yes" },
+        reason: `The Pixel 9 ships with a short cable; a 2 m ${name("CBL-USBC-2M")} reaches the desk. Same wall as the case, no detour.`,
+        signals: { compatible: "usb-c", same_wall: "yes" },
         sponsored: false,
         detour_m: 0,
         detour_s: 5,
@@ -125,24 +141,18 @@ function expandWireless(text: string): Draft {
         sku: "PB-10K",
         unit_cents: priceOf("PB-10K"),
         interest: 0.32,
-        reason: "You've bought travel-size items twice this fall. A 10,000 mAh bank is about 2 full Pixel 9 charges.",
+        reason: `You've bought travel-size items twice this fall. The ${name("PB-10K")} charges a Pixel 9 over USB-C.`,
         signals: { travel_signal: 2, compatible: "usb-c" },
         sponsored: false,
         detour_m: 0,
         detour_s: 10,
       },
     ],
-    advice: [
-      { kind: "skip", sku: "CHG-20W", text: "Skip the charger: you bought a 20W USB-C charger in March and it works with the Pixel 9.", save_cents: 2499 },
-      {
-        kind: "wait",
-        sku: "PX9-128",
-        text: `About the phone itself: your ${ph.name} has ${ph.installments_left} installments left (${"$"}${((ph.installments_left * ph.monthly_installment_cents) / 100).toFixed(2)}). A $200-off holiday promo is expected Nov 27. Picky will remind you.`,
-        save_cents: 20000,
-      },
-    ],
+    advice,
   };
 }
+
+const fmtUsd = (c: number) => `$${(c / 100).toFixed(2)}`;
 
 function expandGrocery(text: string): Draft {
   const t = text.toLowerCase();

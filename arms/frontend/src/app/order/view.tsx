@@ -1,6 +1,7 @@
 "use client";
-import { Ban, Bot, Check, Clock, Info, PackageCheck, Sparkles, Store, UserRound } from "lucide-react";
+import { ArrowRight, Ban, Bot, Check, Clock, Info, PackageCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { motion } from "motion/react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -37,7 +38,6 @@ function OrderBuilder() {
   const [text, setText] = useState<string>(initial);
   const [draft, setDraft] = useState<Draft>(() => expandIntent(initial, storeId, add));
   const store = STORES[storeId];
-  const slotBySku = slotsOf(storeId);
   const [accepted, setAccepted] = useState<Set<string>>(() => defaultAccepted(draft));
   const [mode, setMode] = useState<Mode>("with_me");
   const [thinking, setThinking] = useState(false);
@@ -45,19 +45,20 @@ function OrderBuilder() {
   const placeOrder = useTrip((s) => s.placeOrder);
   const router = useRouter();
   const gatewayLive = useGateway((s) => s.status === "live");
-  const live = gatewayLive && store.kind === "grocery";
+  const live = gatewayLive;
 
   const runDemo = () => {
     placeOrder(draft, [...accepted], mode);
     router.push("/trip");
   };
 
-  // Gateway mode (grocery): the gateway plans from live stock and the robot starts by itself, so this only happens on
-  // "Send", never on "Plan it". The preview above stays the instant local plan. T-Mobile always stays demo.
+  // Gateway mode (every store, grocery and wireless): the gateway plans from live stock and the store's robot starts by
+  // itself (store_tmobile = rover-tmo-1 "Magenta"), so this only happens on "Send", never on "Plan it". The preview
+  // above stays the instant local plan, built from the same data/ files the gateway serves.
   const send = async () => {
-    const gateway = store.kind === "grocery" && (gatewayLive || (await useGateway.getState().check()));
+    const gateway = gatewayLive || (await useGateway.getState().check());
     if (!gateway) {
-      if (store.kind === "grocery" && useGateway.getState().status === "down") toast("No gateway reachable, so this is the demo trip");
+      if (useGateway.getState().status === "down") toast("No gateway reachable, so this is the demo trip");
       return runDemo();
     }
     setSending(true);
@@ -89,14 +90,22 @@ function OrderBuilder() {
   };
 
   const detours = useMemo(() => {
-    const start = { id: "start", pose: store.robot_home };
-    const end = { id: "end", pose: store.checkout };
-    const list = draft.lines.filter((l) => l.sourcing === "in_store").map((l) => ({ id: l.sku, pose: slotBySku[l.sku].approach_pose }));
-    const base = planRoute(store, start, list, end).total_m;
+    // plan against the draft's own store: right after a store switch the old draft is still on screen for a beat
+    const dStore = STORES[draft.store_id];
+    const dSlots = slotsOf(draft.store_id);
+    const start = { id: "start", pose: dStore.robot_home };
+    const end = { id: "end", pose: dStore.checkout };
+    const list = draft.lines
+      .filter((l) => l.sourcing === "in_store" && dSlots[l.sku])
+      .map((l) => ({ id: l.sku, pose: dSlots[l.sku].approach_pose }));
+    const base = planRoute(dStore, start, list, end).total_m;
     const out: Record<string, number> = { __base: base };
-    for (const r of draft.recs) out[r.rec_id] = planRoute(store, start, [...list, { id: r.sku, pose: slotBySku[r.sku].approach_pose }], end).total_m - base;
+    for (const r of draft.recs) {
+      if (!dSlots[r.sku]) continue;
+      out[r.rec_id] = planRoute(dStore, start, [...list, { id: r.sku, pose: dSlots[r.sku].approach_pose }], end).total_m - base;
+    }
     return out;
-  }, [draft, store, slotBySku]);
+  }, [draft]);
 
   const totals = draftTotal(draft, accepted);
   const lines = [
@@ -170,6 +179,11 @@ function OrderBuilder() {
             );
           })}
         </div>
+        {store.kind === "wireless" && (
+          <Link href="/plans" className="mt-3 inline-flex items-center gap-1.5 text-[14px] font-semibold text-grape hover:underline">
+            Plans, trade-in and financing for this store <ArrowRight className="size-4" aria-hidden />
+          </Link>
+        )}
 
         <form
           className="mt-4"

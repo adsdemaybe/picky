@@ -61,6 +61,14 @@ const ICONS: Record<string, LucideIcon> = {
   audio: Headphones,
   wearable: Watch,
   home_internet: Router,
+  // backend wireless taxonomy (data/categories.yaml: category "wireless" + these subcategories)
+  wireless: Smartphone,
+  phones: Smartphone,
+  cases: ShieldCheck,
+  screen_protectors: Smartphone,
+  chargers: PlugZap,
+  wearables: Watch,
+  tablets: Smartphone,
 };
 
 /** More specific icons by product name, falling back to the category icon. */
@@ -78,6 +86,12 @@ const BY_NAME: [RegExp, LucideIcon][] = [
   [/cheese|queso|cotija/i, Pizza],
   [/ice cream/i, IceCreamCone],
   [/onion|tomato|pepper|cilantro|lettuce|romaine/i, Carrot],
+  // wireless store names (category "wireless")
+  [/\bcase\b/i, ShieldCheck],
+  [/charger|adapter|cable|battery|powerstation/i, PlugZap],
+  [/buds|airpods|headphone/i, Headphones],
+  [/watch/i, Watch],
+  [/gateway|antenna|home internet/i, Router],
 ];
 
 export function categoryIcon(category: string, name?: string): LucideIcon {

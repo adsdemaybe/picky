@@ -7,6 +7,12 @@ import Anthropic from "@anthropic-ai/sdk";
 import { betaTool } from "@anthropic-ai/sdk/helpers/beta/json-schema";
 import { maya, type Purchase } from "@/lib/data";
 import { budgetStatus, canIAfford, findProducts, findSavings, localAnswer, priceCheck, spendingSummary, type Card } from "@/lib/assistant/tools";
+import { wirelessTools } from "@/lib/assistant/wireless-tools";
+import { tmobileProducts, wireless } from "@/data/stores/tmobile";
+
+const PHONE_SKUS = tmobileProducts.filter((p) => p.subcategory === "phones").map((p) => `${p.sku} (${p.name})`).join(", ");
+const TRADE_MODELS = wireless.trade_in_models.map((m) => m.model_id).join(", ");
+const PLAN_IDS = wireless.plans.map((p) => p.plan_id).join(", ");
 
 type ChatMsg = { role: "user" | "assistant"; content: string };
 
@@ -17,7 +23,8 @@ Rules:
 - Prefer one or two tool calls, then answer. Lead with the answer in the first sentence.
 - Be honest: if waiting, a cheaper store, or not buying is better, say so plainly. Nothing is sponsored.
 - Keep replies to 2–4 short sentences of plain text (no markdown headers, no bullet lists). The app shows cards for the tool results, so don't repeat whole tables.
-- You can't place orders or move money; if she wants to buy, tell her to add it to a robot order or check out from the Find page.`;
+- You can't place orders or move money; if she wants to buy, tell her to add it to a robot order or check out from the Find page.
+- Wireless (the T-Mobile store): plans, trade-ins, installments, promos and household savings come ONLY from the wireless_* tools (money in integer cents; say it in dollars). If a tool says UNAVAILABLE or ERROR, say you can't estimate it right now. Always mention that wireless prices and offers are synthetic demo data, and say plainly when keeping her phone or her plan is the better deal. Accessories are optional; never push one.`;
 
 export async function POST(req: Request) {
   const body = (await req.json()) as { messages: ChatMsg[]; extraPurchases?: Purchase[] };
@@ -78,6 +85,57 @@ export async function POST(req: Request) {
         additionalProperties: false,
       },
       run: async ({ amount_cents, what }) => track(canIAfford(purchases, Math.max(0, Math.round(Number(amount_cents) || 0)), String(what ?? ""))),
+    }),
+    betaTool({
+      name: "wireless_compare_plans",
+      description: `Quote every wireless plan for a number of lines (cheapest eligible first). Plan ids: ${PLAN_IDS}.`,
+      inputSchema: { type: "object", properties: { lines: { type: "integer", minimum: 1, maximum: 8 } }, required: ["lines"], additionalProperties: false },
+      run: async ({ lines }) => wirelessTools.comparePlans(Math.max(1, Math.min(8, Number(lines) || 1)), maya.profile.user_id),
+    }),
+    betaTool({
+      name: "wireless_household",
+      description: "Is Maya's household (2 lines) on the right plan? Compares her current plan with every plan that fits her usage and returns savings or 'keep current'.",
+      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      run: async () => wirelessTools.household(maya.profile.user_id),
+    }),
+    betaTool({
+      name: "wireless_trade_in",
+      description: `Illustrative trade-in value for a phone and condition, minus what she still owes, plus whether keeping it (or waiting for a promo) is better. model_id one of: ${TRADE_MODELS}. Maya's own phone is pixel-7.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          model_id: { type: "string" },
+          condition: { type: "string", enum: ["excellent", "good", "fair", "broken"] },
+          target_sku: { type: "string", description: "Phone she'd upgrade to (optional)" },
+          plan_id: { type: "string" },
+        },
+        required: ["model_id", "condition"],
+        additionalProperties: false,
+      },
+      run: async ({ model_id, condition, target_sku, plan_id }) => wirelessTools.tradeIn(String(model_id), String(condition), target_sku ? String(target_sku) : undefined, plan_id ? String(plan_id) : undefined, maya.profile.user_id),
+    }),
+    betaTool({
+      name: "wireless_financing",
+      description: `Monthly installment estimate for a phone (demo terms), with any eligible promo credits. Phones: ${PHONE_SKUS}.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          sku: { type: "string" },
+          months: { type: "integer", enum: wireless.financing.months_options },
+          plan_id: { type: "string" },
+          new_line: { type: "boolean" },
+          trade_in: { type: "boolean" },
+        },
+        required: ["sku"],
+        additionalProperties: false,
+      },
+      run: async ({ sku, months, plan_id, new_line, trade_in }) => wirelessTools.financing(String(sku), Number(months) || 24, plan_id ? String(plan_id) : undefined, !!new_line, !!trade_in),
+    }),
+    betaTool({
+      name: "wireless_accessories",
+      description: "Accessories in the T-Mobile store that fit a device, with price, stock and why (all optional).",
+      inputSchema: { type: "object", properties: { device_sku: { type: "string" } }, required: ["device_sku"], additionalProperties: false },
+      run: async ({ device_sku }) => wirelessTools.accessories(String(device_sku)),
     }),
   ];
 

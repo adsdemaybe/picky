@@ -21,7 +21,7 @@ export class GatewayError extends Error {
 
 const enc = encodeURIComponent;
 
-function qs(q: Record<string, string | number | null | undefined>) {
+export function qs(q: Record<string, string | number | null | undefined>) {
   const p = new URLSearchParams();
   for (const [k, v] of Object.entries(q)) if (v !== undefined && v !== null && v !== "") p.set(k, String(v));
   const s = p.toString();
@@ -29,7 +29,7 @@ function qs(q: Record<string, string | number | null | undefined>) {
 }
 
 /** fetch JSON with a timeout; non-2xx → GatewayError(status, body.detail); network/timeout → GatewayError(0, …). */
-async function req<T>(path: string, init: { method?: string; body?: unknown } = {}, timeoutMs = 15_000): Promise<{ data: T; seq: number | null }> {
+export async function req<T>(path: string, init: { method?: string; body?: unknown } = {}, timeoutMs = 15_000): Promise<{ data: T; seq: number | null }> {
   if (!GATEWAY_URL) throw new GatewayError(0, "NEXT_PUBLIC_GATEWAY_URL is not set");
   const ctl = new AbortController();
   const timer = setTimeout(() => ctl.abort(), timeoutMs);
@@ -78,10 +78,10 @@ export const gw = {
   /** talk to one robot's brain (its steps also stream as brain.step) */
   robotMessage: (id: string, b: S["RobotMessageRequest"]) => req<S["BrainReply"]>(`/api/fleet/robots/${enc(id)}/messages`, { method: "POST", body: b }, 30_000),
   /** a manual goal pinned to that robot */
-  robotGoal: (id: string, b: S["CreateGoalRequest"]) => req<S["Goal"]>(`/api/fleet/robots/${enc(id)}/goals`, { method: "POST", body: b }),
-  goal: (id: string) => req<S["Goal"]>(`/api/goals/${enc(id)}`),
+  robotGoal: (id: string, b: S["CreateGoalRequest"]) => req<S["Goal-Output"]>(`/api/fleet/robots/${enc(id)}/goals`, { method: "POST", body: b }),
+  goal: (id: string) => req<S["Goal-Output"]>(`/api/goals/${enc(id)}`),
   /** newest first */
-  goals: (q: { robot_id?: string; store_id?: string; trip_id?: string; kind?: string; limit?: number }) => req<S["Goal"][]>(`/api/goals${qs(q)}`),
+  goals: (q: { robot_id?: string; store_id?: string; trip_id?: string; kind?: string; limit?: number }) => req<S["Goal-Output"][]>(`/api/goals${qs(q)}`),
   /** pending approvals (filters AND together) */
   approvals: (q: { trip_id?: string; robot_id?: string; goal_id?: string; store_id?: string; user_id?: string }) => req<S["ApprovalRequest"][]>(`/api/approvals${qs(q)}`),
   search: (q: string, storeId?: string, limit = 8) => req<S["SearchHit"][]>(`/api/products/search${qs({ q, store_id: storeId, limit })}`),

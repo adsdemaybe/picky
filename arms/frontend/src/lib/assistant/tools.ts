@@ -1,7 +1,7 @@
 // Assistant tools: deterministic answers over Maya's purchases, budget and the price layer.
 // The LLM picks tools and phrases results; every number comes from here ("the LLM proposes; code decides").
 import { mayaDevices } from "@/data/stores/tmobile";
-import { CATS, MONTHLY_BUDGET_CENTS, TODAY, catOf, maya, mostBought, productBySku, tripsFrom, type CatId, type Purchase } from "../data";
+import { CATS, MONTHLY_BUDGET_CENTS, TODAY, catOf, isWireless, maya, mostBought, productBySku, tripsFrom, type CatId, type Purchase } from "../data";
 import { fmt } from "../money";
 import { effective, offersFor, searchProducts, upcomingFor, verdictFor } from "../prices";
 
@@ -113,14 +113,14 @@ export function findSavings(purchases: Purchase[]): ToolResult {
 
 export function canIAfford(purchases: Purchase[], amount_cents: number, what: string): ToolResult {
   const p = searchProducts(what, 1)[0];
-  const isTech = p && ["phone", "case", "screen", "charger", "audio", "wearable"].includes(p.category);
+  const isTech = p && isWireless(p.sku) && p.subcategory !== "home_internet";
   if (isTech) {
     // wireless purchases: compare against discretionary tech room, the mandate, and the phone plan
     const owned = mayaDevices.owns.find((o) => o.sku === p.sku);
     const ph = mayaDevices.phone;
     const note = owned
-      ? `You already own a ${owned.name} (bought ${owned.bought.slice(0, 7)}).`
-      : p.category === "phone"
+      ? `You already own the ${owned.name}.`
+      : p.subcategory === "phones"
         ? `Your ${ph.name} still has ${ph.installments_left} installments of ${fmt(ph.monthly_installment_cents)} left (${fmt(ph.installments_left * ph.monthly_installment_cents)}). Upgrading now adds that payoff on top.`
         : `Cheapest is ${offersFor(p.sku)[0].retailer} at ${fmt(effective(offersFor(p.sku)[0]))} (${fmt(p.price_cents)} new). It's tech, so it doesn't touch October's grocery budget.`;
     const verdict = owned ? "no" : amount_cents > 30000 ? "tight" : "yes";

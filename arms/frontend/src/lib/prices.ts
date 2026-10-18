@@ -1,8 +1,8 @@
 // Price intelligence (the "Phia" layer): offers across retailers, price history, good-price verdicts, cheaper swaps.
 // Deterministic code: the assistant calls these as tools and only phrases the results.
 import offersJson from "@/data/generated/offers.json";
-import { mayaDevices, tmobileUpcoming } from "@/data/stores/tmobile";
-import { STORES, allProducts, isWireless, maya, productBySku, slotsOf, type Product } from "./data";
+import { fits, fitsOf, mayaDevices, tmobileUpcoming } from "@/data/stores/tmobile";
+import { STORES, allProducts, maya, productBySku, slotsOf } from "./data";
 
 export type Offer = {
   retailer_id: string;
@@ -17,6 +17,8 @@ export type Offer = {
   in_stock: boolean;
   note: string | null;
   condition?: string;
+  /** Fictional retailer with a generated price (scripts/gen-data.mjs); shown with a "synthetic" label. */
+  synthetic?: boolean;
 };
 
 const G = offersJson as unknown as {
@@ -31,63 +33,10 @@ function hash(s: string) {
   return (h >>> 0) / 4294967295;
 }
 
-function wirelessOffers(p: Product): Offer[] {
-  const slot = slotsOf("store_tmobile")[p.sku];
-  const base = p.price_cents;
-  if (p.category === "home_internet")
-    return [
-      { retailer_id: "store_tmobile", retailer: "T-Mobile, University Way", kind: "store", price_cents: 0, regular_cents: 0, pack: 1, fee_cents: 0, fee_note: "$50/mo plan, $0 gateway", eta: "take home today", in_stock: true, note: "Free with a home internet plan" },
-    ];
-  const r = hash(p.sku);
-  const out: Offer[] = [
-    {
-      retailer_id: "store_tmobile",
-      retailer: "T-Mobile, University Way",
-      kind: "store",
-      price_cents: slot?.deal?.price_cents ?? base,
-      regular_cents: base,
-      pack: 1,
-      fee_cents: 0,
-      eta: "robot grabs it in store",
-      in_stock: (slot?.qty ?? 0) > 0,
-      note: slot?.deal?.reason ?? null,
-    },
-    { retailer_id: "carrier_online", retailer: "T-Mobile online", kind: "carrier", price_cents: base, regular_cents: base, pack: 1, fee_cents: 0, eta: "2 days, free shipping", in_stock: true, note: null },
-    {
-      retailer_id: "volt",
-      retailer: "Volt Electronics",
-      kind: "store",
-      price_cents: Math.round((base * (0.86 + r * 0.12)) / 100) * 100 - 1,
-      regular_cents: base,
-      pack: 1,
-      fee_cents: 0,
-      eta: "3.2 km away",
-      in_stock: r > 0.15,
-      note: null,
-    },
-  ];
-  if (p.category === "phone" || p.category === "wearable" || p.category === "audio")
-    out.push({
-      retailer_id: "openbox",
-      retailer: "Second Shelf (open box)",
-      kind: "resale",
-      price_cents: Math.round((base * (0.62 + r * 0.12)) / 100) * 100 - 1,
-      regular_cents: base,
-      pack: 1,
-      fee_cents: 599,
-      fee_note: "$5.99 shipping, 1-year warranty",
-      eta: "3–5 days",
-      in_stock: true,
-      note: null,
-      condition: "Like new, open box",
-    });
-  return out;
-}
-
 export function offersFor(sku: string): Offer[] {
   const p = productBySku[sku];
   if (!p) return [];
-  const list = isWireless(sku) ? wirelessOffers(p) : (G.offers[sku] ?? []);
+  const list = G.offers[sku] ?? [];
   return [...list].sort((a, b) => effective(a) - effective(b));
 }
 
@@ -118,8 +67,8 @@ export type Verdict = { label: "Good price" | "Wait" | "Typical price" | "High r
 export function verdictFor(sku: string): Verdict {
   const p = productBySku[sku];
   const owned = mayaDevices.owns.find((o) => o.sku === sku);
-  if (owned) return { label: "Skip it", tone: "tomato", why: `You already own one (bought ${owned.bought.slice(0, 7)}).` };
-  if (p?.compatible_with && !p.compatible_with.includes("PX9-128") && !p.compatible_with.includes(mayaDevices.phone.sku) && p.category !== "phone")
+  if (owned) return { label: "Skip it", tone: "tomato", why: `You already own one (${owned.name}).` };
+  if (fitsOf(sku) && !fits(sku, "PX9-128") && !fits(sku, mayaDevices.phone.sku) && p?.subcategory !== "phones")
     return { label: "Skip it", tone: "tomato", why: `Doesn't fit your ${mayaDevices.phone.name} or the Pixel 9 you're looking at.` };
   const h = historyFor(sku);
   const now = h[h.length - 1];
@@ -141,7 +90,11 @@ export function alternativesFor(sku: string, n = 3) {
   return allProducts
     .filter((q) => q.sku !== sku && (p.subcategory ? q.subcategory === p.subcategory : q.category === p.category))
     .filter((q) => !(maya.profile as unknown as { disliked_skus?: string[] }).disliked_skus?.includes(q.sku))
-    .filter((q) => !(p.compatible_with && q.compatible_with && !q.compatible_with.some((c) => p.compatible_with!.includes(c))))
+    .filter((q) => {
+      const a = fitsOf(p.sku);
+      const b = fitsOf(q.sku);
+      return !(a && b && !b.some((c) => a.includes(c)));
+    })
     .map((q) => ({ product: q, best: offersFor(q.sku)[0] }))
     .filter((x) => x.best && effective(x.best) < mine)
     .sort((a, b) => effective(a.best) - effective(b.best))

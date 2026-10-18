@@ -71,7 +71,7 @@ export function useRobotScreen(robotId: string) {
         current = !!tripId;
       }
       if (!tripId) {
-        const { data: gs } = await gw.goals({ robot_id: robotId, kind: "shop", limit: 1 }).catch(() => ({ data: [] as S["Goal"][] }));
+        const { data: gs } = await gw.goals({ robot_id: robotId, kind: "shop", limit: 1 }).catch(() => ({ data: [] as S["Goal-Output"][] }));
         tripId = gs[0]?.trip_id ?? null;
       }
       let t: Trip | null = null;

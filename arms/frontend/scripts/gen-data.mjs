@@ -1,6 +1,8 @@
 // Generates the app's demo data from the repo's source-of-truth YAML (CLAUDE.md rule 5).
-//   data/products.yaml, data/planograms/store_ave.yaml, data/online_store.yaml, data/fixtures/users.yaml
-//   -> src/data/generated/{products,store_ave,online,maya}.json
+//   data/products.yaml, data/planograms/store_{ave,tmobile}.yaml, data/online_store.yaml, data/fixtures/users.yaml,
+//   data/wireless.yaml -> src/data/generated/{products,store_ave,store_tmobile,online,maya,wireless,offers}.json
+// The T-Mobile store (store_tmobile) is generated from the same planogram the backend serves, so slot ids, prices,
+// stock and deals match the gateway; wireless plans/promos/trade-ins come from data/wireless.yaml (synthetic).
 // Purchase history beyond the fixture trips is synthesized deterministically (seeded) and flagged synthetic=true.
 // Run: pnpm gen-data   (never hand-edit the output)
 
@@ -58,9 +60,8 @@ write(
 );
 const bySku = Object.fromEntries(products.map((p) => [p.sku, p]));
 
-// ---- store layout ----
-const store = load("data/planograms/store_ave.yaml");
-write("store_ave.json", {
+// ---- store layouts (grocery store_ave + wireless store_tmobile; same shape, kept in separate files) ----
+const storeJson = (store) => ({
   store_id: store.store_id,
   name: store.name,
   address: store.address,
@@ -92,6 +93,14 @@ write("store_ave.json", {
     deal: s.deal ?? null,
   })),
 });
+const store = load("data/planograms/store_ave.yaml");
+write("store_ave.json", storeJson(store));
+const tmobile = load("data/planograms/store_tmobile.yaml");
+write("store_tmobile.json", storeJson(tmobile));
+
+// ---- wireless rules (plans, promos, trade-in values, financing, compatibility, demo accounts; all synthetic) ----
+const wireless = load("data/wireless.yaml");
+write("wireless.json", wireless);
 
 // ---- online store ----
 const online = load("data/online_store.yaml");
@@ -213,6 +222,7 @@ const offers = {};
 const history = {};
 const upcoming = {};
 for (const p of products) {
+  if (p.category === "wireless") continue; // the wireless store gets its own offers below
   const list = [];
   const a = aveSlot[p.sku];
   if (a)
@@ -304,5 +314,77 @@ for (const p of products) {
 }
 // Demo hook: a staple Maya buys often goes on sale next week (drives a "wait" verdict in the demo).
 upcoming["COFFEE"] = { starts: "2026-10-23", price_cents: 799, reason: "Weekly ad: $2 off coffee starts Fri Oct 23" };
+
+// ---- wireless offers + price history (store_tmobile) ----
+// The store offer and the carrier's online price are the catalog's list price (+ the slot deal, if any). Two more
+// sellers are fictional and their prices synthetic (flagged synthetic=true; the UI labels them). Upcoming sales come
+// from data/wireless.yaml promotions (kind sale), not from here.
+const wrand = mulberry32(5150);
+const tmoSlot = Object.fromEntries(tmobile.slots.map((s) => [s.sku, s]));
+const homeInternet = wireless.promotions.find((x) => x.kind === "home_internet");
+const usd = (c) => `$${(c / 100).toFixed(2).replace(/\.00$/, "")}`;
+for (const p of products.filter((q) => q.category === "wireless")) {
+  const slot = tmoSlot[p.sku];
+  const list = [];
+  const store = {
+    retailer_id: "store_tmobile",
+    retailer: tmobile.name,
+    kind: "store",
+    price_cents: slot?.deal?.price_cents ?? p.price_cents,
+    regular_cents: slot?.deal?.original_cents ?? p.price_cents,
+    pack: 1,
+    fee_cents: 0,
+    eta: "robot grabs it in store",
+    in_stock: (slot?.qty ?? 0) > 0,
+    note: slot?.deal?.reason ?? null,
+  };
+  if (p.subcategory === "home_internet" && homeInternet && p.sku === "GW-5G")
+    store.fee_note = `${usd(homeInternet.monthly_cents)}/mo plan (${homeInternet.name}, synthetic)`;
+  list.push(store);
+  list.push({ retailer_id: "carrier_online", retailer: "T-Mobile online", kind: "carrier", price_cents: p.price_cents, regular_cents: p.price_cents, pack: 1, fee_cents: 0, eta: "2 days, free shipping", in_stock: true, note: null });
+  if (p.price_cents > 0 && p.subcategory !== "home_internet") {
+    const r = wrand();
+    list.push({
+      retailer_id: "volt",
+      retailer: "Volt Electronics",
+      kind: "store",
+      price_cents: Math.max(99, Math.round((p.price_cents * (0.86 + r * 0.12)) / 100) * 100 - 1),
+      regular_cents: p.price_cents,
+      pack: 1,
+      fee_cents: 0,
+      eta: "3.2 km away",
+      in_stock: r > 0.15,
+      note: "Fictional retailer, synthetic price",
+      synthetic: true,
+    });
+    if (["phones", "wearables", "audio", "tablets"].includes(p.subcategory)) {
+      const q = wrand();
+      list.push({
+        retailer_id: "openbox",
+        retailer: "Second Shelf (open box)",
+        kind: "resale",
+        price_cents: Math.round((p.price_cents * (0.62 + q * 0.12)) / 100) * 100 - 1,
+        regular_cents: p.price_cents,
+        pack: 1,
+        fee_cents: 599,
+        fee_note: "$5.99 shipping, 1-year warranty",
+        eta: "3–5 days",
+        in_stock: true,
+        note: "Fictional retailer, synthetic price",
+        condition: "Like new, open box",
+        synthetic: true,
+      });
+    }
+  }
+  offers[p.sku] = list;
+  // 13 weekly store prices ending today: list price with rare synthetic dips (the last point is today's real price).
+  const pts = [];
+  for (let w = 12; w >= 1; w--) pts.push(wrand() < 0.12 ? Math.round(p.price_cents * 0.85) : p.price_cents);
+  pts.push(store.price_cents);
+  history[p.sku] = pts;
+}
 write("offers.json", { offers, history, upcoming });
 console.log(`gen-data: offers for ${Object.keys(offers).length} products, ${Object.keys(upcoming).length} upcoming sales`);
+console.log(
+  `gen-data: store_tmobile ${tmobile.slots.length} slots; wireless ${wireless.plans.length} plans, ${wireless.promotions.length} promos, ${wireless.accounts.length} accounts`,
+);
