@@ -39,9 +39,9 @@ def parse_command(text: str) -> tuple[str, str]:
 def detect(frame_bgr: np.ndarray, labels: list[str], model: str) -> dict[str, Detection]:
     """Return the highest-ranked box per label, in pixel coords of `frame_bgr`."""
     import cv2
-    from PIL import Image
     from perceptron import configure, image
     from perceptron import detect as p_detect
+    from PIL import Image
 
     configure(model=model)
     h, w = frame_bgr.shape[:2]

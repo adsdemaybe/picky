@@ -1,0 +1,14 @@
+# Test fixture (tiny store_hill).
+schema_version: 1
+store_id: store_hill
+name: Picky Test Hill
+bounds: {x: 0, y: 0, w: 10, h: 12}
+entrance: {x: 1.5, y: 1.5, theta: 1.5708}
+checkout: {x: 8, y: 1.5, theta: 0}
+fixtures:
+  - {fixture_id: H1, kind: shelf, aisle_id: h1, rect: {x: 3, y: 4, w: 1, h: 5}, yaw: 0, levels: 2, level_z_m: [0.2, 0.8]}
+aisles:
+  - {aisle_id: h1, label: Aisle 1, rect: {x: 4, y: 4, w: 1.5, h: 5}, fixture_ids: [H1]}
+slots:
+  - {slot_id: H1-0-0, fixture_id: H1, aisle_id: h1, sku: black_beans, level: 0, index: 0, item_position: {x: 4.0, y: 5.0, z: 0.2}, approach_pose: {x: 4.75, y: 5.0, theta: 3.1416}, qty: 12, price_cents: 119}
+  - {slot_id: H1-0-1, fixture_id: H1, aisle_id: h1, sku: salsa_hot, level: 0, index: 1, item_position: {x: 4.0, y: 6.0, z: 0.2}, approach_pose: {x: 4.75, y: 6.0, theta: 3.1416}, qty: 3}

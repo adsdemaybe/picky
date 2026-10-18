@@ -1,0 +1,71 @@
+# Test fixture (tiny store_ave). Same schema as data/planograms/*.yaml.
+schema_version: 1
+store_id: store_ave
+name: Picky Test Ave
+address: 1 Test Ave
+bounds: {x: 0, y: 0, w: 14, h: 22}
+entrance: {x: 1.5, y: 1.5, theta: 1.5708}
+checkout: {x: 12, y: 1.5, theta: 0}
+fixtures:
+  - {fixture_id: A1, kind: shelf, aisle_id: a1, rect: {x: 3, y: 4, w: 1, h: 10}, yaw: 0, double_sided: true, levels: 3, level_z_m: [0.1, 0.6, 1.1]}
+  - {fixture_id: D1, kind: fridge, aisle_id: a2, rect: {x: 12.8, y: 4, w: 0.8, h: 10}, yaw: 3.1416, levels: 2, level_z_m: [0.3, 0.9]}
+  - {fixture_id: P1, kind: produce_bin, aisle_id: produce, rect: {x: 7, y: 17, w: 4, h: 1}, yaw: -1.5708, levels: 1, level_z_m: [0.8]}
+aisles:
+  - {aisle_id: a1, label: Aisle 1, rect: {x: 4, y: 4, w: 1.5, h: 10}, categories: [pantry, bakery], fixture_ids: [A1]}
+  - {aisle_id: a2, label: Dairy & Meat, rect: {x: 11.2, y: 4, w: 1.5, h: 10}, categories: [dairy, meat, deli], fixture_ids: [D1]}
+  - {aisle_id: produce, label: Produce, rect: {x: 6, y: 15, w: 6, h: 1.8}, categories: [produce], fixture_ids: [P1]}
+slots:
+  - {slot_id: A1-1-0, fixture_id: A1, aisle_id: a1, sku: tortillas_corn, level: 1, index: 0, item_position: {x: 4.0, y: 5.0, z: 0.6}, approach_pose: {x: 4.75, y: 5.0, theta: 3.1416}, qty: 10}
+  - {slot_id: A1-1-1, fixture_id: A1, aisle_id: a1, sku: black_beans, level: 1, index: 1, item_position: {x: 4.0, y: 6.0, z: 0.6}, approach_pose: {x: 4.75, y: 6.0, theta: 3.1416}, qty: 0}
+  - {slot_id: A1-1-2, fixture_id: A1, aisle_id: a1, sku: salsa_mild, level: 1, index: 2, item_position: {x: 4.0, y: 7.0, z: 0.6}, approach_pose: {x: 4.75, y: 7.0, theta: 3.1416}, qty: 8, shelf_tag_cents: 349}
+  - {slot_id: A1-1-3, fixture_id: A1, aisle_id: a1, sku: salsa_hot, level: 1, index: 3, item_position: {x: 4.0, y: 8.0, z: 0.6}, approach_pose: {x: 4.75, y: 8.0, theta: 3.1416}, qty: 4}
+  - slot_id: A1-2-0
+    fixture_id: A1
+    aisle_id: a1
+    sku: hot_sauce
+    level: 2
+    index: 0
+    item_position: {x: 4.0, y: 9.0, z: 1.1}
+    approach_pose: {x: 4.75, y: 9.0, theta: 3.1416}
+    qty: 5
+    deal: {kind: percent_off, price_cents: 299, original_cents: 399, percent_off: 25, reason: "25% off this week"}
+  - slot_id: D1-0-0
+    fixture_id: D1
+    aisle_id: a2
+    sku: ground_beef
+    level: 0
+    index: 0
+    item_position: {x: 12.8, y: 6.0, z: 0.3}
+    approach_pose: {x: 12.05, y: 6.0, theta: 0}
+    qty: 6
+    lots:
+      - {lot_id: beef-L1, qty: 6, expiry: 2026-10-22}
+  - {slot_id: D1-0-1, fixture_id: D1, aisle_id: a2, sku: cheese_mexican, level: 0, index: 1, item_position: {x: 12.8, y: 7.0, z: 0.3}, approach_pose: {x: 12.05, y: 7.0, theta: 0}, qty: 9}
+  - {slot_id: D1-0-2, fixture_id: D1, aisle_id: a2, sku: sour_cream, level: 0, index: 2, item_position: {x: 12.8, y: 8.0, z: 0.3}, approach_pose: {x: 12.05, y: 8.0, theta: 0}, qty: 7, price_cents: 259}
+  - slot_id: D1-1-0
+    fixture_id: D1
+    aisle_id: a2
+    sku: guac_kit
+    level: 1
+    index: 0
+    item_position: {x: 12.8, y: 9.0, z: 0.9}
+    approach_pose: {x: 12.05, y: 9.0, theta: 0}
+    qty: 7
+    lots:
+      - {lot_id: guac-L1, qty: 3, expiry: 2026-10-18}
+      - {lot_id: guac-L2, qty: 4, expiry: 2026-10-30}
+    deal: {kind: near_expiry, price_cents: 299, original_cents: 599, percent_off: 50, reason: "Near expiry: best by Oct 18", lot_id: guac-L1}
+  - slot_id: P1-0-0
+    fixture_id: P1
+    aisle_id: produce
+    sku: avocado
+    level: 0
+    index: 0
+    item_position: {x: 8.0, y: 17.0, z: 0.8}
+    approach_pose: {x: 8.0, y: 16.25, theta: 1.5708}
+    qty: 10
+    lots:
+      - {lot_id: avo-L1, qty: 6, expiry: 2026-10-19, freshness: 0.6}
+      - {lot_id: avo-L2, qty: 4, expiry: 2026-10-23, freshness: 0.9}
+  - {slot_id: P1-0-1, fixture_id: P1, aisle_id: produce, sku: lime, level: 0, index: 1, item_position: {x: 9.0, y: 17.0, z: 0.8}, approach_pose: {x: 9.0, y: 16.25, theta: 1.5708}, capacity: 40, qty: 30}
+  - {slot_id: P1-0-2, fixture_id: P1, aisle_id: produce, sku: cilantro, level: 0, index: 2, item_position: {x: 10.0, y: 17.0, z: 0.8}, approach_pose: {x: 10.0, y: 16.25, theta: 1.5708}, qty: 12}

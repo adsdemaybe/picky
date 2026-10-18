@@ -38,8 +38,11 @@ recordings/
 .vscode/*
 !.vscode/extensions.json
 
-# fetched / generated assets
+# Playwright e2e screenshots / traces (tests/e2e)
+tests/e2e/artifacts/
+test-results/
+
+# SO-101 rig: fetched URDF/meshes and per-rig calibration output
 arms/robot/so101/assets/
 arms/robot/so101/homography.json
 arms/robot/so101/last_detection.jpg
-arms/sim/assets/build/

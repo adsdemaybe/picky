@@ -100,7 +100,7 @@ def main() -> None:
     robot = connect_robot(cfg)
     try:
         last = cfg.home_deg
-        for name, joints, grip in plan:
+        for _name, joints, grip in plan:
             last = joints or last
             move(robot, last, grip, seconds=0.8 if joints is None else 1.5)
     finally:

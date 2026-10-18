@@ -38,7 +38,7 @@ class SO101Kinematics:
             approach = np.array([math.cos(p) * math.cos(heading), math.cos(p) * math.sin(heading), -math.sin(p)])
             q, err = self._solve(target, approach, seeds)
             if err < 0.008:
-                out = {n: self._rad_to_deg(n, q[i]) for i, n in zip(self.active, self.active_names)}
+                out = {n: self._rad_to_deg(n, q[i]) for i, n in zip(self.active, self.active_names, strict=True)}
                 out["wrist_roll"] = 0.0  # keep the jaws square to the table edge
                 return out
         raise ValueError(f"IK target {xyz} unreachable at any approach pitch (best error {err * 1000:.0f} mm)")
@@ -61,7 +61,7 @@ class SO101Kinematics:
         seeds = [np.zeros(n_links)]
         if seed_deg:
             q0 = np.zeros(n_links)
-            for i, n in zip(self.active, self.active_names):
+            for i, n in zip(self.active, self.active_names, strict=True):
                 q0[i] = self._deg_to_rad(n, seed_deg.get(n, 0.0))
             seeds.insert(0, q0)
         rng = np.random.default_rng(0)

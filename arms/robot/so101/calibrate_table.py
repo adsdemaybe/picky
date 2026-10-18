@@ -58,7 +58,7 @@ def main() -> None:
 
     H, _ = cv2.findHomography(np.array(clicks, dtype=float), world)
     cfg.homography_path.write_text(json.dumps({"H": H.tolist(), "pixels": clicks, "world": world.tolist()}))
-    err = [np.hypot(*(np.array(pixel_to_table(H, *c)) - w)) for c, w in zip(clicks, world)]
+    err = [np.hypot(*(np.array(pixel_to_table(H, *c)) - w)) for c, w in zip(clicks, world, strict=True)]
     print(f"saved {cfg.homography_path}  max reprojection error {max(err) * 1000:.1f} mm")
 
 

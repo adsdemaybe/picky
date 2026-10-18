@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Picky debug</title>
+<style>
+  :root { --bg:#f6f6f4; --panel:#fff; --ink:#1d1d1b; --muted:#6b6b66; --line:#ddd; --accent:#1a5fd0;
+          --ok:#1d8a4a; --warn:#b26b00; --bad:#c0392b; --fixture:#c9c6bd; --route:#1a5fd0; --opt:#b26b00; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#141413; --panel:#1f1f1d; --ink:#ecebe6; --muted:#9a998f; --line:#34332f; --accent:#6ea0ff;
+            --fixture:#4a4843; --route:#6ea0ff; --opt:#e0a040; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:13px/1.4 ui-sans-serif, system-ui, sans-serif; }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); }
+  header h1 { font-size:15px; margin:0 8px 0 0; }
+  input, button, select { font:inherit; color:inherit; background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:5px 8px; }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  main { display:grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr) minmax(0,0.9fr); gap:12px; padding:12px 16px; }
+  @media (max-width: 1200px) { main { grid-template-columns: minmax(0,1fr) minmax(0,1fr); } }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:10px; min-width:0; margin-bottom:12px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:0 0 6px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  h2 select, h2 button { text-transform:none; letter-spacing:0; font-size:12px; padding:2px 6px; }
+  .pill { font-weight:600; padding:1px 8px; border-radius:10px; border:1px solid var(--line); font-size:12px; }
+  #log, #brain { height:280px; overflow:auto; font:12px/1.35 ui-monospace, monospace; white-space:pre-wrap; }
+  #log .error, #brain .error { color:var(--bad); } #log .approval { color:var(--warn); }
+  #brain .tool_call { color:var(--accent); } #brain .message { color:var(--ok); } #brain .thought { color:var(--muted); }
+  svg { width:100%; height:auto; max-height:50vh; background:var(--bg); border-radius:6px; }
+  .appr { border:1px solid var(--line); border-radius:6px; padding:6px; margin:4px 0; }
+  .appr .t { font-weight:600; } .appr .b { color:var(--muted); margin:2px 0 4px; }
+  .appr button { margin:2px 4px 2px 0; }
+  table { width:100%; border-collapse:collapse; } td, th { padding:2px 4px; border-bottom:1px solid var(--line); text-align:left; vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  td.n { text-align:right; font-variant-numeric:tabular-nums; }
+  .muted { color:var(--muted); } .bad { color:var(--bad); } .ok { color:var(--ok); } .warn { color:var(--warn); }
+  .robot { border:1px solid var(--line); border-radius:6px; padding:6px; margin:4px 0; cursor:pointer; }
+  .robot.sel { border-color:var(--accent); }
+  .robot .top { display:flex; gap:6px; align-items:baseline; flex-wrap:wrap; }
+  .robot .think { color:var(--muted); font-size:12px; margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; }
+  .cams { display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:6px; }
+  .cam { position:relative; background:#000; border-radius:6px; overflow:hidden; aspect-ratio: 4 / 3; cursor:pointer; }
+  .cam img { width:100%; height:100%; object-fit:cover; display:block; }
+  .cam .lbl { position:absolute; left:0; right:0; bottom:0; padding:2px 6px; font-size:11px; color:#fff; background:rgba(0,0,0,.55); display:flex; justify-content:space-between; }
+  .cam.live { outline:2px solid var(--bad); }
+  #reply { margin-left:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Picky debug</h1>
+  <select id="role" aria-label="role"><option value="shopper">shopper</option><option value="staff">staff</option></select>
+  <input id="user" value="maya" size="7" aria-label="user id">
+  <select id="reqStore" aria-label="store hint"><option value="">any store</option></select>
+  <input id="text" value="tacos for 6, under $40, one vegetarian" size="36" aria-label="request text">
+  <button class="primary" id="send">Send request</button>
+  <span id="reply" class="muted"></span>
+</header>
+<main>
+  <div>
+    <section>
+      <h2>Fleet <select id="fleetStore" aria-label="store"><option value="">all stores</option></select> <span id="sim" class="pill">sim?</span></h2>
+      <div id="robots" class="muted">loading…</div>
+    </section>
+    <section>
+      <h2>Goals <button id="goalsRefresh">refresh</button></h2>
+      <table id="goals"></table>
+    </section>
+    <section>
+      <h2>Brain log <select id="brainRobot" aria-label="robot"><option value="">all robots</option></select>
+        <form id="robotChat" style="display:flex;gap:4px;margin-left:auto"><input id="robotMsg" size="16" placeholder="talk to robot"><button>Send</button></form></h2>
+      <div id="brain"></div>
+    </section>
+  </div>
+  <div>
+    <section>
+      <h2>Trip <input id="tripId" placeholder="trip id" size="15" aria-label="trip id"> <button id="connect">Connect</button>
+        <button id="checkout">Checkout</button> <button id="followup">Follow-up</button> <span id="state" class="pill">no trip</span></h2>
+      <div class="muted" id="routeInfo"></div>
+      <svg id="map" viewBox="0 0 10 10"></svg>
+    </section>
+    <section><h2>Approvals</h2><div id="approvals" class="muted">none</div></section>
+    <section><h2>Cart <span class="muted" id="budget"></span></h2><table id="cart"></table></section>
+    <section><h2>Recommendations</h2><div id="recs" class="muted">-</div></section>
+    <section><h2>Trip chat</h2>
+      <form id="chatForm" style="display:flex;gap:6px"><input id="chat" style="flex:1" placeholder="ask the shopping agent (needs a trip)"><button>Send</button></form>
+    </section>
+  </div>
+  <div>
+    <section>
+      <h2>Cameras <select id="camStore" aria-label="camera store"></select> <span class="muted">click = live MJPEG (max 3)</span></h2>
+      <div id="cams" class="cams"></div>
+    </section>
+    <section>
+      <h2>Stock alerts <select id="stockStore" aria-label="stock store"></select></h2>
+      <table id="alerts"></table>
+    </section>
+    <section><h2>Events <span class="muted">(trip / request socket)</span></h2><div id="log"></div></section>
+  </div>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (c) => (c == null ? "-" : (c < 0 ? "-" : "") + "$" + (Math.abs(c) / 100).toFixed(2));
+const proto = location.protocol === "https:" ? "wss" : "ws";
+let tripWs = null, fleetWs = null, tripId = null, plan = null, route = null, stopStatus = {}, lastSeq = 0;
+const approvals = new Map(), robots = new Map(), goals = new Map(), poses = new Map();
+let selectedRobot = "", liveCams = [];
+
+async function api(method, path, body) {
+  const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) { log({ type: "error", message: method + " " + path + " -> " + r.status + " " + (await r.text()) }); return null; }
+  r.seq = Number(r.headers.get("X-Event-Seq") || 0);
+  const data = await r.json(); return data;
+}
+async function apiSeq(path) {
+  const r = await fetch(path); if (!r.ok) return [null, 0];
+  return [await r.json(), Number(r.headers.get("X-Event-Seq") || 0)];
+}
+
+// ---------------------------------------------------------------------------------------------------- event log
+function log(ev) {
+  const div = document.createElement("div");
+  if (ev.type === "error") div.className = "error";
+  if ((ev.type || "").startsWith("approval")) div.className = "approval";
+  div.textContent = `#${ev.seq ?? "-"} ${ev.type} ${summary(ev)}`;
+  const box = $("log"); box.appendChild(div); if (box.children.length > 600) box.firstChild.remove(); box.scrollTop = box.scrollHeight;
+}
+function summary(ev) {
+  switch (ev.type) {
+    case "request.planned": return `${ev.plan.status}: ${ev.plan.reply}`;
+    case "goal.created": case "goal.updated": case "goal.completed": case "goal.failed": return `${ev.goal.kind} ${ev.goal.status} ${Math.round(ev.goal.progress * 100)}% ${ev.goal.progress_note || ""}`;
+    case "goal.assigned": return `${ev.goal.goal_id} -> ${ev.assignment.robot_id}: ${ev.assignment.reason}`;
+    case "brain.step": return `${ev.step.robot_id} ${ev.step.kind} ${ev.step.tool || ""} ${ev.step.text}`;
+    case "trip.state_changed": return `${ev.from_state} -> ${ev.to_state} (${ev.reason})`;
+    case "list.ready": return ev.shopping_list.items.map(i => `${i.qty}x ${i.query}`).join(", ");
+    case "sourcing.split": return `in-store ${ev.in_store.length}, online ${ev.online.length}, unresolved ${ev.unresolved.length}`;
+    case "stop.updated": return `${ev.stop_id}: ${ev.status} ${ev.reason || ""}`;
+    case "cart.updated": return `total ${money(ev.total_cents)} remaining ${money(ev.remaining_cents)}`;
+    case "approval.requested": return `[${ev.request.kind}] ${ev.request.title}`;
+    case "approval.resolved": return `${ev.response.decision} via ${ev.response.channel}`;
+    case "mandate.decision": return `${ev.decision.scope} ${ev.decision.verdict} ${ev.decision.reasons.join(",")}`;
+    case "checkout.completed": return `${ev.receipt.status} ${money(ev.receipt.amount_cents)} ${ev.receipt.provider}`;
+    case "agent.message": return `${ev.role}: ${ev.text}`;
+    case "error": return `${ev.arm || ""}: ${ev.message}`;
+    case "item.picked": return ev.sku;
+    case "stock.alert": return `${ev.alert.active ? "ALERT" : "cleared"} ${ev.alert.status} ${ev.alert.sku}`;
+    case "route.planned": return `${ev.route.order.length} stops ${ev.route.total_distance_m.toFixed(1)} m${ev.replan ? " (replan)" : ""}`;
+    default: return "";
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------- map
+async function loadPlan(storeId) {
+  if (plan && plan.store_id === storeId) return;
+  plan = await api("GET", `/api/stores/${storeId}/planogram`);
+  draw();
+}
+function draw() {
+  const svg = $("map");
+  if (!plan) { svg.innerHTML = ""; return; }
+  const b = plan.bounds, H = b.h;
+  svg.setAttribute("viewBox", `${b.x - 0.5} ${-0.5} ${b.w + 1} ${b.h + 1}`);
+  const Y = (y) => H - y;
+  let s = `<rect x="${b.x}" y="0" width="${b.w}" height="${b.h}" fill="none" stroke="var(--line)" stroke-width="0.08"/>`;
+  for (const f of plan.fixtures) {
+    s += `<rect x="${f.rect.x}" y="${Y(f.rect.y + f.rect.h)}" width="${f.rect.w}" height="${f.rect.h}" fill="var(--fixture)"><title>${esc(f.label || f.fixture_id)}</title></rect>`;
+  }
+  if (route) {
+    if (route.baseline_waypoints && route.baseline_waypoints.length) {
+      s += `<polyline fill="none" stroke="var(--muted)" stroke-dasharray="0.2 0.2" stroke-width="0.06" points="${route.baseline_waypoints.map(p => `${p.x},${Y(p.y)}`).join(" ")}"/>`;
+    }
+    const pts = route.legs.flatMap(l => l.waypoints).map(p => `${p.x},${Y(p.y)}`).join(" ");
+    s += `<polyline fill="none" stroke="var(--route)" stroke-width="0.1" stroke-linejoin="round" points="${pts}"/>`;
+    for (const st of route.stops) {
+      const status = stopStatus[st.stop_id] || "pending";
+      const color = status === "done" ? "var(--ok)" : status === "failed" || status === "declined" ? "var(--bad)" : st.kind === "optional" ? "var(--opt)" : "var(--route)";
+      s += `<circle cx="${st.pose.x}" cy="${Y(st.pose.y)}" r="${st.kind === "optional" ? 0.28 : 0.2}" fill="${color}"><title>${esc(st.label || st.stop_id)} (${status})</title></circle>`;
+    }
+  }
+  for (const [rid, st] of poses) {
+    if (st.store_id && st.store_id !== plan.store_id) continue;
+    const info = robots.get(rid), color = (info && info.color) || "var(--ink)";
+    const p = st.pose, dx = Math.cos(p.theta) * 0.6, dy = Math.sin(p.theta) * 0.6;
+    s += `<g><title>${esc(info ? info.name : rid)} (${st.status})</title><circle cx="${p.x}" cy="${Y(p.y)}" r="0.3" fill="none" stroke="${color}" stroke-width="0.09"/>`;
+    s += `<line x1="${p.x}" y1="${Y(p.y)}" x2="${p.x + dx}" y2="${Y(p.y + dy)}" stroke="${color}" stroke-width="0.09"/>`;
+    s += `<text x="${p.x + 0.4}" y="${Y(p.y) - 0.4}" font-size="0.6" fill="${color}">${esc(info ? info.name : rid)}</text></g>`;
+  }
+  svg.innerHTML = s;
+}
+
+// ---------------------------------------------------------------------------------------------------- trip view
+function renderTrip(trip) {
+  $("state").textContent = trip.state + (trip.robot_id ? ` · ${robots.get(trip.robot_id)?.name || trip.robot_id}` : "");
+  stopStatus = trip.stop_status || {};
+  route = trip.route; renderCart(trip.cart, trip.budget_cents); renderRecs(trip.recs || []);
+  loadPlan(trip.store_id); draw();
+}
+function renderCart(cart, budget) {
+  const rows = cart.lines.filter(l => l.status !== "declined").map(l =>
+    `<tr><td>${l.qty}x ${esc(l.name || l.sku)}</td><td class="muted">${esc(l.source)}</td><td class="n">${money(l.total_cents)}</td></tr>`);
+  if (cart.shipping_cents && cart.online_cents) rows.push(`<tr><td>shipping</td><td></td><td class="n">${money(cart.shipping_cents)}</td></tr>`);
+  rows.push(`<tr><td><b>total</b></td><td></td><td class="n"><b>${money(cart.total_cents)}</b></td></tr>`);
+  $("cart").innerHTML = rows.join("");
+  $("budget").textContent = budget != null ? `budget ${money(budget)} · left ${money(budget - cart.total_cents)}` : "";
+}
+function renderRecs(recs) {
+  $("recs").innerHTML = recs.length ? recs.map(r =>
+    `<div>• <b>${esc(r.product_name || r.sku)}</b> ${money(r.price_cents)} <span class="muted">[${esc(r.kind)}, interest ${r.interest.toFixed(2)}${r.extra_distance_m != null ? `, +${r.extra_distance_m.toFixed(0)} m` : ""}${r.sponsored ? ", SPONSORED" : ""}]</span><br><span class="muted">${esc(r.reason)}</span></div>`).join("") : "-";
+}
+function renderApprovals() {
+  const box = $("approvals");
+  if (!approvals.size) { box.innerHTML = "none"; box.className = "muted"; return; }
+  box.className = ""; box.innerHTML = "";
+  for (const req of approvals.values()) {
+    const d = document.createElement("div"); d.className = "appr";
+    const who = req.robot_id ? `${robots.get(req.robot_id)?.name || req.robot_id} asks ${req.user_id}: ` : "";
+    d.innerHTML = `<div class="t">${esc(who)}[${esc(req.kind)}] ${esc(req.title)}</div><div class="b">${esc(req.body || "")}</div>`;
+    const btn = (label, body) => { const b = document.createElement("button"); b.textContent = label; b.onclick = () => answer(req, body); d.appendChild(b); };
+    if (req.options.length) {
+      for (const o of req.options) btn(o.label, req.multi ? { decision: "choice", choices: [o.option_id] } : { decision: "choice", choice: o.option_id });
+      btn("None", { decision: "reject" });
+    } else { btn("Approve", { decision: "approve" }); btn("No", { decision: "reject" }); }
+    box.appendChild(d);
+  }
+}
+async function answer(req, body) {
+  body.channel = "web";
+  if (req.kind === "checkout") body.cart_hash = req.cart_hash;
+  await api("POST", `/api/approvals/${req.approval_id}`, body);
+}
+function onTripEvent(ev) {
+  // a request socket may cover several trips: follow the first trip it announces
+  if (!tripId && (ev.type === "trip.created" || ev.type === "trip.snapshot")) { tripId = ev.trip.trip_id; $("tripId").value = tripId; }
+  if (ev.seq && ev.seq <= lastSeq && ev.type !== "trip.snapshot") return;
+  lastSeq = Math.max(lastSeq, ev.seq || 0);
+  if (ev.type !== "robot.state" && ev.type !== "brain.step") log(ev);
+  switch (ev.type) {
+    case "trip.snapshot": case "trip.created":
+      if (ev.trip.trip_id !== tripId) break;
+      renderTrip(ev.trip);
+      for (const a of ev.trip.approvals) if (!ev.trip.approval_responses.some(r => r.approval_id === a.approval_id)) approvals.set(a.approval_id, a);
+      renderApprovals(); break;
+    case "trip.state_changed": if (ev.trip_id === tripId) $("state").textContent = ev.to_state; break;
+    case "route.planned": if (ev.trip_id !== tripId) break; route = ev.route; draw(); $("routeInfo").textContent = `${ev.route.total_distance_m.toFixed(1)} m` + (ev.route.baseline_distance_m != null ? ` (list-only ${ev.route.baseline_distance_m.toFixed(1)} m)` : ""); break;
+    case "stop.updated": if (ev.trip_id === tripId) { stopStatus[ev.stop_id] = ev.status; draw(); } break;
+    case "cart.updated": if (ev.trip_id === tripId) renderCart(ev.cart, ev.budget_cents); break;
+    case "recs.ready": if (ev.trip_id === tripId) renderRecs(ev.recs); break;
+  }
+}
+function connectTrip(query, id) {
+  if (tripWs) tripWs.close();
+  tripId = id || null; lastSeq = 0; $("tripId").value = id || ""; $("log").innerHTML = ""; route = null; stopStatus = {};
+  tripWs = new WebSocket(`${proto}://${location.host}/ws?${query}`);
+  tripWs.onmessage = (m) => onTripEvent(JSON.parse(m.data));
+  tripWs.onclose = () => log({ type: "ws", message: "closed" });
+  history.replaceState(null, "", `?${query}`);
+}
+
+// ---------------------------------------------------------------------------------------------------- request box
+$("send").onclick = async () => {
+  const body = { text: $("text").value, user_id: $("user").value, role: $("role").value, channel: "web" };
+  if ($("reqStore").value) body.store_id = $("reqStore").value;
+  const p = await api("POST", "/api/requests", body);
+  if (!p) return;
+  $("reply").textContent = `${p.status}: ${p.reply || ""}`;
+  // shop requests: follow the request on one socket (covers a split request's trips); other requests (staff scans,
+  // robot commands) show up in the fleet panel, so the trip view keeps following the current trip
+  if (p.trip_ids && p.trip_ids.length) connectTrip(`request_id=${encodeURIComponent(p.request_id)}`, p.trip_ids[0]);
+  refreshGoals();
+};
+$("connect").onclick = () => $("tripId").value && connectTrip(`trip_id=${encodeURIComponent($("tripId").value.trim())}`, $("tripId").value.trim());
+$("checkout").onclick = () => tripId && api("POST", `/api/trips/${tripId}/checkout`);
+$("followup").onclick = () => tripId && api("POST", `/api/trips/${tripId}/followup`);
+$("chatForm").onsubmit = (e) => {
+  e.preventDefault();
+  if (tripWs && tripId && $("chat").value) { tripWs.send(JSON.stringify({ type: "chat", text: $("chat").value, trip_id: tripId })); $("chat").value = ""; }
+};
+$("role").onchange = () => {
+  if ($("role").value === "staff") { $("user").value = "staff"; $("text").value = "check stock in the snacks aisle at store_ave"; }
+  else { $("user").value = "maya"; $("text").value = "tacos for 6, under $40, one vegetarian"; }
+};
+
+// ---------------------------------------------------------------------------------------------------- fleet
+const statusClass = (s) => s === "idle" || s === "charging" ? "ok" : s === "error" || s === "disconnected" ? "bad" : "warn";
+function renderRobots() {
+  const store = $("fleetStore").value;
+  const byStore = {};
+  for (const r of robots.values()) if (!store || r.store_id === store) (byStore[r.store_id] ||= []).push(r);
+  const box = $("robots"); box.className = ""; box.innerHTML = "";
+  for (const [sid, list] of Object.entries(byStore)) {
+    const h = document.createElement("div"); h.className = "muted"; h.textContent = sid; box.appendChild(h);
+    for (const r of list) {
+      const d = document.createElement("div"); d.className = "robot" + (selectedRobot === r.robot_id ? " sel" : "");
+      const goal = r.current_goal_id ? goals.get(r.current_goal_id) : null;
+      d.innerHTML = `<div class="top"><span class="dot" style="background:${esc(r.color || "var(--accent)")}"></span><b>${esc(r.name)}</b>
+        <span class="muted">${esc(r.robot_id)}</span><span class="${statusClass(r.status)}">${esc(r.status)}</span>
+        <span>${r.battery_pct != null ? Math.round(r.battery_pct) + "%" : ""}${r.charging ? " ⚡" : ""}</span>
+        <span class="muted">${esc(r.backend || "")}</span><span class="muted">basket ${r.basket_count}/${r.basket_capacity}</span>
+        <span class="muted">${esc(r.brain_state)}</span></div>
+        <div class="muted">${goal ? esc(`${goal.kind}: ${goal.title} (${goal.status}, ${Math.round(goal.progress * 100)}%)`) : r.current_goal_id ? esc(r.current_goal_id) : r.queued_goal_ids.length ? `queued: ${r.queued_goal_ids.length}` : "no goal"}</div>
+        <div class="think">${esc(r.last_thought || "")}</div>`;
+      d.onclick = () => { selectedRobot = selectedRobot === r.robot_id ? "" : r.robot_id; $("brainRobot").value = selectedRobot; loadSteps(); renderRobots(); };
+      box.appendChild(d);
+    }
+  }
+  if (!box.children.length) { box.className = "muted"; box.textContent = "no robots (fleet not wired?)"; }
+}
+function renderGoals() {
+  const list = [...goals.values()].sort((a, b) => (b.created_at || "").localeCompare(a.created_at || "")).slice(0, 15);
+  $("goals").innerHTML = `<tr><th>goal</th><th>robot</th><th>status</th><th class="n">%</th><th></th></tr>` + list.map(g =>
+    `<tr><td>${esc(g.kind)}<br><span class="muted">${esc(g.title)}</span></td><td>${esc(robots.get(g.robot_id)?.name || g.robot_id || "-")}</td>
+     <td class="${g.status === "completed" ? "ok" : g.status === "failed" || g.status === "cancelled" ? "bad" : "warn"}">${esc(g.status)}</td>
+     <td class="n">${Math.round(g.progress * 100)}</td>
+     <td>${["completed", "failed", "cancelled"].includes(g.status) ? "" : `<button data-cancel="${esc(g.goal_id)}">cancel</button>`}</td></tr>`).join("");
+  for (const b of $("goals").querySelectorAll("button[data-cancel]")) b.onclick = () => api("POST", `/api/goals/${b.dataset.cancel}/cancel`, { reason: "cancelled from /debug" });
+}
+async function refreshGoals() {
+  const list = await api("GET", "/api/goals?limit=30");
+  if (list) { for (const g of list) goals.set(g.goal_id, g); renderGoals(); renderRobots(); }
+}
+function brainLine(step, prepend) {
+  if (selectedRobot && step.robot_id !== selectedRobot) return;
+  const d = document.createElement("div"); d.className = step.kind + (step.ok ? "" : " error");
+  const name = robots.get(step.robot_id)?.name || step.robot_id;
+  d.textContent = `${name} #${step.step_no} ${step.kind}${step.tool ? " " + step.tool : ""}: ${step.text}`;
+  const box = $("brain");
+  if (prepend) box.insertBefore(d, box.firstChild); else { box.appendChild(d); if (box.children.length > 800) box.firstChild.remove(); box.scrollTop = box.scrollHeight; }
+}
+async function loadSteps() {
+  $("brain").innerHTML = "";
+  if (!selectedRobot) return;
+  const steps = await api("GET", `/api/fleet/robots/${selectedRobot}/steps?limit=80`);
+  for (const s of steps || []) brainLine(s, true);
+  $("brain").scrollTop = $("brain").scrollHeight;
+}
+$("brainRobot").onchange = () => { selectedRobot = $("brainRobot").value; loadSteps(); renderRobots(); };
+$("fleetStore").onchange = renderRobots;
+$("goalsRefresh").onclick = refreshGoals;
+$("robotChat").onsubmit = async (e) => {
+  e.preventDefault();
+  const rid = selectedRobot || [...robots.keys()][0];
+  if (!rid || !$("robotMsg").value) return;
+  const reply = await api("POST", `/api/fleet/robots/${rid}/messages`, { text: $("robotMsg").value, user_id: $("user").value });
+  $("robotMsg").value = "";
+  if (reply) brainLine({ robot_id: rid, step_no: "", kind: "message", tool: null, ok: true, text: "reply: " + reply.text });
+};
+
+function onFleetEvent(ev) {
+  switch (ev.type) {
+    case "fleet.robot_updated": robots.set(ev.robot.robot_id, ev.robot); renderRobots(); break;
+    case "goal.created": case "goal.assigned": case "goal.updated": case "goal.completed": case "goal.failed":
+      goals.set(ev.goal.goal_id, ev.goal); renderGoals(); renderRobots(); break;
+    case "brain.step": {
+      brainLine(ev.step);
+      const r = robots.get(ev.step.robot_id);
+      if (r && (ev.step.kind === "thought" || ev.step.kind === "message" || ev.step.kind === "tool_call")) { r.last_thought = ev.step.text; renderRobots(); }
+      break;
+    }
+    case "robot.state": poses.set(ev.state.robot_id, ev.state); draw(); break;
+    case "stock.alert": if (ev.store_id === $("stockStore").value) loadAlerts(); break;
+    case "approval.requested": approvals.set(ev.request.approval_id, ev.request); renderApprovals(); break;
+    case "approval.resolved": approvals.delete(ev.response.approval_id); renderApprovals(); break;
+  }
+}
+async function initFleet() {
+  const [list, seq] = await apiSeq("/api/fleet/robots");
+  for (const r of list || []) robots.set(r.robot_id, r);
+  const sel = $("brainRobot");
+  for (const r of robots.values()) sel.insertAdjacentHTML("beforeend", `<option value="${esc(r.robot_id)}">${esc(r.name)} (${esc(r.robot_id)})</option>`);
+  renderRobots(); refreshGoals();
+  const pend = await api("GET", "/api/approvals");
+  for (const a of pend || []) approvals.set(a.approval_id, a); renderApprovals();
+  fleetWs = new WebSocket(`${proto}://${location.host}/ws?after_seq=${seq}`);  // firehose: fleet / staff view
+  fleetWs.onmessage = (m) => onFleetEvent(JSON.parse(m.data));
+  fleetWs.onclose = () => setTimeout(initFleetSocket, 2000);
+  const sim = await api("GET", "/api/sim/status");
+  if (sim) { $("sim").textContent = sim.connected ? `Isaac: ${sim.isaac_store_ids.join(", ") || "connected"}` : "2D fake (no Isaac)"; $("sim").className = "pill " + (sim.connected ? "ok" : "muted"); }
+}
+function initFleetSocket() {
+  fleetWs = new WebSocket(`${proto}://${location.host}/ws`);
+  fleetWs.onmessage = (m) => onFleetEvent(JSON.parse(m.data));
+  fleetWs.onclose = () => setTimeout(initFleetSocket, 2000);
+}
+
+// ---------------------------------------------------------------------------------------------------- cameras
+let cameras = [], snapTimer = null;
+function renderCams() {
+  const store = $("camStore").value;
+  const list = cameras.filter(c => !store || c.store_id === store);
+  const box = $("cams"); box.innerHTML = "";
+  for (const c of list) {
+    const live = liveCams.includes(c.camera_id);
+    const d = document.createElement("div"); d.className = "cam" + (live ? " live" : "");
+    const img = document.createElement("img"); img.alt = c.name; img.dataset.cam = c.camera_id;
+    img.src = live ? `${c.stream_url}?fps=5&w=480` : `${c.snapshot_url}?w=320&t=${Date.now()}`;
+    if (!live) img.dataset.snap = c.snapshot_url;
+    d.appendChild(img);
+    d.insertAdjacentHTML("beforeend", `<div class="lbl"><span>${esc(c.name)}</span><span>${live ? "LIVE" : esc(c.source)}</span></div>`);
+    d.onclick = () => {
+      liveCams = live ? liveCams.filter(x => x !== c.camera_id) : [...liveCams, c.camera_id].slice(-3);
+      renderCams();
+    };
+    box.appendChild(d);
+  }
+  if (!list.length) box.innerHTML = `<span class="muted">no cameras</span>`;
+}
+function pollSnapshots() {
+  for (const img of $("cams").querySelectorAll("img[data-snap]")) {
+    if (img.dataset.loading) continue;
+    const next = new Image(); img.dataset.loading = "1";
+    next.onload = () => { img.src = next.src; delete img.dataset.loading; };
+    next.onerror = () => { delete img.dataset.loading; };
+    next.src = `${img.dataset.snap}?w=320&t=${Date.now()}`;
+  }
+}
+async function initCams() {
+  cameras = (await api("GET", "/api/cameras")) || [];
+  renderCams();
+  snapTimer = setInterval(pollSnapshots, 1500);
+}
+$("camStore").onchange = renderCams;
+
+// ---------------------------------------------------------------------------------------------------- stock alerts
+async function loadAlerts() {
+  const sid = $("stockStore").value; if (!sid) return;
+  const list = await api("GET", `/api/stores/${sid}/stock/alerts`);
+  $("alerts").innerHTML = (list && list.length) ? `<tr><th>sku</th><th>status</th><th class="n">qty</th><th></th></tr>` + list.map(a =>
+    `<tr><td>${esc(a.name || a.sku)}<br><span class="muted">${esc(a.sku)} ${esc(a.size || "")}</span></td><td class="${a.status === "out" ? "bad" : "warn"}">${esc(a.status)}</td>
+     <td class="n">${a.qty}</td><td><button data-sku="${esc(a.sku)}">restock</button></td></tr>`).join("")
+    : `<tr><td class="muted">no active alerts</td></tr>`;
+  for (const b of $("alerts").querySelectorAll("button[data-sku]")) b.onclick = async () => { await api("POST", `/api/stores/${sid}/stock/restock`, { sku: b.dataset.sku, actor: "staff:debug" }); loadAlerts(); };
+}
+$("stockStore").onchange = loadAlerts;
+
+// ---------------------------------------------------------------------------------------------------- boot
+async function boot() {
+  const stores = ((await api("GET", "/api/stores")) || []).filter(s => s.store_id !== "online");
+  for (const id of ["reqStore", "fleetStore", "camStore", "stockStore"]) {
+    const sel = $(id);
+    for (const s of stores) sel.insertAdjacentHTML("beforeend", `<option value="${esc(s.store_id)}">${esc(s.name || s.store_id)}</option>`);
+  }
+  if (stores.length) { $("camStore").value = stores[0].store_id; $("stockStore").value = stores[0].store_id; loadPlan(stores[0].store_id); }
+  await initFleet();
+  await initCams();
+  loadAlerts();
+  const q = new URLSearchParams(location.search);
+  if (q.get("trip_id")) connectTrip(`trip_id=${encodeURIComponent(q.get("trip_id"))}`, q.get("trip_id"));
+  else if (q.get("request_id")) connectTrip(`request_id=${encodeURIComponent(q.get("request_id"))}`, null);
+}
+boot();
+</script>
+</body>
+</html>
