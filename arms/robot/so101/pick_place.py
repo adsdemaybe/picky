@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from dataclasses import dataclass, field
 
 import cv2
 
@@ -64,6 +65,69 @@ def move(robot, joints: dict[str, float], gripper: float, seconds: float = 1.5, 
         time.sleep(seconds / steps)
 
 
+ARM_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
+
+
+@dataclass
+class PickPlan:
+    target: str
+    dest: str
+    frame_path: str
+    missing: list[str] = field(default_factory=list)
+    target_xy: tuple[float, float] | None = None
+    dest_xy: tuple[float, float] | None = None
+    steps: list[tuple[str, dict[str, float] | None, float]] = field(default_factory=list)
+    error: str | None = None
+
+
+def plan_pick(cfg: RigConfig, kin: SO101Kinematics, command: str, save: str = "last_detection.jpg") -> PickPlan:
+    """Sentence -> camera frame -> Perceptron boxes -> table xy -> IK waypoints. Never touches the motors."""
+    target, dest = parse_command(command)
+    plan = PickPlan(target, dest, save)
+    frame = grab_frame(cfg)
+    dets = detect(frame, [target, dest], cfg.perceptron_model)
+    for d in dets.values():
+        x0, y0, x1, y1 = d.box_px
+        cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 255, 0), 2)
+        cv2.putText(frame, d.label, (x0, y0 - 6), 0, 0.6, (0, 255, 0), 2)
+    cv2.imwrite(save, frame)
+    plan.missing = [lab for lab in (target, dest) if lab not in dets]
+    if plan.missing:
+        plan.error = f"not found in frame: {plan.missing}"
+        return plan
+
+    H = load_homography(cfg)
+    tx, ty = pixel_to_table(H, *dets[target].center_px)
+    bx, by = pixel_to_table(H, *dets[dest].center_px)
+    plan.target_xy, plan.dest_xy = (tx, ty), (bx, by)
+    try:
+        plan.steps = [
+            ("hover", kin.ik((tx, ty, cfg.hover_z), cfg.home_deg), cfg.gripper_open),
+            ("descend", kin.ik((tx, ty, cfg.grasp_z), cfg.home_deg), cfg.gripper_open),
+            ("grip", None, cfg.gripper_closed),
+            ("lift", kin.ik((tx, ty, cfg.hover_z), cfg.home_deg), cfg.gripper_closed),
+            ("over_basket", kin.ik((bx, by, cfg.place_z), cfg.home_deg), cfg.gripper_closed),
+            ("release", None, cfg.gripper_open),
+        ]
+    except ValueError as e:  # IK target out of reach
+        plan.error = str(e)
+    return plan
+
+
+def execute(robot, plan: PickPlan, rest: dict[str, float], rest_gripper: float) -> None:
+    """Run the waypoints, then return to `rest` (the pose captured at connect, known to be safe)."""
+    last = rest
+    for _name, joints, grip in plan.steps:
+        last = joints or last
+        move(robot, last, grip, seconds=0.8 if joints is None else 2.0)
+    move(robot, rest, rest_gripper, seconds=2.5)
+
+
+def read_pose(robot) -> tuple[dict[str, float], float]:
+    obs = robot.get_observation()
+    return {k: float(obs[f"{k}.pos"]) for k in ARM_JOINTS}, float(obs["gripper.pos"])
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("command", help='e.g. "pick up the granola bar and put it in the basket"')
@@ -72,46 +136,20 @@ def main() -> None:
     args = ap.parse_args()
 
     cfg = RigConfig()
-    target, dest = parse_command(args.command)
-    print(f"target={target!r} destination={dest!r}")
-
-    frame = grab_frame(cfg)
-    dets = detect(frame, [target, dest], cfg.perceptron_model)
-    for d in dets.values():
-        x0, y0, x1, y1 = d.box_px
-        cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 255, 0), 2)
-        cv2.putText(frame, d.label, (x0, y0 - 6), 0, 0.6, (0, 255, 0), 2)
-    cv2.imwrite(args.save, frame)
-    missing = [lab for lab in (target, dest) if lab not in dets]
-    if missing:
-        raise SystemExit(f"not found in frame: {missing} (see {args.save})")
-
-    H = load_homography(cfg)
-    tx, ty = pixel_to_table(H, *dets[target].center_px)
-    bx, by = pixel_to_table(H, *dets[dest].center_px)
-    print(f"{target}: ({tx:.3f}, {ty:.3f}) m   {dest}: ({bx:.3f}, {by:.3f}) m")
-
-    kin = SO101Kinematics(cfg)
-    plan = [
-        ("hover", kin.ik((tx, ty, cfg.hover_z), cfg.home_deg), cfg.gripper_open),
-        ("descend", kin.ik((tx, ty, cfg.grasp_z), cfg.home_deg), cfg.gripper_open),
-        ("grip", None, cfg.gripper_closed),
-        ("lift", kin.ik((tx, ty, cfg.hover_z), cfg.home_deg), cfg.gripper_closed),
-        ("over_basket", kin.ik((bx, by, cfg.place_z), cfg.home_deg), cfg.gripper_closed),
-        ("release", None, cfg.gripper_open),
-        ("home", cfg.home_deg, cfg.gripper_open),
-    ]
-    for name, joints, grip in plan:
+    plan = plan_pick(cfg, SO101Kinematics(cfg), args.command, args.save)
+    print(f"target={plan.target!r} destination={plan.dest!r}  (annotated frame: {plan.frame_path})")
+    if plan.error:
+        raise SystemExit(plan.error)
+    print(f"{plan.target}: {plan.target_xy}  {plan.dest}: {plan.dest_xy}")
+    for name, joints, grip in plan.steps:
         print(f"  {name:12s} {joints or '(hold)'} gripper={grip}")
     if args.dry_run:
         return
 
     robot = connect_robot(cfg)
     try:
-        last = cfg.home_deg
-        for _name, joints, grip in plan:
-            last = joints or last
-            move(robot, last, grip, seconds=0.8 if joints is None else 1.5)
+        rest, rest_grip = read_pose(robot)
+        execute(robot, plan, rest, rest_grip)
     finally:
         robot.disconnect()
 

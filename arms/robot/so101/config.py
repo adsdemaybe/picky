@@ -18,9 +18,17 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(f"SO101_{name}", default)
 
 
+def _default_port() -> str:
+    """First USB serial device that looks like the SO-101 controller (macOS cu.usbmodem*, Linux ttyACM*)."""
+    import glob
+
+    found = sorted(glob.glob("/dev/cu.usbmodem*")) + sorted(glob.glob("/dev/ttyACM*"))
+    return found[0] if found else "/dev/ttyACM0"
+
+
 @dataclass
 class RigConfig:
-    port: str = _env("PORT", "/dev/ttyACM0")  # Windows: COM3
+    port: str = field(default_factory=lambda: _env("PORT", _default_port()))  # Windows: set SO101_PORT=COM3
     robot_id: str = _env("ROBOT_ID", "follower")  # must match the id used in lerobot-calibrate
     camera_index: str = _env("CAMERA", "0")  # int index or /dev/videoN
     frame_w: int = 640
