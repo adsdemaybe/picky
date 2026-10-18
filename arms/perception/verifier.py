@@ -186,7 +186,12 @@ class PerceptionVerifier(VerifierBase):
         return self._labels[sku]
 
     async def _state(
-        self, robot_id: RobotId, slot_ids: Sequence[SlotId], approvals: dict[str, bool]
+        self,
+        robot_id: RobotId,
+        slot_ids: Sequence[SlotId],
+        approvals: dict[str, bool],
+        *,
+        counter: bool = False,
     ) -> tuple[StateFacts | None, str | None, str | None]:
         """-> (StateFacts, backend, store_id) from RobotState alone (None when the robot service can't answer)."""
         robot = self.s.robot
@@ -199,9 +204,11 @@ class PerceptionVerifier(VerifierBase):
             return None, None, None
         holding_sku: Sku | None = None
         basket_skus = list(st.basket_skus)
-        if st.holding or (st.basket and len(basket_skus) != len(st.basket)):
+        counter_counts: dict[Sku, int] = {}
+        if st.holding or counter or (st.basket and len(basket_skus) != len(st.basket)):
             try:
                 units = {u.instance_id: u for u in await robot.list_instances(robot_id)}
+                counter_counts = dict(Counter(u.sku for u in units.values() if u.on_counter))
                 holding_sku = units[st.holding].sku if st.holding in units else None
                 if len(basket_skus) != len(st.basket):
                     basket_skus = [units[i].sku for i in st.basket if i in units]
@@ -225,6 +232,7 @@ class PerceptionVerifier(VerifierBase):
             holding_instance_id=st.holding,
             holding_sku=holding_sku,
             basket_counts=dict(Counter(basket_skus)),
+            counter_counts=counter_counts,
             approvals=dict(approvals),
             slots=slots,
         )
@@ -429,7 +437,8 @@ class PerceptionVerifier(VerifierBase):
             raise VerifierUnavailableError("verifier service unavailable (injected fault)")
         cond = req.condition
         slot_ids = slot_ids_in(cond)
-        facts, backend, store_id = await self._state(req.robot_id, slot_ids, dict(req.approvals))
+        needs_counter = any(a.op == "item_on_counter" for _, a in iter_atoms(cond))
+        facts, backend, store_id = await self._state(req.robot_id, slot_ids, dict(req.approvals), counter=needs_counter)
         mode = self.resolve_mode(req.mode, backend)
         cams = cameras_needed(cond, req.robot_id, alternate=req.alternate_cameras)
         ctxd = exec_ctx_dict(req.context, slot_ids)
