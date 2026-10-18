@@ -395,7 +395,16 @@ def compose(
         col = GREEN if out == "PASS" else (RED if out == "FAIL" else AMBER)
         prov = v.get("provider") or {}
         by = v.get("decided_by") or ""
-        who = f"verified by Perceptron {prov.get('model') or ''}".strip() if by == "provider" else f"decided by {by}"
+        model = prov.get("model") or ""
+        reason = v.get("reason") or ""
+        if by == "provider" and "camera inconclusive" in reason:
+            who = f"robot state decided (Perceptron {model} inconclusive)"
+        elif by == "provider" and "state agrees" in reason:
+            who = f"Perceptron {model} + robot state agree"
+        elif by == "provider":
+            who = f"verified by Perceptron {model}"
+        else:
+            who = f"decided by {by}"
         head = f"VERIFIER {out}"
         d.text((22, y0 + 58), head, font=F_B, fill=col)
         x = 22 + d.textlength(head, font=F_B) + 12
