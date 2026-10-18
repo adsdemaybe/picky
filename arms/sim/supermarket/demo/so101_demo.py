@@ -72,6 +72,35 @@ SYSTEM = (
     "rover will face), then end at the checkout. Explain each leg in one short, concrete sentence a shopper would "
     "understand (mention the section and why it comes next). Answer with JSON only."
 )
+# --policy perceptron: Gemini is also the task planner (the step plan per stop); Perceptron Mk1.5 does the grasps
+SYSTEM_VLA = SYSTEM.replace(" Answer with JSON only.", "") + (
+    " You are also the rover's task planner: for every stop give 'steps', the ordered steps the rover runs there, "
+    "using only: approach (drive + park beside the shelf), look (the wrist camera finds the product), grasp (a "
+    "vision-language-action model, Perceptron Mk1.5, steers the arm onto the product and closes the jaws), "
+    "place_in_basket, verify (a camera check that it landed in the basket); and 'grasp_hint': at most 10 words on how "
+    "to recognise the product on the shelf. Also give 'checkout_steps' using: approach_checkout, unload (each item "
+    "onto the counter), pay. Answer with JSON only."
+)
+SCHEMA_VLA = {
+    "summary": "one or two sentences: the overall strategy",
+    "robots": [
+        {
+            "robot": "<robot name>",
+            "stops": [
+                {
+                    "item": "<item id>",
+                    "section": "<section id>",
+                    "side": "<north|south|east|west>",
+                    "reason": "<why this stop comes next, <= 20 words>",
+                    "steps": ["approach", "look", "grasp", "place_in_basket", "verify"],
+                    "grasp_hint": "<how to recognise it on the shelf, <= 10 words>",
+                }
+            ],
+            "checkout_reason": "<why/when it heads to the checkout>",
+            "checkout_steps": ["approach_checkout", "unload", "pay"],
+        }
+    ],
+}
 
 
 # --- small geometry helpers ------------------------------------------------------------------------------------------
@@ -1807,7 +1836,7 @@ def replan(ms: Mission, items, stop, event, planner, ctx):
     ms.wait(0.4)
 
 
-def make_plan(planner, smap, items, start, ctx, log=print):
+def make_plan(planner, smap, items, start, ctx, log=print, schema=None):
     sec_label = {s["id"]: f"{s['label']} ({s['where']})" for s in smap.sections}
     for it in items.values():
         it["section_label"] = sec_label.get(it["section"], "")
@@ -1827,7 +1856,11 @@ def make_plan(planner, smap, items, start, ctx, log=print):
     robots_info = [{"name": NAME, "start": r2(start[:2], 2), "facing_deg": round(math.degrees(start[2]))}]
     t0 = time.time()
     try:
-        resp = planner.plan(ctx["map_summary"], robots_info, items_info, ctx["checkout_info"])
+        resp = (
+            planner.plan(ctx["map_summary"], robots_info, items_info, ctx["checkout_info"], schema=schema)
+            if schema
+            else planner.plan(ctx["map_summary"], robots_info, items_info, ctx["checkout_info"])
+        )
         stops, seen = [], set()
         rb = next((r for r in resp.get("robots", []) if r.get("robot") == NAME), (resp.get("robots") or [{}])[0])
         for st in rb.get("stops", []):
@@ -1845,6 +1878,7 @@ def make_plan(planner, smap, items, start, ctx, log=print):
             "summary": resp.get("summary", ""),
             "stops": stops,
             "checkout_reason": rb.get("checkout_reason", ""),
+            "checkout_steps": rb.get("checkout_steps") or [],
         }
     except Exception as e:  # noqa: BLE001
         log(f"[so101-demo] Gemini plan failed: {e}; greedy fallback")
@@ -1937,6 +1971,7 @@ def plan_doc(plan, items, smap, meta, slot, ck, spawn):
         "summary": plan["summary"],
         "robots": {NAME: plan["stops"]},
         "checkout_reason": {NAME: plan.get("checkout_reason", "")},
+        "checkout_steps": {NAME: plan.get("checkout_steps", [])},
         "items": {
             i: {
                 "name": it["name"],
@@ -1946,6 +1981,7 @@ def plan_doc(plan, items, smap, meta, slot, ck, spawn):
                 "center": r2(it["center"], 2),
                 "stand": r2(it["xy"], 2),
                 "width_cm": round(it["width"] * 100, 1),
+                "looks": it.get("looks", ""),
             }
             for i, it in items.items()
         },
@@ -2185,13 +2221,20 @@ def run(app, args, tele):
         },
         "alternatives": alternatives_fn(cat, {it["path"] for it in items.values()}),
     }
-    planner = Planner(str(out / "llm_log.jsonl"), system=SYSTEM)
+    vla = getattr(args, "policy", "scripted") == "perceptron"
+    planner = Planner(str(out / "llm_log.jsonl"), system=SYSTEM_VLA if vla else SYSTEM)
     # name the products from close-up renders (Gemini vision); category names if that fails
     try:
         shots = product_closeups(app, stage, items, out, hide=[ROBOT], look_at=autopilot.look_at)
-        names = planner.name_products(shots) if shots else {}
+        names = planner.name_products(shots, describe=True) if shots and vla else {}
+        if shots and not vla:
+            names = planner.name_products(shots)
         seen = {}
         for iid, nm in names.items():
+            if isinstance(nm, dict):  # describe=True: {"name", "looks"}
+                if iid in items and isinstance(nm.get("looks"), str):
+                    items[iid]["looks"] = nm["looks"].strip().rstrip(".")[:60]
+                nm = nm.get("name")
             if iid in items and isinstance(nm, str) and 2 <= len(nm) <= 40:
                 nm = nm.strip().rstrip(".")
                 seen[nm] = seen.get(nm, 0) + 1
@@ -2199,8 +2242,10 @@ def run(app, args, tele):
         log(f"[so101-demo] product names: {[(i, it['name']) for i, it in items.items()]}")
     except Exception as e:  # noqa: BLE001
         log(f"[so101-demo] product naming skipped: {e}")
-    plan = make_plan(planner, smap, items, spawn, ctx, log)
-    (out / "plan.json").write_text(json.dumps(plan_doc(plan, items, smap, meta, slot, ck, spawn), indent=1))
+    plan = make_plan(planner, smap, items, spawn, ctx, log, schema=SCHEMA_VLA if vla else None)
+    doc = plan_doc(plan, items, smap, meta, slot, ck, spawn)
+    doc["policy"] = "perceptron" if vla else "scripted"
+    (out / "plan.json").write_text(json.dumps(doc, indent=1))
     log(
         f"[so101-demo] setup {time.time() - t_setup:.0f}s; plan {plan['source']} {plan['model']} "
         f"{plan['latency_s']}s: {plan['summary']}"
@@ -2229,6 +2274,12 @@ def run(app, args, tele):
     cams["birdseye"] = (bird_path, (960, 540))
     cams["side"] = (side_path, (960, 540))
     keep = {c.strip() for c in str(getattr(args, "rec_cams", "") or "").split(",") if c.strip()}
+    if vla:  # the policy's cameras: the wrist camera + a mast camera on the rover (sim-only mount), basket for verify
+        from demo.vla_pick import MAST, VlaRig  # noqa: PLC0415
+
+        VlaRig.define_mast(stage, "/World/picky_vla_mast")
+        cams[MAST[0]] = ("/World/picky_vla_mast", MAST[1])
+        keep |= {MAST[0], "wrist", "basket"} if keep else set()
     if keep:  # fewer render products = less GPU memory + faster renders on a shared GPU
         cams = {k: v for k, v in cams.items() if k in keep or k == "director"}
     log(f"[so101-demo] recording cameras: {sorted(cams)}")
@@ -2267,8 +2318,32 @@ def run(app, args, tele):
     ms.cap_every = max(1, int(getattr(args, "capture_every", 2)))
     follow = FollowCams(hg, set_cam_factory(bird_path), set_cam_factory(side_path))
     ms.cam_hooks.append(follow.update)
+    rig = None
+    if vla:
+        from demo import vla_pick  # noqa: PLC0415
+
+        rig = vla_pick.VlaRig(
+            ms,
+            stage,
+            ROBOT,
+            vla_pick.Sidecar(args.vla_url),
+            out,
+            wrist_res=cams["wrist"][1],
+            max_calls=args.vla_max_calls,
+            max_attempts=args.vla_attempts,
+        )
+        ms.cam_hooks.append(rig.mast_hook)
+        rig.mast_hook(spawn[0], spawn[1], spawn[2])
     names = {it["path"]: it["name"] for it in items.values()}
-    ms.ev("plan", source=plan["source"], model=plan["model"], summary=plan["summary"], stops=plan["stops"])
+    ms.ev(
+        "plan",
+        source=plan["source"],
+        model=plan["model"],
+        summary=plan["summary"],
+        stops=plan["stops"],
+        checkout_steps=plan.get("checkout_steps", []),
+        policy="perceptron" if vla else "scripted",
+    )
     t_run = time.time()
     try:
         # intro: slow orbit round the rover
@@ -2291,7 +2366,10 @@ def run(app, args, tele):
             rec.set_active(list(cams))
         ms.gphase = "main"
         ms.ev("start")
-        trip(ms, items, plan["stops"], planner, ctx)
+        if rig is not None:
+            vla_pick.trip_vla(ms, rig, items, plan["stops"], planner, ctx, replan)
+        else:
+            trip(ms, items, plan["stops"], planner, ctx)
         ms.checkout(slot, counter_top, names)
         ms.gphase = "outro"
         if rec:
@@ -2321,6 +2399,14 @@ def run(app, args, tele):
             if (out / "llm_log.jsonl").exists()
             else 0,
         }
+        if rig is not None:
+            vs = rig.summary()
+            for iid, rp in vs["items"].items():
+                p = items.get(iid, {}).get("path")
+                rp["unloaded"] = p in ms.on_counter if p else None
+            stats["vla"] = {k: v for k, v in vs.items() if k != "items"}
+            (out / "vla_summary.json").write_text(json.dumps(vs, indent=1, default=str))
+            ms.ev("vla_summary", **stats["vla"])
         ms.ev("done", **stats)
         (out / "stats.json").write_text(json.dumps(stats, indent=1))
         if rec:

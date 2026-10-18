@@ -73,6 +73,13 @@ ap.add_argument(
 )
 ap.add_argument("--capture-every", type=int, default=2, help="--demo so101: record every Nth 60 Hz step (2 = 30 fps)")
 ap.add_argument("--debug", action="store_true", help="--demo: log held-product poses after each grab")
+# --demo so101 grasp policy: scripted IK (default) or Perceptron Mk1.5 as the VLA (demo/vla_pick.py + vla_sidecar.py)
+ap.add_argument("--policy", choices=["scripted", "perceptron"], default="scripted", help="--demo so101 grasp policy")
+ap.add_argument("--vla-url", default="http://127.0.0.1:8766", help="--policy perceptron: demo/vla_sidecar.py")
+ap.add_argument("--vla-max-calls", type=int, default=8, help="--policy perceptron: Mk1.5 steps per grasp attempt")
+ap.add_argument(
+    "--vla-attempts", type=int, default=2, help="--policy perceptron: VLA attempts before the scripted grasp"
+)
 args = ap.parse_args()
 if args.smoke or (args.demo and not args.livestream):
     args.headless = True
