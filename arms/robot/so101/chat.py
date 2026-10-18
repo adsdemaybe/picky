@@ -52,8 +52,12 @@ def main() -> None:
     robot, rest, rest_grip = None, None, None
 
     say("Picky SO-101 — natural-language pick & place", "b")
-    if not os.environ.get("PERCEPTRON_API_KEY"):
-        say("warning: PERCEPTRON_API_KEY is not set; detection will fail", "y")
+    key, url = os.environ.get("PERCEPTRON_API_KEY"), os.environ.get("PICKY_VLM_URL")
+    mode = os.environ.get("PICKY_GROUNDING", "auto")
+    if mode == "local" or not key:
+        say(f"grounding: self-hosted Isaac-0.2-1B at {url}" if url else "warning: no grounding backend set", "dim")
+    else:
+        say(f"grounding: Perceptron API ({cfg.perceptron_model})" + (f", fallback {url}" if url else ""), "dim")
     if not cfg.homography_path.exists():
         say(f"warning: no table calibration at {cfg.homography_path}; run calibrate_table first", "y")
     if not dry:

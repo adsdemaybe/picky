@@ -35,3 +35,34 @@ def test_to_pixels():
     from arms.robot.so101.grounding import _to_pixels
 
     assert _to_pixels("x", (500, 250, 1000, 1000), 640, 480).box_px == (320, 120, 640, 480)
+
+
+def test_backend_selection(monkeypatch):
+    import numpy as np
+
+    from arms.robot.so101 import grounding
+
+    calls = []
+    monkeypatch.setattr(grounding, "detect_local", lambda *a, **k: calls.append("local") or {})
+    monkeypatch.setattr(grounding, "detect_api", lambda *a, **k: calls.append("api") or {})
+    frame = np.zeros((4, 4, 3), np.uint8)
+
+    monkeypatch.setenv("PERCEPTRON_API_KEY", "k")
+    monkeypatch.setenv("PICKY_VLM_URL", "http://x")
+    monkeypatch.delenv("PICKY_GROUNDING", raising=False)
+    grounding.detect(frame, ["a"], "m")
+    assert calls == ["api"]
+
+    def boom(*a, **k):
+        calls.append("api")
+        raise RuntimeError("quota")
+
+    monkeypatch.setattr(grounding, "detect_api", boom)
+    calls.clear()
+    grounding.detect(frame, ["a"], "m")
+    assert calls == ["api", "local"]  # auto falls back to the self-hosted model
+
+    monkeypatch.setenv("PICKY_GROUNDING", "local")
+    calls.clear()
+    grounding.detect(frame, ["a"], "m")
+    assert calls == ["local"]

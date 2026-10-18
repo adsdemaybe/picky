@@ -63,13 +63,29 @@ def detect_local(frame_bgr: np.ndarray, labels: list[str], url: str, timeout: fl
 def detect(frame_bgr: np.ndarray, labels: list[str], model: str) -> dict[str, Detection]:
     """Return the highest-ranked box per label, in pixel coords of `frame_bgr`.
 
-    Uses the self-hosted model when PICKY_VLM_URL is set, otherwise the Perceptron API (PERCEPTRON_API_KEY).
+    PICKY_GROUNDING=auto (default): Perceptron API when PERCEPTRON_API_KEY is set, falling back to the self-hosted
+    server at PICKY_VLM_URL if the API call fails (quota, network). `api` / `local` force one backend.
     """
     import os
 
-    if url := os.environ.get("PICKY_VLM_URL"):
+    mode = os.environ.get("PICKY_GROUNDING", "auto").lower()
+    url = os.environ.get("PICKY_VLM_URL")
+    has_key = bool(os.environ.get("PERCEPTRON_API_KEY"))
+    if mode == "local" or (mode == "auto" and not has_key):
+        if not url:
+            raise RuntimeError("no grounding backend: set PERCEPTRON_API_KEY or PICKY_VLM_URL")
         return detect_local(frame_bgr, labels, url)
+    try:
+        return detect_api(frame_bgr, labels, model)
+    except Exception as e:
+        if mode == "auto" and url:
+            print(f"Perceptron API failed ({type(e).__name__}: {e}); using self-hosted model at {url}")
+            return detect_local(frame_bgr, labels, url)
+        raise
 
+
+def detect_api(frame_bgr: np.ndarray, labels: list[str], model: str) -> dict[str, Detection]:
+    """Perceptron API (Mk1.5 by default): ~0.6 s for several labels in one call."""
     import cv2
     from perceptron import configure, image
     from perceptron import detect as p_detect
