@@ -106,3 +106,40 @@ class ProfileUpdate(Model):
     version_before: int = 1
     version_after: int = 1
     ts: Timestamp = Field(default_factory=utcnow)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# Replenish suggestions (0.2.3): "you bought this 12 days ago" cards for the web app
+# --------------------------------------------------------------------------------------------------------------------
+class ReplenishSuggestion(Model):
+    """One card of GET /api/users/{user_id}/suggestions (0.2.3): an item the shopper probably needs again, from their
+    purchase cadence (the Cart Whisperer "replenish" generator, recommender arm). Deterministic: the list is sorted by
+    ``overdue_days`` (most overdue first), then SKU. Clicking cards and ordering them = POST /api/requests with
+    ``items`` (``fleet.RequestItem``). Never sponsored (CLAUDE.md section 8)."""
+
+    suggestion_id: str = Field(description="Stable id: 'rep-<user_id>-<sku>'.")
+    kind: Literal["replenish"] = "replenish"
+    user_id: UserId
+    sku: Sku
+    name: str
+    brand: str | None = None
+    size: str | None = None
+    category: str | None = None
+    image_url: str = Field(description="Root-relative product thumbnail: '/api/products/{sku}/image.jpg'.")
+    label_color: str | None = Field(None, description="#RRGGBB of the sim prop's label (card accent).")
+    price_cents: Cents = Field(description="Unit price at ``store_id`` now (deal applied).")
+    store_id: StoreId
+    in_stock: bool
+    stock_qty: int = Field(0, ge=0)
+    aisle_label: str | None = Field(None, description="'Aisle 3 · shelf 2' (None when not stocked here).")
+    slot_id: str | None = None
+    shelf_level: int | None = Field(None, ge=0, description="0 = bottom shelf.")
+    last_bought_at: Timestamp
+    last_bought_days: int = Field(ge=0, description="Whole days since the last purchase.")
+    cadence_days: int = Field(ge=1, description="Typical days between purchases (own history).")
+    overdue_days: int = Field(description="last_bought_days - cadence_days (negative = due in that many days).")
+    times_bought: int = Field(ge=1)
+    suggested_qty: int = Field(1, ge=1, description="Usual quantity per purchase.")
+    reason: str = Field(description="'You bought this 12 days ago — you usually buy it every 10 days.'")
+    signals: dict[str, float | int | str] = Field(default_factory=dict, description="Why, as numbers (transparency).")
+    sponsored: bool = False

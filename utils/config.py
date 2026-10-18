@@ -109,6 +109,24 @@ class Settings(BaseSettings):
     """Perceptron Mk1.5 calls per trip for the robot (T1 tool policy + navigation look-outs); spent -> T0."""
     picky_vla_mk15_timeout_s: float = 12.0
     """Per-call timeout of the Mk1.5 tool policy / look-out."""
+    picky_perceived_streams: bool = True
+    """List the annotated onboard cameras '<robot>.front.perceived' / '<robot>.wrist.perceived' (contracts 0.2.3)."""
+    picky_perceived_provider: str = "perceptron"
+    """Boxes on the perceived streams: perceptron (Mk1.5, needs PERCEPTRON_API_KEY + the real cameras arm; ground
+    truth whenever it is unavailable / quota'd / over budget) | ground_truth (never calls Perceptron)."""
+    picky_perceived_detect_hz: float = 1.0
+    """Detections per second per perceived stream (boxes are reused between detections)."""
+    picky_perceived_call_budget: int = 240
+    """Perceptron calls per trip for the perceived streams (separate from PICKY_PERCEPTRON_CALL_BUDGET); spent ->
+    ground-truth boxes for the rest of the trip."""
+    picky_perceived_timeout_s: float = 6.0
+    """Per-call timeout of one perceived-stream detection."""
+    picky_director_camera: bool = True
+    """List '<robot>.director' (third-person chase view) for robots on the 2D fake; Isaac robots get it when the
+    worker runs with PICKY_SIM_DIRECTOR."""
+    picky_product_image_dir: str = ""
+    """Optional folder of product photos / renders ('<SKU>.jpg|png') served by GET /api/products/{sku}/image.jpg;
+    blank or missing file = a label-card render of the sim prop."""
     gateway_host: str = "0.0.0.0"
     gateway_port: int = 8000
     picky_gateway_url: str = "http://localhost:8000"

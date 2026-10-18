@@ -20,6 +20,7 @@ from contracts.bridge import (
 )
 from contracts.cameras import (
     DEFAULT_ROBOT_CAMERA_MOUNTS,
+    PERCEIVED_SOURCE_KINDS,
     ROBOT_CAMERA_KINDS,
     CameraInfo,
     CameraKind,
@@ -27,7 +28,10 @@ from contracts.cameras import (
     ObservedItem,
     RobotCameraKind,
     VisionObservation,
+    director_camera_id,
     parse_camera_id,
+    perceived_camera_id,
+    perceived_source,
     robot_camera_id,
     store_camera_id,
 )
@@ -149,6 +153,7 @@ from contracts.fleet import (
     GoalStatus,
     GoalUpdate,
     RequestDraft,
+    RequestItem,
     RequestPlan,
     RobotInfo,
     StoreChoice,
@@ -272,7 +277,7 @@ from contracts.policy import (
     failure_from_verdict,
     failure_from_vla,
 )
-from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, UserProfile
+from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, ReplenishSuggestion, UserProfile
 from contracts.routing import GridSpec, Route, RouteLeg, RouteRequest, Stop, StopStatus
 from contracts.services import (
     ARM_NAMES,
@@ -415,7 +420,7 @@ from contracts.vla import (
     resolve_tier,
 )
 
-CONTRACTS_VERSION = "0.2.2"
+CONTRACTS_VERSION = "0.2.3"
 
 __all__ = [
     "ACTION_INSERTS",
@@ -471,6 +476,7 @@ __all__ = [
     "MAX_GOAL_ATTEMPTS",
     "MIRROR_MODEL",
     "ONLINE_STORE_ID",
+    "PERCEIVED_SOURCE_KINDS",
     "PERCEPTRON_CALLS",
     "PICK_CHOICE_MAX",
     "POLICY_CAMERAS",
@@ -662,7 +668,9 @@ __all__ = [
     "Rect2D",
     "ReplanRequest",
     "ReplyInterpretation",
+    "ReplenishSuggestion",
     "RequestDraft",
+    "RequestItem",
     "RequestPlan",
     "RestockRequest",
     "RetryPolicy",
@@ -769,6 +777,7 @@ __all__ = [
     "compute_cart_hash",
     "decide_recovery",
     "default_conditions",
+    "director_camera_id",
     "default_low_threshold",
     "evaluate_on_state",
     "evaluate_on_truth",
@@ -792,6 +801,8 @@ __all__ = [
     "online_shipping_cents",
     "parse_brain_tool_input",
     "parse_camera_id",
+    "perceived_camera_id",
+    "perceived_source",
     "parse_event",
     "parse_gateway_to_sim",
     "parse_sim_message",
