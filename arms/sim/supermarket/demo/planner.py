@@ -11,6 +11,7 @@ and is never logged. Every request/response is appended to the log file (JSONL) 
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
@@ -18,7 +19,15 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest"]
+# tried in order; a model whose quota is exhausted (HTTP 429) is skipped for the rest of the run
+MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-3.5-flash-lite",
+]
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 SYSTEM = (
@@ -60,7 +69,9 @@ def load_key() -> str | None:
 
 
 class Planner:
-    def __init__(self, log_path: str, models=MODELS):
+    def __init__(self, log_path: str, models=MODELS, system: str = SYSTEM):
+        self.system = system
+        self.exhausted: set[str] = set()
         self.key = load_key()
         self.models = list(models)
         self.log_path = Path(log_path)
@@ -71,16 +82,23 @@ class Planner:
         with self.log_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
 
-    def _call(self, prompt: str, kind: str) -> dict:
+    def _call(self, prompt: str, kind: str, images=None, system: str | None = None) -> dict:
+        """images: [(label, jpeg bytes)] sent inline after the prompt (logged as sizes only)"""
         if not self.key:
             raise RuntimeError("GEMINI_API_KEY not set (env or ~/.config/picky/secrets.env)")
+        parts = [{"text": prompt}]
+        for label, data in images or []:
+            b64 = base64.b64encode(data).decode()
+            parts += [{"text": label}, {"inline_data": {"mime_type": "image/jpeg", "data": b64}}]
         body = {
-            "systemInstruction": {"parts": [{"text": SYSTEM}]},
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "systemInstruction": {"parts": [{"text": system or self.system}]},
+            "contents": [{"role": "user", "parts": parts}],
             "generationConfig": {"temperature": 0.3, "responseMimeType": "application/json"},
         }
         last = None
         for model in self.models:
+            if model in self.exhausted:
+                continue
             for attempt in range(2):
                 t0 = time.time()
                 req = urllib.request.Request(
@@ -95,13 +113,21 @@ class Planner:
                     out = json.loads(text[text.find("{") : text.rfind("}") + 1])
                     self.model_used = model
                     self._log({"t": time.time(), "kind": kind, "model": model, "latency_s": round(time.time() - t0, 2),
-                               "prompt": prompt, "response": out})  # fmt: skip
+                               "prompt": prompt, "images": [[lb, len(dt)] for lb, dt in images or []],
+                               "response": out})  # fmt: skip
                     return out
                 except urllib.error.HTTPError as e:
-                    last = f"{model}: HTTP {e.code}"
+                    try:
+                        detail = json.loads(e.read()).get("error", {}).get("message", "")[:240]
+                    except Exception:  # noqa: BLE001
+                        detail = ""
+                    last = f"{model}: HTTP {e.code} {detail}".replace(self.key, "<key>")
                     self._log({"t": time.time(), "kind": kind, "model": model, "error": last})
                     if e.code in (404, 400):
                         break  # model not available -> next model
+                    if e.code == 429:  # quota exhausted: skip this model for the rest of the run
+                        self.exhausted.add(model)
+                        break
                     time.sleep(3 * (attempt + 1))
                 except Exception as e:  # noqa: BLE001  (timeouts, malformed JSON)
                     last = f"{model}: {type(e).__name__}: {e}"
@@ -127,3 +153,13 @@ class Planner:
             + json.dumps({"summary": "...", "robots": [SCHEMA_HINT["robots"][0]]})
         )  # fmt: skip
         return self._call(prompt, "replan")
+
+    def name_products(self, images: list) -> dict:
+        """images: [(item id, jpeg bytes)] close-ups from the sim -> {item id: short generic product name}"""
+        prompt = (
+            "Each image below is a close-up of one product on a supermarket shelf (a 3-D model in a simulator), "
+            "labelled with its item id. Name each product the way a shopper would, in 2-4 words, generic (no brand "
+            "names), first letter capitalised, e.g. 'Orange soda bottle', 'Hand cream tube', 'Dish soap'. The "
+            "product of interest is the one in the centre of the image. Return JSON only: {\"<item id>\": \"<name>\"}."
+        )
+        return self._call(prompt, "name_products", images=images, system="You label supermarket products from photos.")

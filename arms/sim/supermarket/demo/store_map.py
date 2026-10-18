@@ -111,32 +111,44 @@ def _box(bbc, prim):
     return np.array(r.GetMin()), np.array(r.GetMax())
 
 
+def scene_boxes(stage):
+    """(products [(path, name, lo, hi)], fixtures [(path, kind, lo, hi)], building (lo, hi) | None) from the stage:
+    world-aligned boxes only, so a map can also be rebuilt offline from a JSON dump of this."""
+    bbc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    prods = []
+    for ent in product_entities(stage):
+        b = _box(bbc, ent)
+        if b is not None:
+            prods.append((str(ent.GetPath()), ent.GetParent().GetName(), b[0], b[1]))
+    fixtures = []
+    building = None
+    for prim in Usd.PrimRange(stage.GetPrimAtPath("/World/background")):
+        n = prim.GetName()
+        if n == "background" and building is None and prim.GetParent().GetName() == "background":
+            building = _box(bbc, prim)
+            continue
+        if any(k in n for k in FIXTURE_KEYS):
+            parent_fix = any(any(k in a.GetName() for k in FIXTURE_KEYS) for a in _ancestors(prim))
+            if parent_fix:
+                continue
+            b = _box(bbc, prim)
+            if b is not None and b[0][2] < 0.2:
+                fixtures.append((str(prim.GetPath()), next(k for k in FIXTURE_KEYS if k in n), b[0], b[1]))
+    return prods, fixtures, building
+
+
 class StoreMap:
-    def __init__(self, stage, res: float = 0.05, inflate: float = ROBOT_RADIUS, extra_fixtures=()):
-        bbc = UsdGeom.BBoxCache(Usd.TimeCode.Default(), [UsdGeom.Tokens.default_, UsdGeom.Tokens.render])
+    def __init__(self, stage, res: float = 0.05, inflate: float = ROBOT_RADIUS, extra_fixtures=(), boxes=None):
+        """boxes: scene_boxes() output (stage may then be None, e.g. offline from a JSON dump)"""
         self.res, self.inflate = res, inflate
-        self.products: list[Product] = []
-        for ent in product_entities(stage):
-            b = _box(bbc, ent)
-            if b is None:
-                continue
-            name = ent.GetParent().GetName()
-            self.products.append(Product(str(ent.GetPath()), name, category(name), sku(name), b[0], b[1]))
-        self.fixtures: list[Fixture] = []
-        building = None
-        for prim in Usd.PrimRange(stage.GetPrimAtPath("/World/background")):
-            n = prim.GetName()
-            if n == "background" and building is None and prim.GetParent().GetName() == "background":
-                building = _box(bbc, prim)
-                continue
-            if any(k in n for k in FIXTURE_KEYS):
-                parent_fix = any(any(k in a.GetName() for k in FIXTURE_KEYS) for a in _ancestors(prim))
-                if parent_fix:
-                    continue
-                b = _box(bbc, prim)
-                if b is not None and b[0][2] < 0.2:
-                    kind = next(k for k in FIXTURE_KEYS if k in n)
-                    self.fixtures.append(Fixture(str(prim.GetPath()), b[0], b[1], kind))
+        prods, fixtures, building = scene_boxes(stage) if boxes is None else boxes
+        self.products: list[Product] = [
+            Product(path, name, category(name), sku(name), np.array(lo, float), np.array(hi, float))
+            for path, name, lo, hi in prods
+        ]
+        self.fixtures: list[Fixture] = [
+            Fixture(path, np.array(lo, float), np.array(hi, float), kind) for path, kind, lo, hi in fixtures
+        ]
         for path, lo, hi, kind in extra_fixtures:
             self.fixtures.append(Fixture(path, np.array(lo, float), np.array(hi, float), kind))
         # floor-stacked goods (pallets of water etc.) block the floor too
@@ -149,6 +161,7 @@ class StoreMap:
             lo = np.min([f.lo for f in self.fixtures], axis=0) - 1.5
             hi = np.max([f.hi for f in self.fixtures], axis=0) + 1.5
             building = (lo, hi)
+        building = (np.array(building[0], float), np.array(building[1], float))
         self.lo = building[0][:2] + 0.25  # keep off the walls
         self.hi = building[1][:2] - 0.25
         self._assign()
@@ -400,8 +413,9 @@ class StoreMap:
         return True
 
     # --- picking geometry ---------------------------------------------------------------------------------------
-    def approach(self, p: Product, side: str | None = None, reach: float | None = None):
-        """Base pose (x, y, yaw) that faces the product's fixture from `side` with the arm lined up on it."""
+    def approach(self, p: Product, side: str | None = None, reach: float | None = None, arm_y: float = ARM_Y):
+        """Base pose (x, y, yaw) that faces the product's fixture from `side` with the arm lined up on it
+        (tool point at base-frame (reach, arm_y))."""
         side = side or p.side
         f = self.fixtures[p.fixture]
         nx, ny = SIDES[side]
@@ -410,8 +424,8 @@ class StoreMap:
         reach = FRONT_CLEAR + depth if reach is None else reach
         yaw = math.atan2(-ny, -nx)  # face into the fixture
         cy, sy = math.cos(yaw), math.sin(yaw)
-        bx = c[0] - (cy * reach - sy * ARM_Y)
-        by = c[1] - (sy * reach + cy * ARM_Y)
+        bx = c[0] - (cy * reach - sy * arm_y)
+        by = c[1] - (sy * reach + cy * arm_y)
         return np.array([bx, by]), yaw, reach
 
     def ascii(self, cell: float = 0.25) -> str:

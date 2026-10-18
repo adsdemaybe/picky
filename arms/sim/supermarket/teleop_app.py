@@ -6,6 +6,10 @@ Targets Isaac Sim 6.x (pip `isaacsim`, `isaacsim.core.experimental` API).
     bash arms/sim/supermarket/run_sim.sh --smoke         # headless self-test with screenshots
     bash arms/sim/supermarket/run_sim.sh --demo --record # Gemini-planned shopping run, recorded (see demo/)
 
+--demo runs Picky's SO-101 rover v3 (demo/so101_demo.py; --robot = picky_so101_rover.usd from
+robot/build_so101_rover.py). `--demo --demo-robot rm2` keeps the earlier rm2_car/AIRBOT autopilot (demo/autopilot.py);
+teleop, --smoke and --livestream drive the rm2_car/AIRBOT robot (--robot = rm2_basket.usd) as before.
+
 Controls (focus the viewport):
   Fly the camera      hold right mouse + W/A/S/D/Q/E (built-in viewport navigation)
   Drive robot         I/K forward/back · J/L turn · U/O strafe · SPACE stop
@@ -48,6 +52,10 @@ ap.add_argument("--out", default="/tmp/picky_smoke", help="screenshot dir for --
 ap.add_argument("--livestream", action="store_true", help="enable WebRTC livestream (view from a browser/client)")
 # --demo: autopilot shopping run (demo/autopilot.py): Gemini plans the route, the rovers drive + pick + check out
 ap.add_argument("--demo", action="store_true", help="LLM-planned autopilot shopping run (headless unless --livestream)")
+ap.add_argument("--demo-robot", choices=["so101", "rm2"], default="so101",
+                help="--demo robot: so101 = Picky SO-101 rover v3 (demo/so101_demo.py), rm2 = rm2_car/AIRBOT")  # fmt: skip
+ap.add_argument("--so101-config", default=str(Path(__file__).parent / "demo" / "so101_config.json"))
+ap.add_argument("--light-scale", type=float, default=0.8, help="--demo so101: scale every scene light (exposure)")
 ap.add_argument("--demo-config", default=str(Path(__file__).parent / "demo" / "demo_config.json"))
 ap.add_argument(
     "--ik", default=str(Path(__file__).parent / "demo" / "arm_ik.json"), help="robot/solve_arm_ik.py output"
@@ -505,6 +513,17 @@ def run_smoke(picky: Picky, viewport, step):
 
 
 def main():
+    if args.demo and args.demo_robot == "so101":
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).parent))
+        from demo import so101_demo  # noqa: PLC0415
+
+        try:
+            so101_demo.run(simulation_app, args, sys.modules[__name__])
+        finally:
+            simulation_app.close()
+        return
     stage = open_scene(args.scene)
     if stage is None:
         raise SystemExit(f"could not open {args.scene}")
