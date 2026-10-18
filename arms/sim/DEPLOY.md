@@ -124,11 +124,15 @@ store store_ave: 1218 units on per-item models, 10 shelf tags     # SimLog: "117
 rover USD ...: SO-101 puppet ready in 6.1s (reach table max error ... mm; z_ref 0.319 m)
 ```
 
-These were measured on vhagar on 2026-10-17 (RTX 5090, standalone render check of store_ave):
+Measured on vhagar on 2026-10-17 with the live worker (RTX 5090, both stores, 3 rovers, models + rover USD on;
+taco request + staff shelf scan through the gateway on :8100):
 
-- The store build takes ~16 s, against ~10 s with primitives.
-- The rover reach table is computed once per USD in ~6 s, and every rover shares it.
-- A new render product is ready in 0.3-0.6 s, and each frame of a changed scene takes ~0.3-0.7 s at 1024x768.
+- Launch to `sim link up`: ~46 s warm (store_ave ~20 s, the reach table 5.3 s once for all rovers, store_hill ~8 s).
+  The first launch after a deploy took ~99 s: its first frames load every model texture (~56 s for store_ave).
+- A new render product is ready in 0.55-0.7 s. The worker's `isaac render` average is ~80 ms per frame (12 render
+  products, 4-6 active), and gateway snapshots took a median of 0.24 s (p90 0.65 s) while ~4 cameras were polled.
+- GPU memory: ~3.8 GB after the build, ~5.9 GB with all 12 cameras used.
+- `PICKY_SIM_AMBIENT` (default 0.1) sets the RTX ambient fill for the shelf interiors; 0.6 already washes the store out.
 - A unit, SKU or rover whose files are missing falls back to the primitive with a warning; nothing else changes.
 - Rollback: `PICKY_SIM_ASSETS=off` and / or `unset PICKY_ROVER_USD`, then restart the worker.
 
