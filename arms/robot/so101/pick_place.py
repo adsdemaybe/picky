@@ -52,11 +52,6 @@ def connect_robot(cfg: RigConfig):
     present = bus.sync_read("Present_Position", normalize=False, num_retry=3)
     bus.sync_write("Goal_Position", present, normalize=False)
     robot.configure()  # writes PID/limits with torque off, then enables torque: holds the current pose
-    # LeRobot limits the gripper to 50% torque and drops it to 25% once it stalls on an object, which let a held
-    # gum pack slip out mid-carry. Holds here last seconds, so allow 65% / 45%.
-    with bus.torque_disabled("gripper"):
-        bus.write("Max_Torque_Limit", "gripper", 650)
-        bus.write("Overload_Torque", "gripper", 45)
     return robot
 
 

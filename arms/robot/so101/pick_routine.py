@@ -30,23 +30,30 @@ from .scene import CameraModel, best_roll, box_long_axis_yaw
 
 GRIP_CLOSED = 5.0  # stalls on the object; LeRobot drops the gripper to reduced torque when it does
 GRIP_OPEN = 98.0
-HOLDING_MIN = 8.0  # gripper reading when closed on the gum pack ~12-13; on nothing ~1-5
-CARRY_STEPS = ("lift straight up", "lift high", "transit", "over destination", "lower")
-
-
-MAX_ATTEMPTS = 3  # grasp retries when the gripper comes up empty
-
-
-class GripLost(RuntimeError):
-    """The object is not (or no longer) in the gripper."""
-
-
 MAX_REACH = 0.36  # m, horizontal; nothing beyond this solves at grasp/carry heights
 
 
+# What the objects on this table look like: a bare "gum" has been matched to the Oreo bag, so ask for these first.
+APPEARANCE = {
+    "gum": "green Extra chewing gum pack",
+    "oreo": "blue Oreo cookie bag",
+    "oreos": "blue Oreo cookie bag",
+    "plate": "round paper plate",
+}
+
+
 def detect_named(frame: np.ndarray, name: str, model: str):
-    """Perceptron box for `name`; short names ("gum") often return nothing, so retry with fuller phrasings."""
-    for query in (name, f"{name} packet", f"{name} package", f"pack of {name}", f"box of {name}", f"{name} container"):
+    """Perceptron box for `name`: its known appearance first, then fuller phrasings (short names often miss)."""
+    described = [APPEARANCE[name.lower()]] if name.lower() in APPEARANCE else []
+    for query in (
+        *described,
+        name,
+        f"{name} packet",
+        f"{name} package",
+        f"pack of {name}",
+        f"box of {name}",
+        f"{name} container",
+    ):
         d = detect(frame, [query], model).get(query)
         if d:
             d.label = name
@@ -106,7 +113,6 @@ class ScenePlan:
     waypoints: list[Waypoint] = field(default_factory=list)
     frame_path: str = "last_scene.jpg"
     error: str | None = None
-    target_box_center: tuple[float, float] | None = None
 
 
 def plan(
@@ -143,7 +149,6 @@ def plan(
         return p
 
     h = object_height
-    p.target_box_center = dets[target].center_px
     t = cam.pixel_to_world(*dets[target].center_px, h / 2, size)
     t = t + np.array([st["grasp_dx"], st["grasp_dy"], 0.0])
     jaw = box_long_axis_yaw(cam, dets[target].box_px, h / 2, size) + math.pi / 2  # close across the thin side
@@ -156,7 +161,7 @@ def plan(
         p.error = f"{target} at ({t[0]:.2f}, {t[1]:.2f}) is out of reach: {e}"
         return p
     p.roll = max(-175.0, min(175.0, best_roll(kin, q_hover, jaw) + st["roll"]))
-    hang = h - 0.03  # the object hangs this far below the fingertip (gripped 3 cm below its top)
+    hang = h - 0.02  # the object hangs this far below the fingertip (gripped 2 cm below its top)
     lower_z = 0.01 + hang + 0.01  # object bottom ~1 cm above the plate when released
     # Transit must clear a plate/bowl rim with margin for arm error and the object slipping in the jaws:
     # object bottom >= ~6 cm above the table -> fingertip >= hang + 0.06.
@@ -186,7 +191,7 @@ def plan(
         return p
     p.waypoints = [
         Waypoint("hover over target", hover, GRIP_OPEN),
-        Waypoint("straddle", (t[0], t[1], h - 0.03 + st["grasp_dz"]), GRIP_OPEN),
+        Waypoint("straddle", (t[0], t[1], h - 0.02 + st["grasp_dz"]), GRIP_OPEN),
         Waypoint("close", None, GRIP_CLOSED),
         Waypoint("lift straight up", (t[0], t[1], h + 0.03), GRIP_CLOSED),
         Waypoint("lift high", (t[0], t[1], lift_z), GRIP_CLOSED),
@@ -226,28 +231,16 @@ def execute(
         pose, grip = read_pose(robot)
         if w.xyz is None:
             move(robot, pose, w.gripper, seconds=1.5)
-            g = read_pose(robot)[1]
-            log(f"  {w.name}: gripper -> {g:.0f}")
-            if w.name == "close" and g < HOLDING_MIN:
-                raise GripLost(f"gripper closed to {g:.0f}: nothing between the jaws")
+            log(f"  {w.name}: gripper -> {read_pose(robot)[1]:.0f}")
             traj.append({"name": w.name, "joints": None, "gripper": w.gripper})
             _snap(cfg, w.name, snap_after, log)
             continue
         q = kin.ik(w.xyz, pose)
         q["wrist_roll"] = p.roll
         jump = max(abs(q[j] - pose[j]) for j in ARM_JOINTS)
-        carrying = w.name in CARRY_STEPS
-        secs = max(2.5, jump / 10.0) if carrying else max(1.5, jump / 15.0)  # gentle while holding the object
-        move(robot, q, w.gripper, seconds=secs, steps=80)
+        move(robot, q, w.gripper, seconds=max(1.5, jump / 15.0), steps=60)
         err = settle(robot, q, w.gripper)
         log(f"  {w.name}: settled to {err:.1f} deg")
-        if carrying:
-            g = read_pose(robot)[1]
-            if g < HOLDING_MIN:
-                raise GripLost(f"lost the object during '{w.name}' (gripper closed to {g:.0f})")
-            if w.name == "lift high" and cfg is not None and p.target_box_center is not None:
-                if _target_still_on_table(cfg, p):
-                    raise GripLost(f"camera still sees the {p.target} where it was - it was not lifted")
         traj.append({"name": w.name, "joints": {j: round(float(q[j]), 2) for j in ARM_JOINTS}, "gripper": w.gripper})
         _snap(cfg, w.name, snap_after, log)
     return traj
@@ -286,18 +279,6 @@ def replay(robot, name: str, log=print) -> None:
         move(robot, q, step["gripper"], seconds=1.5 if step["joints"] is None else max(1.5, jump / 15.0), steps=60)
         err = settle(robot, q, step["gripper"]) if step["joints"] else 0.0
         log(f"  {step['name']}: settled to {err:.1f} deg, gripper {read_pose(robot)[1]:.0f}")
-
-
-def _target_still_on_table(cfg: RigConfig, p: ScenePlan, tol_px: float = 18.0) -> bool:
-    """After lifting: is the target still detected at its original image position (i.e. not in the gripper)?"""
-    try:
-        d = detect_named(grab_frame(cfg), p.target, cfg.perceptron_model)
-    except RuntimeError:
-        return False
-    if d is None:
-        return False
-    (u, v), (u0, v0) = d.center_px, p.target_box_center
-    return math.hypot(u - u0, v - v0) < tol_px
 
 
 def _snap(cfg: RigConfig | None, name: str, which: tuple[str, ...], log) -> None:
@@ -391,40 +372,27 @@ def main() -> None:
             replay(robot, args.replay)
             print("done")
             return
-        from .train_loop import DATA_DIR, SteeringPolicy  # late import: train_loop imports this module
+        from .train_loop import DATA_DIR, QPolicy  # late import: train_loop imports this module
 
-        policy = SteeringPolicy.load()
-        steer = dict(policy.mean)  # run what has been learned from successes so far (no exploration here)
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            scene = grab_frame(cfg)
-            p = plan(cfg, kin, cam, args.command, rest, args.height, frame=scene.copy(), steer=steer)
-            print(describe(p))
-            print(f"annotated camera frame: {p.frame_path}")
-            if p.error or args.dry:
-                return
-            if rec:
-                rec.caption = f"found {p.target} and {p.dest} - planning done" + (
-                    f" (attempt {attempt})" if attempt > 1 else ""
-                )
-            try:
-                traj = execute(
-                    robot,
-                    kin,
-                    p,
-                    step=args.step,
-                    cfg=cfg,
-                    on_step=(lambda name: setattr(rec, "caption", name)) if rec else None,
-                )
-                break
-            except GripLost as e:
-                print(f"attempt {attempt}: {e}")
-                if attempt == MAX_ATTEMPTS:
-                    raise
-                print("not holding it - opening the gripper, going home and looking for it again")
-                if rec:
-                    rec.caption = f"missed the {p.target} - looking again"
-                go_home(robot, rest, GRIP_OPEN)
-                time.sleep(1.0)  # let the object settle before the next camera frame
+        policy = QPolicy.load()
+        actions = policy.greedy()  # best-known tweaks (both "base" = the routine that succeeded); no exploration
+        steer = policy.steer(actions)
+        scene = grab_frame(cfg)
+        p = plan(cfg, kin, cam, args.command, rest, args.height, frame=scene.copy(), steer=steer)
+        print(describe(p))
+        print(f"annotated camera frame: {p.frame_path}")
+        if p.error or args.dry:
+            return
+        if rec:
+            rec.caption = f"found {p.target} and {p.dest} - planning done"
+        traj = execute(
+            robot,
+            kin,
+            p,
+            step=args.step,
+            cfg=cfg,
+            on_step=(lambda name: setattr(rec, "caption", name)) if rec else None,
+        )
         if rec:
             rec.caption = "returning home"
         go_home(robot, rest, GRIP_OPEN)
@@ -444,7 +412,7 @@ def main() -> None:
             ans = input(f"{hint} - Enter to accept, or type s / f: ").strip().lower()
             label = ans or default
         success = label == "s"
-        policy.update(steer, success)  # learns from successes only
+        policy.update(actions, success)  # TD update of both decisions' Q-values
         policy.save()
         ep = DATA_DIR / time.strftime("%Y%m%d-%H%M%S")
         ep.mkdir(parents=True, exist_ok=True)
@@ -455,6 +423,7 @@ def main() -> None:
             "command": args.command,
             "success": success,
             "auto_guess": guess,
+            "actions": actions,
             "steer": steer,
             "target_xy": p.target_xy,
             "dest_xy": p.dest_xy,
@@ -467,7 +436,7 @@ def main() -> None:
             save_recipe(f"success_{ep.name}", p, traj, rest)
         print(
             f"{'SUCCESS' if success else 'failure'} saved to {ep} | policy {policy.successes} successes / "
-            f"{policy.episodes} runs (learns from successes only)"
+            f"{policy.episodes} runs | {policy.summary()}"
         )
     finally:
         go_home(robot, dict(cfg.home_deg), GRIP_OPEN)

@@ -1,10 +1,14 @@
 """Human-in-the-loop RL for the SO-101 pick & place: press Enter to run, type s / f to label, it learns.
 
-Policy-steering in the spirit of DSRL: the camera-guided pick routine is a frozen base policy, and a small Gaussian
-"steering" policy learns offsets to its key decisions (grasp x/y/depth, wrist roll, drop x/y) from successful runs
-only: each success pulls the steering toward what worked and narrows the search; failures are logged, never learned
-from. Every episode is saved (frames, plan, offsets, joint trajectory, label) as a dataset for later BC / DSRL on a
-learned policy, and every success also becomes a replayable recipe.
+Q-learning over the camera-guided pick routine. Each episode makes two decisions, each a small tweak to the base
+routine (the version that succeeded): a grasp tweak (shift / depth / wrist roll), then a drop tweak (shift over the
+plate). The only reward is your label at the end (s = 1, f = 0). TD updates:
+
+    Q_drop[a_drop]   += alpha * (r - Q_drop[a_drop])                          (terminal)
+    Q_grasp[a_grasp] += alpha * (gamma * Q_drop[a_drop] - Q_grasp[a_grasp])   (bootstraps from the next decision)
+
+Actions are chosen epsilon-greedily, so it mostly runs the best-known routine and sometimes tries a tweak. Every
+episode is saved (frames, plan, actions, joint trajectory, label) and every success becomes a replayable recipe.
 
     python -m arms.robot.so101.train_loop "pick up the gum and put it on the plate"
 
@@ -31,60 +35,90 @@ from .camera import grab_frame
 from .config import RigConfig
 from .kinematics import SO101Kinematics
 from .pick_place import connect_robot, read_pose
-from .pick_routine import GRIP_OPEN, GripLost, describe, execute, go_home, plan, save_recipe
+from .pick_routine import GRIP_OPEN, describe, execute, go_home, plan, save_recipe
 from .scene import CameraModel
 
 DATA_DIR = Path.home() / "picky_runs"
-POLICY_FILE = DATA_DIR / "steer_policy.json"
+POLICY_FILE = DATA_DIR / "q_policy.json"
 
-# name: (initial std, bound) - metres, except roll in degrees
-DIMS = {
-    "grasp_dx": (0.010, 0.04),
-    "grasp_dy": (0.010, 0.04),
-    "grasp_dz": (0.006, 0.02),
-    "roll": (8.0, 35.0),
-    "drop_dx": (0.015, 0.06),
-    "drop_dy": (0.015, 0.06),
+STEER_KEYS = ("grasp_dx", "grasp_dy", "grasp_dz", "roll", "drop_dx", "drop_dy")  # metres, roll in degrees
+GRASP_ACTIONS: dict[str, dict[str, float]] = {
+    "base": {},
+    "x+1cm": {"grasp_dx": 0.01},
+    "x-1cm": {"grasp_dx": -0.01},
+    "y+1cm": {"grasp_dy": 0.01},
+    "y-1cm": {"grasp_dy": -0.01},
+    "deeper": {"grasp_dz": -0.008},
+    "higher": {"grasp_dz": 0.008},
+    "roll+15": {"roll": 15.0},
+    "roll-15": {"roll": -15.0},
 }
+DROP_ACTIONS: dict[str, dict[str, float]] = {
+    "base": {},
+    "x+2cm": {"drop_dx": 0.02},
+    "x-2cm": {"drop_dx": -0.02},
+    "y+2cm": {"drop_dy": 0.02},
+    "y-2cm": {"drop_dy": -0.02},
+}
+BASE_Q, TWEAK_Q = 0.6, 0.4  # the base routine has succeeded before; tweaks start a bit lower
+
+
+def _init_q(actions: dict) -> dict[str, float]:
+    return {k: BASE_Q if k == "base" else TWEAK_Q for k in actions}
 
 
 @dataclass
-class SteeringPolicy:
-    mean: dict[str, float] = field(default_factory=lambda: {k: 0.0 for k in DIMS})
-    std: dict[str, float] = field(default_factory=lambda: {k: s for k, (s, _) in DIMS.items()})
+class QPolicy:
+    q_grasp: dict[str, float] = field(default_factory=lambda: _init_q(GRASP_ACTIONS))
+    q_drop: dict[str, float] = field(default_factory=lambda: _init_q(DROP_ACTIONS))
+    alpha: float = 0.3
+    gamma: float = 0.95
+    epsilon: float = 0.2
     episodes: int = 0
     successes: int = 0
 
     @classmethod
-    def load(cls, path: Path = POLICY_FILE) -> SteeringPolicy:
+    def load(cls, path: Path = POLICY_FILE) -> QPolicy:
         return cls(**json.loads(path.read_text())) if path.exists() else cls()
 
     def save(self, path: Path = POLICY_FILE) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(self.__dict__, indent=1))
 
-    def sample(self, rng: np.random.Generator) -> dict[str, float]:
-        return {
-            k: float(np.clip(self.mean[k] + self.std[k] * rng.standard_normal(), -b, b)) for k, (_, b) in DIMS.items()
-        }
+    def greedy(self) -> dict[str, str]:
+        return {"grasp": max(self.q_grasp, key=self.q_grasp.get), "drop": max(self.q_drop, key=self.q_drop.get)}
 
-    def update(self, theta: dict[str, float], success: bool) -> None:
-        """Learns from successes only: a success pulls the mean toward what worked and narrows the search around it.
-        Failures are counted (and kept in the episode log) but never move the policy."""
+    def act(self, rng: np.random.Generator) -> dict[str, str]:
+        """Epsilon-greedy per decision."""
+        a = self.greedy()
+        for k, table in (("grasp", self.q_grasp), ("drop", self.q_drop)):
+            if rng.random() < self.epsilon:
+                a[k] = str(rng.choice(list(table)))
+        return a
+
+    @staticmethod
+    def steer(actions: dict[str, str]) -> dict[str, float]:
+        s = dict.fromkeys(STEER_KEYS, 0.0)
+        s.update(GRASP_ACTIONS[actions["grasp"]])
+        s.update(DROP_ACTIONS[actions["drop"]])
+        return s
+
+    def update(self, actions: dict[str, str], success: bool) -> None:
+        """One TD(0) backup per decision, last decision first so the grasp bootstraps from the updated drop value."""
+        r = 1.0 if success else 0.0
         self.episodes += 1
-        if not success:
-            return
-        self.successes += 1
-        for k, (s0, b) in DIMS.items():
-            d = theta[k] - self.mean[k]
-            self.mean[k] = float(np.clip(self.mean[k] + 0.6 * d, -b, b))
-            self.std[k] = max(0.25 * s0, self.std[k] * 0.8)
+        self.successes += int(success)
+        d, g = actions["drop"], actions["grasp"]
+        self.q_drop[d] += self.alpha * (r - self.q_drop[d])
+        self.q_grasp[g] += self.alpha * (self.gamma * self.q_drop[d] - self.q_grasp[g])
+        self.epsilon = max(0.05, self.epsilon * 0.95)  # explore less as it learns
 
     def summary(self) -> str:
-        def fmt(k: str, v: float) -> str:
-            return f"{k}={v:+.0f}deg" if k == "roll" else f"{k}={v * 100:+.1f}cm"
-
-        return "  ".join(fmt(k, self.mean[k]) for k in DIMS)
+        a = self.greedy()
+        return (
+            f"best grasp={a['grasp']} (Q {self.q_grasp[a['grasp']]:.2f}), "
+            f"best drop={a['drop']} (Q {self.q_drop[a['drop']]:.2f}), epsilon {self.epsilon:.2f}"
+        )
 
 
 def main() -> None:
@@ -97,7 +131,7 @@ def main() -> None:
     cfg = RigConfig()
     kin = SO101Kinematics(cfg)
     cam = CameraModel.load()
-    policy = SteeringPolicy.load()
+    policy = QPolicy.load()
     rng = np.random.default_rng(args.seed)
     keys: queue.Queue[str] = queue.Queue()
 
@@ -112,7 +146,7 @@ def main() -> None:
     _, rest_grip = read_pose(robot)
     rest = dict(cfg.home_deg)  # raised pose: the wrist camera sees the whole workspace
     go_home(robot, rest, rest_grip)
-    print(f"steering policy: {policy.episodes} episodes, {policy.successes} successes | {policy.summary()}")
+    print(f"Q policy: {policy.episodes} episodes, {policy.successes} successes | {policy.summary()}")
     try:
         while True:
             print("\nReset the scene, then press Enter to run (q to quit).", flush=True)
@@ -122,7 +156,9 @@ def main() -> None:
             if k in ("s", "f"):
                 print("(no run in progress - press Enter to start one)")
                 continue
-            theta = policy.sample(rng)
+            actions = policy.act(rng)
+            theta = policy.steer(actions)
+            print(f"actions: grasp={actions['grasp']}  drop={actions['drop']}", flush=True)
             frame = grab_frame(cfg)
             p = plan(cfg, kin, cam, args.command, rest, args.height, frame=frame.copy(), steer=theta)
             print(describe(p), flush=True)
@@ -150,9 +186,6 @@ def main() -> None:
                             label = kk
                         elif kk == "q":
                             raise KeyboardInterrupt
-            except GripLost as e:  # empty gripper: an automatic failure, no need to ask
-                print(f"{e} - counting this run as a failure", flush=True)
-                label = "f"
             finally:
                 go_home(robot, rest, GRIP_OPEN)  # reset pose
             try:
@@ -167,14 +200,15 @@ def main() -> None:
                 elif kk == "q":
                     label = "f"
             success = label == "s"
-            policy.update(theta, success)
+            policy.update(actions, success)
             policy.save()
             record = {
                 "command": args.command,
                 "success": success,
+                "actions": actions,
                 "steer": theta,
-                "policy_mean_after": policy.mean,
-                "policy_std_after": policy.std,
+                "q_grasp_after": policy.q_grasp,
+                "q_drop_after": policy.q_drop,
                 "target_xy": p.target_xy,
                 "dest_xy": p.dest_xy,
                 "roll": p.roll,
@@ -190,7 +224,7 @@ def main() -> None:
             rate = policy.successes / max(1, policy.episodes)
             print(
                 f"saved {ep.name}: {'SUCCESS' if success else 'failure'} | {policy.successes}/{policy.episodes} "
-                f"({rate:.0%}) | steering now {policy.summary()}",
+                f"({rate:.0%}) | {policy.summary()}",
                 flush=True,
             )
     except KeyboardInterrupt:

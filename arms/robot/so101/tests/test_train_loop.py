@@ -1,30 +1,42 @@
 import numpy as np
+import pytest
 
-from arms.robot.so101.train_loop import DIMS, SteeringPolicy
+from arms.robot.so101.train_loop import DROP_ACTIONS, GRASP_ACTIONS, QPolicy
 
 
-def test_success_pulls_mean_and_narrows():
-    p = SteeringPolicy()
-    theta = {k: 0.5 * b for k, (_, b) in DIMS.items()}
-    p.update(theta, success=True)
-    assert all(np.isclose(p.mean[k], 0.6 * theta[k]) for k in DIMS)
-    assert all(p.std[k] < s0 for k, (s0, _) in DIMS.items())
+def test_starts_greedy_on_the_base_routine():
+    p = QPolicy()
+    assert p.greedy() == {"grasp": "base", "drop": "base"}
+    assert all(v == 0.0 for v in p.steer(p.greedy()).values())
+
+
+def test_td_updates():
+    p = QPolicy()
+    qd, qg = p.q_drop["x+2cm"], p.q_grasp["deeper"]
+    p.update({"grasp": "deeper", "drop": "x+2cm"}, success=True)
+    new_qd = qd + p.alpha * (1.0 - qd)
+    assert p.q_drop["x+2cm"] == pytest.approx(new_qd)
+    assert p.q_grasp["deeper"] == pytest.approx(qg + p.alpha * (p.gamma * new_qd - qg))
     assert (p.episodes, p.successes) == (1, 1)
 
 
-def test_failures_do_not_move_the_policy():
-    p = SteeringPolicy()
-    before = (dict(p.mean), dict(p.std))
-    for _ in range(5):
-        p.update({k: 0.9 * b for k, (_, b) in DIMS.items()}, success=False)
-    assert (p.mean, p.std) == before
-    assert (p.episodes, p.successes) == (5, 0)
+def test_repeated_failures_switch_away_from_base():
+    p = QPolicy()
+    for _ in range(4):
+        p.update({"grasp": "base", "drop": "base"}, success=False)
+    assert p.greedy()["grasp"] != "base" and p.greedy()["drop"] != "base"
 
 
-def test_samples_stay_in_bounds():
-    p = SteeringPolicy()
-    p.std = {k: 10 * b for k, (_, b) in DIMS.items()}
-    rng = np.random.default_rng(0)
-    for _ in range(50):
-        s = p.sample(rng)
-        assert all(abs(s[k]) <= b for k, (_, b) in DIMS.items())
+def test_successes_make_a_tweak_the_greedy_choice():
+    p = QPolicy()
+    for _ in range(3):
+        p.update({"grasp": "roll+15", "drop": "base"}, success=True)
+    assert p.greedy() == {"grasp": "roll+15", "drop": "base"}
+    assert p.steer(p.greedy())["roll"] == 15.0
+
+
+def test_act_only_returns_known_actions():
+    p, rng = QPolicy(epsilon=1.0), np.random.default_rng(0)
+    for _ in range(30):
+        a = p.act(rng)
+        assert a["grasp"] in GRASP_ACTIONS and a["drop"] in DROP_ACTIONS
