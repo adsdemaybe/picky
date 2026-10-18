@@ -136,6 +136,9 @@ class LoopStats:
     failed_verdicts: int = 0
     dropoffs: int = 0
     """Mid-trip basket drop-offs at the checkout (a full basket before a grasp)."""
+    unload: dict[str, dict[str, int]] = field(default_factory=dict)
+    """0.2.4 checkout unload by the arm: plan_id -> {'total', 'verified', 'skipped', 'done'} (checkout.unload)."""
+    unload_lines: list[str] = field(default_factory=list)
     _pending_verdict: dict[tuple[str, str, int], Any] = field(default_factory=dict)
 
     def observe(self, ev: Any) -> None:
@@ -184,6 +187,13 @@ class LoopStats:
                     c.retry_status, c.retry_attempts = str(ev.status), ev.attempts
         elif t == "demo.fault":
             self.firings.append(ev.firing)
+        elif t == "checkout.unload":
+            u = self.unload.setdefault(ev.plan_id, {"total": 0, "verified": 0, "skipped": 0, "done": 0})
+            u["total"] = max(u["total"], ev.total)
+            if ev.status in ("verified", "skipped", "done"):
+                u[ev.status] += 1
+            if ev.status in ("verified", "done", "skipped"):
+                self.unload_lines.append(ev.text)
         elif t == "plan.completed":
             self.completed.append(ev)
 
@@ -395,6 +405,8 @@ def describe_loop(ev: Any) -> str | None:
         c = ev.firing.context
         what = " ".join(x for x in (c.step_kind or "", c.sku or "", f"attempt {c.attempt}") if x)
         return f"INJECTED {ev.firing.effect} ({ev.firing.fault_id}, scenario {ev.scenario or '-'}) on {what}"
+    if t == "checkout.unload":
+        return ev.text if ev.status in ("verified", "skipped", "done") else None
     if t in ("step.started", "target.grounded"):
         return None
     return ""
@@ -758,6 +770,13 @@ def check_loop(res: DemoResult) -> list[str]:
     bad = [f"{e.plan_id} {e.status}: {e.summary}" for e in lp.completed if e.status != "completed"]
     if bad:
         problems.append("plans not completed: " + "; ".join(bad))
+    if get_settings().picky_unload_by_arm:
+        for pid in {e.plan_id for e in lp.completed if e.status == "completed"}:
+            u = lp.unload.get(pid)
+            if u is None or not u["total"]:
+                problems.append(f"{pid}: the arm unloaded nothing at the checkout counter (checkout.unload)")
+            elif u["verified"] + u["skipped"] < u["total"] or not u["done"]:
+                problems.append(f"{pid}: checkout unload incomplete ({u})")
     if len(lp.completed) < len(res.trips1) + len(res.trips2):
         problems.append(f"only {len(lp.completed)} plan.completed for {len(res.trips1) + len(res.trips2)} shop trips")
     if _expects_catch(res.faults):
@@ -855,6 +874,11 @@ def _loop_summary(res: DemoResult, names: dict[str, str]) -> None:
         f"verifier: {lp.verdicts} checks, {lp.failed_verdicts} not passed | basket drop-offs: {lp.dropoffs} | "
         f"faults: {res.faults or 'none'}"
     )
+    for pid, u in lp.unload.items():
+        print(
+            f"checkout unload {pid}: {u['verified']}/{u['total']} units placed on the counter by the arm and verified"
+            + (f", {u['skipped']} left for the handoff" if u["skipped"] else "")
+        )
     fired: dict[tuple[str, str], list[Any]] = {}
     for f in lp.firings:
         fired.setdefault((f.fault_id, f.effect), []).append(f)

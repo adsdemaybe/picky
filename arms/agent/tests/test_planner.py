@@ -112,8 +112,22 @@ def test_scripted_goal_plan_follows_the_route_and_asks_before_the_optional_item(
     plan = run(s.planner.plan(PlanRequest(robot_id=ROBOT, goal=goal)))
     kinds = [st.kind for st in plan.steps]
     assert kinds[0] == "ask_user" and plan.steps[0].item_id == "stop_2"  # ask BEFORE driving for the rec
-    assert [st.item_id for st in plan.steps if isinstance(st, GraspStep)] == ["stop_2", "stop_1", "stop_1"]
-    assert kinds[-3:] == ["verify", "navigate_to", "handoff"] and plan.planner.origin == "scripted"
+    assert [st.item_id for st in plan.steps if isinstance(st, GraspStep) and st.source == "shelf"] == [
+        "stop_2",
+        "stop_1",
+        "stop_1",
+    ]
+    shelf_kinds = [st.kind for st in plan.steps if not (st.group_id or "").startswith("unload:")]
+    assert shelf_kinds[-3:] == ["verify", "navigate_to", "handoff"] and plan.planner.origin == "scripted"
+    # 0.2.4 checkout unload: per unit ground (basket camera) -> grasp(basket) -> place(counter) -> verify
+    unload = [st for st in plan.steps if (st.group_id or "").startswith("unload:")]
+    assert [st.kind for st in unload if st.group_id == "unload:1"] == ["ground_target", "grasp", "place", "verify"]
+    assert len({st.group_id for st in unload}) == 3  # 1 hot salsa + 2 mild salsa
+    grasps = [st for st in unload if isinstance(st, GraspStep)]
+    assert all(g.source == "basket" and g.target.slot_id is None and g.optional for g in grasps)
+    places = [st for st in unload if st.kind == "place"]
+    assert [p.counter.index for p in places] == [0, 1, 2] and all(p.destination == "counter" for p in places)
+    assert plan.steps[-1].kind == "handoff" and plan.steps[-1].title.startswith("Basket empty")
     assert plan.plan_id == "plan-g-1" and all(i.severity != "error" for i in s.planner.validate(plan))
 
 
@@ -171,7 +185,7 @@ def test_messy_llm_draft_still_picks_every_unit_exactly_once() -> None:
     assert out.status == "completed", out.summary
     want = Counter({i.sku: i.qty for i in plan.items if i.status != "online" and i.slot_id})
     assert Counter(sku for _, sku, _ in s.catalog.picks) == want  # no double pick, nothing forgotten
-    assert len([st for st in plan.steps if isinstance(st, GraspStep)]) == sum(want.values())
+    assert len([st for st in plan.steps if isinstance(st, GraspStep) and st.source == "shelf"]) == sum(want.values())
 
 
 @pytest.mark.parametrize(

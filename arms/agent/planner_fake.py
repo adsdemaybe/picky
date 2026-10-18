@@ -33,11 +33,15 @@ from contracts.plan import (
     CLOSED_STEP_STATUSES,
     OPEN_ITEM_STATUSES,
     AlignStep,
+    AllOf,
+    AnyOf,
     AskUserStep,
     DraftStep,
     GraspStep,
+    GripperEmpty,
     GroundTargetStep,
     HandoffStep,
+    ItemOnCounter,
     NavigateToStep,
     PlaceStep,
     PlanDraft,
@@ -46,8 +50,10 @@ from contracts.plan import (
     PlanRequest,
     PlanStatus,
     PlanStep,
+    RobotAt,
     ScanShelfStep,
     StepPlan,
+    TargetGrounded,
     VerifyStep,
     binding_key,
     default_conditions,
@@ -58,7 +64,7 @@ from contracts.plan import (
     plan_errors,
     validate_plan,
 )
-from contracts.planogram import Planogram
+from contracts.planogram import CounterSpot, Planogram, counter_spots
 from contracts.policy import ReplanRequest
 from contracts.tools import parse_brain_tool_input
 
@@ -165,10 +171,19 @@ def interpret_text(text: str) -> tuple[list[tuple[str, int, str | None, str | No
 class ScriptedPlanner:
     """Deterministic PlannerService (scripted draft). Subclass and override ``draft()`` for an LLM planner."""
 
-    def __init__(self, services: Any) -> None:
+    def __init__(self, services: Any, *, unload_by_arm: bool | None = None) -> None:
         self.s = services
         self._plans: dict[str, Planogram] = {}
         self._products: dict[str, Product | None] = {}
+        if unload_by_arm is None:
+            try:
+                from utils.config import get_settings
+
+                unload_by_arm = bool(get_settings().picky_unload_by_arm)
+            except Exception:  # noqa: BLE001 - config errors fall back to the demo default
+                unload_by_arm = True
+        self.unload_by_arm = unload_by_arm
+        """0.2.4: compile the per-unit checkout unload (ground in basket -> grasp -> place on counter -> verify)."""
 
     # ---- lookups (v0.2 CatalogService only) --------------------------------------------------------------------------
     async def _planogram(self, store_id: str) -> Planogram:
@@ -586,24 +601,36 @@ class ScriptedPlanner:
                     )
                 )
                 if d.kind == "checkout":
-                    pre, post = default_conditions("navigate_to", goal_pose=planogram.checkout)
+                    units = await self._unload_units(items)
+                    spots = counter_spots(planogram, len(units)) if self.unload_by_arm and units else []
+                    park = spots[0].approach_pose if spots else planogram.checkout
+                    pre, post = default_conditions("navigate_to", goal_pose=park)
                     steps.append(
                         NavigateToStep(
                             step_id=sid(),
-                            title="Go to checkout",
+                            title="Go to the checkout counter" if spots else "Go to checkout",
                             target="checkout",
-                            goal_pose=planogram.checkout,
+                            goal_pose=park,
                             preconditions=pre,
                             postconditions=post,
                             group_id="checkout",
                             group_label="Checkout",
                         )
                     )
-                    pre, post = default_conditions("handoff", goal_pose=planogram.checkout)
+                    bays = self._unload_steps(steps, units[: len(spots)], spots, sid, fixes)
+                    if len(units) > len(spots) and spots:
+                        fixes.append(f"{len(units) - len(spots)} units more than counter spots: the handoff takes them")
+                    if bays:
+                        _, post = default_conditions("handoff", goal_pose=planogram.checkout)
+                        pre = AnyOf(of=[RobotAt(pose=b, note="at the counter") for b in bays])
+                        title = "Basket empty: hand off for payment"
+                    else:
+                        pre, post = default_conditions("handoff", goal_pose=planogram.checkout)
+                        title = "Hand the basket off at checkout"
                     steps.append(
                         HandoffStep(
                             step_id=sid(),
-                            title="Hand the basket off at checkout",
+                            title=title,
                             preconditions=pre,
                             postconditions=post,
                             group_id="checkout",
@@ -855,6 +882,122 @@ class ScriptedPlanner:
                 HandoffStep(step_id=sid(), title="Hand the basket off", preconditions=pre, postconditions=post, **base)
             )
         return out
+
+    async def _unload_units(self, items: Sequence[GoalItem]) -> list[tuple[GoalItem, int, str, str, list[str]]]:
+        """0.2.4: every in-store unit expected in the basket at checkout, in item order: (item, unit, name, visual
+        description, label hints). Online / unavailable / skipped items have no unit in the basket."""
+        out: list[tuple[GoalItem, int, str, str, list[str]]] = []
+        for it in items:
+            if not it.sku or it.status not in (*OPEN_ITEM_STATUSES, "in_basket"):
+                continue
+            p = await self._product(it.sku)
+            name = it.name or (p.name if p else it.sku)
+            desc = ", ".join(x for x in (f"{p.brand} {p.name}" if p and p.brand else name, p.size if p else None) if x)
+            hints = [x for x in ((p.brand if p else None), (p.size if p else None)) if x]
+            for unit in range(1, it.qty + 1):
+                out.append((it, unit, name, desc, hints))
+        return out
+
+    @staticmethod
+    def _unload_steps(
+        steps: list[PlanStep],
+        units: Sequence[tuple[GoalItem, int, str, str, list[str]]],
+        spots: Sequence[CounterSpot],
+        sid: Callable[[], str],
+        fixes: list[str],
+    ) -> list[Pose2D]:
+        """0.2.4 checkout unload by the arm: PER UNIT ground it in the basket (basket camera) -> grasp from the basket
+        -> place on the next free counter spot (left -> right) -> verify it is on the counter; a short drive along the
+        counter when the spot is in the next bay. Every step is optional (an unload that cannot be done leaves the
+        unit for the handoff) and carries the item id (a skipped item's unload is skipped with it). Returns the bay
+        approach poses used (the handoff's precondition)."""
+        if not units:
+            return []
+        total = len(units)
+        bays: list[Pose2D] = [spots[0].approach_pose]
+        on_counter: dict[str, int] = {}
+        for n, ((it, unit, name, desc, hints), spot) in enumerate(zip(units, spots, strict=False), start=1):
+            sku = it.sku or ""
+            on_counter[sku] = on_counter.get(sku, 0) + 1
+            group: dict[str, Any] = {
+                "item_id": it.item_id,
+                "unit": unit,
+                "group_id": f"unload:{n}",
+                "group_label": f"Unloading {n}/{total}: {name}",
+                "optional": True,
+            }
+            head = f"Unloading {n}/{total}: {name}"
+            if spot.approach_pose.distance_to(bays[-1]) > 1e-6:
+                bays.append(spot.approach_pose)
+                pre, post = default_conditions("navigate_to", goal_pose=spot.approach_pose)
+                steps.append(
+                    NavigateToStep(
+                        step_id=sid(),
+                        title=f"{head}: shift along the counter",
+                        target="checkout",
+                        goal_pose=spot.approach_pose,
+                        preconditions=pre,
+                        postconditions=post,
+                        **group,
+                    )
+                )
+            bkey = f"basket:{it.item_id}:{unit}"
+            target = TargetSpec(sku=sku, description=desc, label_hints=hints)
+            steps.append(
+                GroundTargetStep(
+                    step_id=sid(),
+                    title=f"{head}: find it in the basket",
+                    target=target,
+                    camera="basket",
+                    binding=bkey,
+                    postconditions=TargetGrounded(binding=bkey, note="found in the basket"),
+                    **group,
+                )
+            )
+            pre, post = default_conditions("grasp", sku=sku, source="basket")
+            steps.append(
+                GraspStep(
+                    step_id=sid(),
+                    title=f"{head}: grasp it from the basket",
+                    source="basket",
+                    target=target,
+                    binding=bkey,
+                    instruction=f"take the {name} out of the basket",
+                    preconditions=pre,
+                    postconditions=post,
+                    **group,
+                )
+            )
+            pre, post = default_conditions("place", sku=sku, destination="counter", counter_count=on_counter[sku])
+            steps.append(
+                PlaceStep(
+                    step_id=sid(),
+                    title=f"{head} → counter spot {spot.index + 1}",
+                    sku=sku,
+                    destination="counter",
+                    counter=spot,
+                    instruction=f"put the {name} on the counter",
+                    preconditions=pre,
+                    postconditions=post,
+                    **group,
+                )
+            )
+            steps.append(
+                VerifyStep(
+                    step_id=sid(),
+                    title=f"{head} → counter ✓",
+                    condition=AllOf(
+                        of=[
+                            ItemOnCounter(sku=sku, min_count=on_counter[sku], note=f"{name} on the counter"),
+                            GripperEmpty(note="not in the gripper"),
+                        ]
+                    ),
+                    purpose="check",
+                    **group,
+                )
+            )
+        fixes.append(f"unload {total} units onto the counter by arm ({len(bays)} counter position(s))")
+        return bays
 
     def validate(self, plan: StepPlan) -> list[PlanIssue]:
         """``plan.validate_plan`` + store checks: every slot the plan drives to / scans exists in the robot's store
