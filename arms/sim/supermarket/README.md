@@ -54,47 +54,59 @@ Demo loop: drive to a shelf → N → jog with ↑/↓ until the gripper is at a
 | `demo/autopilot.py` | `--demo`: rovers execute the plan (drive, pick, basket, checkout), cameras, frame recorder |
 | `demo/edit_video.py` | cuts a recorded run into the demo video (captions, mini-map, gripper PiP, cards) |
 | `demo/demo_config.json` | robots + spawns, checkout counter + slots, overview camera, optional fixed shopping list |
+| `demo/so101_demo.py` | `--demo` with the SO-101 rover v3: graspable shopping list, Gemini plan, diff-drive A* trips, IK picks with jaw-contact attach, basket drop, checkout unload, camera director, recorder; `--offline` dry run without Isaac |
+| `demo/so101_config.json` | SO-101 demo: spawn, checkout counter + parking slot, counter placement spots, open shelf sides |
+| `demo/edit_so101.py` | cuts an SO-101 run: full cut, 45-60 s highlight, GIF, early cut, `--stills N` for review |
+| `demo/record_so101.sh` | one command: record the SO-101 demo + cut the videos (on the GPU host) |
 | `robot/build_so101_rover.py` | robot v3 USD: PMB2 base + fixed riser + long-reach SO-101 (cut + carbon-tube extensions, reducers) + round wire basket + cameras, one articulation; writes `.kin.json` (chain, actuators, torque budget, jaw points) |
 | `robot/setup_so101_rover.sh` | fetches SO-ARM100 + pmb2_robot at pinned commits, makes the tools venv, builds the USD, runs the reach check |
 | `robot/so101_ik.py` / `robot/urdf_tree.py` | numpy FK/IK (DLS) for the long-reach chain; minimal URDF reader |
 | `robot/reach_check.py` | reach table (shelf heights × standoffs, body clearance), basket drop, torque budget |
 | `robot/preview_so101_rover.py` / `robot/validate_so101_rover.py` / `robot/make_validation_video.py` | studio renders; supermarket validation run (sweeps, diff drive, IK pick with jaw check, basket drop); review video + pick clip |
 
-## Autopilot demo (`--demo`): Gemini plans the route, the rovers shop
+## Autopilot demo (`--demo`): Gemini plans the route, the SO-101 rover shops
 
-The rover's navigation brain is an LLM: before driving, the app builds a **store map from the scene** (every product
-prim's world box grouped into sections by the shelf it sits on, shelf/fixture boxes plus an orthographic top-down
-**depth render** as obstacles — that catches pillars and walls that are only in the building mesh — the rover
-spawns and the checkout counter) and sends Gemini the shopping list + a compact map (sections, obstacle boxes, a
-0.25 m ASCII occupancy picture). Gemini splits the list between the rovers, orders each route and gives a one-line
-reason per leg. The rovers then **execute** that plan: grid A* (0.05 m, inflated by the rover's footprint) between
-stops, driven through the same swerve command path as the keyboard (`cmd` → wheels steer and spin, kinematic base).
-A stop that fails (approach spot blocked, no path, product not at the gripper) goes back to Gemini with what
-happened and the product's alternatives (same SKU elsewhere) for a **replan**. Every LLM call is logged to
-`<out>/llm_log.jsonl` (model, latency, prompt, response; never the key).
-
-Per pick (Suraj's arm + grab, nothing learned): IK-table pre-grasp 11 cm in front of the product at its height →
-straight slide in → measure the gripper↔product error in the sim and correct it (arm x/z + a sideways base strafe)
-→ close → `grab(target, keep_offset=True)`: the product that is actually at the gripper (≤ 5 cm, checked) is
-attached **where it is** — never snapped/teleported to the gripper → lift, retract → B pose → release (gravity drops
-it into the basket). Settled basket items then ride with the base (re-posed with it every step: the kinematic base is
-teleported, which friction can't carry). Checkout: drive to the counter, take each item out of the basket (IK into
-the basket, same attach rule), put it on the counter, "paid".
+`--demo` runs Picky's **SO-101 rover v3** (below) through the Genie Sim `supermarket_06` store; `--demo --demo-robot rm2`
+keeps the earlier rm2_car/AIRBOT autopilot (`demo/autopilot.py`), and teleop / `--smoke` / `--livestream` still drive
+the rm2_car/AIRBOT robot.
 
 ```bash
-# on vhagar (Isaac Sim 6.0 standalone; key in ~/.config/picky/secrets.env as GEMINI_API_KEY)
-PY=/data/advaiv2/isaacsim/python.sh; D=/data/advaiv2/picky-suraj
-$PY arms/sim/supermarket/teleop_app.py --scene $D/geniesim/background/supermarket/supermarket_06/background.usda \
-    --robot $D/build/rm2_basket.usd --demo --robots 2 --max-items 12 --record --out $D/runs/full
-# --plan-only: build the map + ask Gemini, write plan.json / topdown.jpg, exit (fast iteration on the config)
-$D/tools/bin/python arms/sim/supermarket/demo/edit_video.py $D/runs/full $D/video   # needs pillow, imageio[ffmpeg]
+# on vhagar: one command (builds the robot USD first if it is missing), frames + videos stay on vhagar
+bash arms/sim/supermarket/demo/record_so101.sh            # -> $RUN/video/picky_so101_supermarket_full.mp4, highlight, gif
+bash arms/sim/supermarket/demo/record_so101.sh --plan-only  # map + shopping list + Gemini plan only (~2 min)
+# offline dry run of the whole trip (no Isaac, perfect tracking) from a scene_boxes.json an Isaac run wrote:
+python arms/sim/supermarket/demo/so101_demo.py --boxes RUN/scene_boxes.json --heights RUN/heights.npy \
+    --topdown-meta RUN/plan.json --kin picky_so101_rover.kin.json --out /tmp/dry
 ```
 
-Recording: replicator render products + `rgb` annotators (chase cam per rover, wrist cam per rover, side tracking cam,
-overview, intro/outro orbit), one frame every 2 physics steps (30 fps of sim time), JPEGs written by a thread pool;
-cameras the edit doesn't need in a phase are switched off. The scene is `supermarket_06` (10 sections: snacks,
-drinks, cleaning, paper goods, personal care, …); fetch it with `tools/fetch_geniesim.py --scene supermarket_06`
-(its dome-light HDR is not referenced as a USD layer, so fetch `background/common/HDR/*.hdr` too).
+What happens, and who decides it:
+
+| step | how | physics / scripted / LLM |
+|---|---|---|
+| store map | product + fixture boxes from the stage, top-down depth render (pillars, walls), sections, 0.05 m grid inflated 0.32 m | scene data |
+| shopping list | every product screened for the SO-101: ≤ 6.8 cm across the jaws, front row, free height above, a free parking pose with the shelf on the robot's right, exact 5-DoF IK (level or pitched approach), room beside it for the jaws; one SKU per section per round over ≥ 5 sections | scripted |
+| product names | a close-up render of each item → Gemini vision names it ("Hand cream tube") | LLM |
+| route | Gemini gets the map (sections, obstacles, ASCII grid), the items (section, position, height, parking pose) and orders the stops with a reason per leg; a stop that fails goes back to Gemini with what happened + alternatives (same SKU elsewhere) | LLM |
+| driving | A* on the grid → differential drive: turn in place, pure pursuit along the path, park parallel to the shelf | joint drives on the planar base joints (scripted targets) |
+| pick | IK pre-grasp → straight slide in (min-jerk) → close the moving jaw until it meets the product (jaw mesh points vs. its box) → attach only if both jaws touch it and it is between the pads → lift, retract | arm: physics drives with torque limits; attach: kinematic follow of the gripper |
+| basket | tool down (yaw chosen so the item fits the round basket), swing 90° to the back, lower over the lowest part of the pile, open: the product falls in and rides on the basket floor | gravity + PhysX contacts + friction |
+| checkout | park parallel to the counter, take each item out (tool down, jaws across its narrow side, same contact rule), lay it on the counter, move along the counter after six, "Paid" | as above |
+
+Recording (`--record`): one director camera at 1920×1080 (chase while driving; a held framing per pick chosen from
+the occupancy/height grid so the eye is in free air and sees the arm, the product and the basket; cuts instead of
+flying through shelves) + the robot's wrist, front and basket cameras, one frame every 2 physics steps = 30 fps of sim
+time. `frames.jsonl` / `events.jsonl` / `plan.json` / `llm_log.jsonl` / `stats.json` sit next to the frames;
+`demo/edit_so101.py` adds the HUD, the live mini-map (Gemini's route, visited/remaining stops, the trail, the robot),
+picture-in-picture and captions.
+
+The earlier rm2_car/AIRBOT autopilot (`--demo-robot rm2`, `demo/autopilot.py`, `demo/edit_video.py`):
+
+```bash
+PY=/data/advaiv2/isaacsim/python.sh; D=/data/advaiv2/picky-suraj
+$PY arms/sim/supermarket/teleop_app.py --scene $D/geniesim/background/supermarket/supermarket_06/background.usda \
+    --robot $D/build/rm2_basket.usd --demo --demo-robot rm2 --robots 2 --max-items 12 --record --out $D/runs/full
+$D/tools/bin/python arms/sim/supermarket/demo/edit_video.py $D/runs/full $D/video   # needs pillow, imageio[ffmpeg]
+```
 
 ## Picky SO-101 rover v3 (robot): PMB2 round base + long-reach Hiwonder SO-ARM101 + circular wire basket
 

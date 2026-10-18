@@ -159,17 +159,51 @@ class RoverKinematics:
             e.append(w_rot * np.cross(T[:3, 2], R[:, 2]))
         return np.concatenate(e)
 
+    def _fk_axes(self, q):
+        """tcp pose + each joint's world axis and origin (for the analytic Jacobian), one FK pass"""
+        T = self.base0
+        zs, os_ = [], []
+        for (Tj, ax), qi in zip(self.chain, q[:5], strict=False):
+            T = T @ Tj
+            zs.append(T[:3, :3] @ ax)
+            os_.append(T[:3, 3])
+            R = np.eye(4)
+            R[:3, :3] = _axis_angle(ax, qi)
+            T = T @ R
+        return T @ self.tcp, np.array(zs), np.array(os_)
+
+    def _err_jac(self, q, pos, R, w_rot, ori_mode):
+        """error e (as in _err) and J = -de/dq from the geometric Jacobian (one FK instead of six)"""
+        T, Z, org = self._fk_axes(q)
+        p = T[:3, 3]
+        Jv = np.cross(Z, p - org).T  # 3 x 5
+        e = [pos - p]
+        J = [Jv]
+        if ori_mode == "full":
+            Rc = T[:3, :3]
+            e.append(w_rot * 0.5 * sum(np.cross(Rc[:, k], R[:, k]) for k in range(3)))
+            Jw = np.zeros((3, 5))
+            for i in range(5):
+                Jw[:, i] = -0.5 * sum(np.cross(np.cross(Z[i], Rc[:, k]), R[:, k]) for k in range(3))
+            J.append(w_rot * Jw)
+        elif ori_mode == "axis":
+            zc = T[:3, 2]
+            e.append(w_rot * np.cross(zc, R[:, 2]))
+            J.append(w_rot * np.array([-np.cross(np.cross(Z[i], zc), R[:, 2]) for i in range(5)]).T)
+        return np.concatenate(e), np.vstack(J)
+
     def _dls(self, q, pos, R, w_rot, iters, ori_mode):
         lam = 0.02
+        best, stall = 1e9, 0
         for _ in range(iters):
-            e = self._err(q, pos, R, w_rot, ori_mode)
+            e, J = self._err_jac(q, pos, R, w_rot, ori_mode)
             if np.linalg.norm(e[:3]) < 2e-4 and (len(e) == 3 or np.linalg.norm(e[3:]) < 2e-3 * w_rot):
                 break
-            J = np.zeros((len(e), 5))
-            for i in range(5):
-                dq = np.zeros(5)
-                dq[i] = 1e-5
-                J[:, i] = (e - self._err(q + dq, pos, R, w_rot, ori_mode)) / 1e-5
+            ne = float(np.linalg.norm(e))
+            stall = stall + 1 if ne > best - 1e-7 else 0
+            best = min(best, ne)
+            if stall > 12:  # converged as far as the limits / orientation allow
+                break
             step = J.T @ np.linalg.solve(J @ J.T + lam * lam * np.eye(len(e)), e)
             n = np.linalg.norm(step)
             if n > 0.25:
