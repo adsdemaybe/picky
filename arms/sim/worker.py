@@ -656,7 +656,9 @@ class _ArmJoints(_Action):
                     mid_frame = True
             core.sync_carried(r)
             if mid_frame and self.capture:  # live feed while the arm moves (one render per tick at most)
-                self.frames += core.render_policy(r, self.capture, step=self.i)
+                fresh = core.render_policy(r, self.capture, step=self.i)
+                self.frames += fresh
+                core.stream_policy_frames(r, fresh)
             if self.i < len(self.rows) or self.t + 1e-9 < len(self.rows) / cmd.hz:
                 return None
         if not cmd.capture_each_step and self.capture:
@@ -1223,6 +1225,27 @@ class WorkerCore:
             )
             prev = q_rad(q)
         return out
+
+    def stream_policy_frames(self, rover: Rover, frames: list[PolicyFrame]) -> None:
+        """Mid-chunk policy pictures go out at once as unsolicited RAW ``CameraFrame``s (camera_id
+        '<robot>.policy_side' / '.policy_wrist'), so the backend's live view moves with the arm instead of getting the
+        whole chunk's pictures in the result at its end. They stay in the result too (the policy's record)."""
+        for f in frames:
+            self._frame_n += 1
+            self.emit(
+                CameraFrame(
+                    frame_id=f"{rover.robot_id}-policy-{f.camera}-f{self._frame_n:06d}",
+                    camera="front" if f.camera == "side" else "wrist",
+                    camera_id=aj.policy_camera_id(rover.robot_id, f.camera),
+                    robot_id=rover.robot_id,
+                    store_id=rover.store_id,
+                    jpeg_b64=f.jpeg_b64,
+                    w=f.w,
+                    h=f.h,
+                    pose=rover.pose,
+                    camera_pose=f.camera_pose,
+                )
+            )
 
     def arm_state(self, rover: Rover, steps: int = 0, events: list[str] | None = None) -> ArmJointState:
         kin = self.kinematics(rover)

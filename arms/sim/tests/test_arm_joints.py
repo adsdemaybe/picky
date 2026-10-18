@@ -376,6 +376,15 @@ def test_capture_every_streams_frames_while_the_arm_moves(rig):
     assert steps == [("side", 10), ("wrist", 10), ("side", 20), ("wrist", 20), ("side", 30), ("wrist", 30)]
     wrist = [f for f in res.policy_frames if f.camera == "wrist"]
     assert wrist[0].camera_pose != wrist[-1].camera_pose  # pictures taken WHILE moving, not repeats
+    # the mid-chunk pictures also went out live, as unsolicited frames, before the result
+    from contracts.sim import CameraFrame
+
+    live = [m for m in out if isinstance(m, CameraFrame) and m.camera_id and ".policy_" in m.camera_id]
+    assert [(m.camera_id, m.camera) for m in live] == [
+        (f"{R1}.policy_side", "front"),
+        (f"{R1}.policy_wrist", "wrist"),
+    ] * 2
+    assert live[0].jpeg_b64 == res.policy_frames[0].jpeg_b64 and not live[0].blurred
     # the wrist camera rolls with the wrist: its roll is on the frame so pixel rays can be cast exactly
     kin = core.kinematics(rover)
     cam = aj.wrist_camera_pose(kin, rover.pose, rover.lift, rp.q_rad(rover.arm_q))
