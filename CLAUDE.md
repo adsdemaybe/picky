@@ -294,7 +294,8 @@ Not required: every edge case, scale beyond the demo, perfect polish.
   SKIP/WAIT reasons come from deterministic reason codes; the LLM only phrases them.
 - Picky remembers only what the shopper can see and delete (the web app's Permissions page).
 - Never claim a "privacy mode" or "nothing leaves the store": model calls go to the Gemini API (Claude if
-  `PICKY_LLM_PROVIDER=anthropic`) and the verifier's frames to Perceptron. Claim only what is true: faces blurred before any frame is stored, streamed or sent to an LLM; derived signals only to the LLM.
+  `PICKY_LLM_PROVIDER=anthropic`) and the verifier's frames to Perceptron. Claim only what is true: faces blurred
+  before any frame is stored, streamed or sent to an LLM or to Perceptron; derived signals only to the LLM.
 - Test/sandbox payments only, tokenized credentials only; never store card numbers. Synthetic data only: demo users,
   stores, retailers, devices and prices are fictional.
 

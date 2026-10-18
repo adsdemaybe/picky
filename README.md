@@ -242,8 +242,11 @@ make db-up && make seed                         # local Postgres + pgvector, see
 
 Keys go in `.env` (see [`.env.example`](.env.example)): `GEMINI_API_KEY` switches the agent and robot brains to
 Gemini (needs `uv sync --extra agent`; `PICKY_LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` for Claude; blank =
-deterministic fakes); also `STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`. The web
-app reads its own `arms/frontend/.env.local`.
+deterministic fakes); `PERCEPTRON_API_KEY` switches the loop verifier's vision to Perceptron Mk1.5 with
+`PICKY_REAL_ARMS=perception` (needs `uv sync --extra perception`; blank = the ground-truth fake verifier); also
+`STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`. `PICKY_REAL_ARMS=evidence` (no key) gives the
+verifier panel real camera thumbnails instead of the fakes' flat frames. The web app reads its own
+`arms/frontend/.env.local`.
 `make setup` removes extras, so re-run `uv sync --extra <arm>` after it.
 
 ## API at a glance (for the web app)
