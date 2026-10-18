@@ -2,6 +2,7 @@
 database -> structured order -> plan with per-item photo verification -> the arm unloads every unit onto the counter
 (checkout.unload) -> the Visa payment agent timeline -> the purchase rows (with photos) in the database."""
 
+import asyncio
 import time
 from typing import Any
 
@@ -135,3 +136,53 @@ def test_verification_routes() -> None:
         assert c.post("/api/verifications/nope", json={"decision": "maybe"}).status_code == 422
         assert c.get("/api/trips/none/payment").json() == []
         assert c.get("/api/users/nobody/purchases").status_code == 404
+
+
+def test_photo_card_per_grasp_and_wrong_answer_puts_it_back() -> None:
+    """On the real 2D fakes (FakeRobot can put a unit back): ✗ on the first photo -> put back + re-pick; the counter
+    unload then runs for real (checkout.unload verified per unit)."""
+    import math
+
+    from arms.agent.loop import PlanLoop
+    from contracts.plan import GraspStep, PlanRequest
+    from contracts.policy import DEFAULT_RETRY_POLICY
+    from contracts.trust import ApprovalRequest, ApprovalResponse
+
+    set_settings(picky_exec_mode="", picky_faults="", gemini_api_key="", anthropic_api_key="", perceptron_api_key="")
+    try:
+        reg = build_registry(real_arms=set(), fake_opts={"robot": {"realtime_factor": math.inf}})
+        s = reg.services
+        s.approvals = None  # answers come from the injected shopper below
+        asked: list[ApprovalRequest] = []
+        wrong_once = {"left": 1}
+
+        async def answer(req: ApprovalRequest) -> ApprovalResponse:
+            asked.append(req)
+            if req.kind.value == "verify_item":
+                pick = "correct"
+                if wrong_once["left"]:
+                    wrong_once["left"] -= 1
+                    pick = "wrong"
+                return ApprovalResponse(approval_id=req.approval_id, decision="choice", choice=pick)
+            return ApprovalResponse(approval_id=req.approval_id, decision="approve")
+
+        runner = PlanLoop(s, policy=DEFAULT_RETRY_POLICY, answer=answer, verify_items=True)
+
+        async def go() -> Any:
+            plan = await s.planner.plan(PlanRequest(robot_id="rover-ave-1", text="2 mild salsa", store_id="store_ave"))
+            return await runner.run_plan(plan)
+
+        out = asyncio.run(go())
+    finally:
+        reset_settings()
+    assert out.status == "completed", out.summary
+    cards = [r for r in asked if r.kind.value == "verify_item"]
+    assert len(cards) >= 3 and all(r.payload.get("verification") for r in cards)  # 2 units + the re-pick
+    events = [e for e in reg.bus.recent(after_seq=0)]
+    statuses = [e.verification.status for e in events if e.type == "item.verification"]
+    assert "rejected" in statuses and statuses.count("accepted") >= 2
+    assert any(e.type == "step.failed" and e.failure.code == "wrong_item_grasped" for e in events)
+    unload = [e for e in events if e.type == "checkout.unload" and e.status == "verified"]
+    assert len(unload) == 2 and unload[-1].text.startswith("Unloading 2/2")
+    shelf_grasps = [st for st in out.plan.steps if isinstance(st, GraspStep) and st.source == "shelf"]
+    assert shelf_grasps
