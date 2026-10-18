@@ -650,7 +650,9 @@ class T0Vla:
             look_m = float(_setting("picky_vla_nav_look_m", DEFAULT_NAV_LOOK_M))
         except (TypeError, ValueError):
             look_m = DEFAULT_NAV_LOOK_M
-        want_look = look_mode == "always" or (look_mode == "isaac" and st.backend == "isaac")
+        want_look = req.step.kind == "navigate_to" and (
+            look_mode == "always" or (look_mode == "isaac" and st.backend == "isaac")
+        )
         target = await self._nav_target_name(ex, st) if want_look else None
         ex.nav_target = target
         context = {
