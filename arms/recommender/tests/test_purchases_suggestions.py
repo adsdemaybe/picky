@@ -150,6 +150,31 @@ def test_llm_rerank_is_grounded_and_falls_back() -> None:
     assert grounded("You bought this 12 days ago.", a) == ("12" in str(a.signals.values()))
 
 
+def test_llm_rerank_is_cached_per_candidate_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The Home page asks on every visit; one Gemini call per candidate set (TTL) keeps it under the app's timeout."""
+    from arms.recommender import suggest
+    from utils import llm
+
+    cards = asyncio.run(_rec().replenish_suggestions("maya", "store_ave", 3))
+    calls: list[str] = []
+
+    async def complete_json(prompt: str, schema: Any, **kw: Any) -> Any:
+        calls.append(prompt)
+        ranked = [{"suggestion_id": c.suggestion_id, "reason": "Time to restock."} for c in reversed(cards)]
+        return schema.model_validate({"ranked": ranked})
+
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "complete_json", complete_json)
+    monkeypatch.setattr(suggest, "_RERANK_CACHE", {})
+    one = asyncio.run(llm_rerank(cards))
+    two = asyncio.run(llm_rerank(cards))
+    assert len(calls) == 1 and one == two and one[0].suggestion_id == cards[-1].suggestion_id
+    assert all(c.ranked_by == "llm" and c.reason == "Time to restock." for c in two)
+    monkeypatch.setattr(suggest, "RERANK_TTL_S", 0.0)
+    asyncio.run(llm_rerank(cards))
+    assert len(calls) == 2  # expired -> asked again
+
+
 def test_old_purchase_is_not_due(tmp_path: Any) -> None:
     rec = FakeRecommenderService(purchases_db=str(tmp_path / "q.sqlite"), suggestions_llm=False)
     asyncio.run(rec.purchase_store().ensure(utcnow() - timedelta(days=0)))

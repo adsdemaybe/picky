@@ -23,7 +23,9 @@ template (grounding check). No key / disabled / any error -> rule order + templa
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+import time
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
@@ -46,6 +48,10 @@ WITH_SHARE = 0.8
 GENERIC_TAGS = frozenset({"vegetarian", "vegan", "gluten_free", "kid_friendly", "fresh", "organic", "dairy_free"})
 """Diet / generic tags never justify a deal card on their own (every shopper 'likes' half the store)."""
 LLM_TIMEOUT_S = 8.0
+RERANK_TTL_S = 3600.0
+"""The LLM re-rank of one candidate set is reused this long: the Home page asks on every visit and a Gemini call takes
+5-8 s, longer than the web app waits. A new purchase changes the candidates (new key) -> a fresh call."""
+_RERANK_CACHE: dict[str, tuple[float, list[tuple[str, str | None]]]] = {}
 KIND_PREFIX: dict[str, str] = {"replenish": "rep", "substitute": "sub", "complement": "cmp", "deal": "deal"}
 
 ProductFn = Callable[[Sku], Awaitable[Product | None]]
@@ -327,6 +333,10 @@ async def llm_rerank(cards: list[ReplenishSuggestion], *, client: Any = None) ->
     if client is None and not llm.is_configured():
         return cards
     lines = [{"suggestion_id": c.suggestion_id, "kind": c.kind, "name": c.name, "signals": c.signals} for c in cards]
+    key = json.dumps(lines, sort_keys=True, default=str) if client is None else None
+    hit = _RERANK_CACHE.get(key) if key is not None else None
+    if hit is not None and time.monotonic() - hit[0] < RERANK_TTL_S:
+        return _apply_rerank(cards, hit[1])
     prompt = (
         "You rank grocery suggestion cards for one shopper. Use ONLY the facts in each card's signals; never invent "
         "numbers, dates, prices or reasons. Put the most useful first (overdue staples, then substitutes for "
@@ -340,15 +350,24 @@ async def llm_rerank(cards: list[ReplenishSuggestion], *, client: Any = None) ->
     except Exception as exc:  # noqa: BLE001 - LLM down / quota / malformed: the rule order stands
         log.info("suggestion re-rank unavailable (%s): rule order", type(exc).__name__)
         return cards
+    order = [(r.suggestion_id, r.reason.strip()) for r in out.ranked]
+    if key is not None:
+        if len(_RERANK_CACHE) > 64:
+            _RERANK_CACHE.clear()
+        _RERANK_CACHE[key] = (time.monotonic(), order)
+    return _apply_rerank(cards, order)
+
+
+def _apply_rerank(cards: list[ReplenishSuggestion], order: list[tuple[str, str | None]]) -> list[ReplenishSuggestion]:
+    """Apply the LLM's order + reasons; a reason quoting a number not in the card's facts keeps its template."""
     by_id = {c.suggestion_id: c for c in cards}
     ranked: list[ReplenishSuggestion] = []
-    for r in out.ranked:
-        card = by_id.pop(r.suggestion_id, None)
+    for sid, reason in order:
+        card = by_id.pop(sid, None)
         if card is None:
             continue
-        reason = r.reason.strip()
         update: dict[str, Any] = {"ranked_by": "llm"}
-        if grounded(reason, card):
+        if reason and grounded(reason, card):
             update["reason"] = reason
         ranked.append(card.model_copy(update=update))
     ranked += [c for c in cards if c.suggestion_id in by_id]  # the ones the LLM forgot keep their rule order
