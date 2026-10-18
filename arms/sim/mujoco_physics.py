@@ -30,6 +30,7 @@ from xml.sax.saxutils import quoteattr
 
 import numpy as np
 
+from arms.sim import mujoco_screen
 from arms.sim.geometry import CameraPose
 from arms.sim.mujoco_backend import (
     PARKED_Z_M,
@@ -102,6 +103,9 @@ class MujocoPhysicsBackend(MujocoBackend):
         self._last_step: float | None = None
         self._ikd: Any = None
         self.grasp_log: list[dict[str, Any]] = []
+        self._screen_feed: mujoco_screen.ScreenFeed | None = None
+        self._screen_tick = mujoco_screen.ScreenTicker()
+        self._screen_tex: dict[str, int] = {}
 
     # ---- core -> backend state
     def set_instance_pose(self, store_id: str, instance_id: str, position, yaw: float | None = None) -> None:
@@ -164,6 +168,15 @@ class MujocoPhysicsBackend(MujocoBackend):
             if name in ROVER_COLLIDERS:
                 g = g.replace('contype="0" conaffinity="0"', 'contype="4" conaffinity="0"')
             target.append(g)
+        sx, sy, sz = mujoco_screen.SCREEN_LOCAL
+        w, h = mujoco_screen.SCREEN_SIZE_M
+        base.append(  # bezel + the live screen, facing the rover's +x (shoppers in front of it)
+            f'<geom type="box" pos="{sx - 0.006:.3f} {sy:.3f} {sz:.3f}" '
+            f'size="0.008 {w / 2 + 0.012:.3f} {h / 2 + 0.012:.3f}" '
+            f'rgba="0.08 0.08 0.09 1" contype="0" conaffinity="0"/>'
+            f'<geom type="box" pos="{sx + 0.0025:.4f} {sy:.3f} {sz:.3f}" size="0.0015 {w / 2:.3f} {h / 2:.3f}" '
+            f'material="screen.{rid}" contype="0" conaffinity="0"/>'
+        )
         lift_xml = "".join(lift) or '<geom size="0.01" contype="0" conaffinity="0"/>'
         out = [
             f'<body name="r/{rid}/base" mocap="true">{"".join(base)}</body>',
@@ -194,6 +207,13 @@ class MujocoPhysicsBackend(MujocoBackend):
             'contype="1" conaffinity="0" rgba="0 0 0 0"/>'
         )
         xml = xml.replace("<worldbody>", "<worldbody>" + park, 1)
+        screens = "".join(
+            f'<texture name="screen.{rid}" type="2d" builtin="flat" rgb1="0.05 0.08 0.11" '
+            f'width="{mujoco_screen.SCREEN_W}" height="{mujoco_screen.SCREEN_H}"/>'
+            f'<material name="screen.{rid}" texture="screen.{rid}" emission="0.9" specular="0.4"/>'
+            for rid in self.rovers
+        )
+        xml = xml.replace("</asset>", screens + "</asset>", 1)
         spec = mj.MjSpec.from_string(xml)
         if self.so101_xml is not None:
             for rid in self.rovers:
@@ -248,6 +268,14 @@ class MujocoPhysicsBackend(MujocoBackend):
                     "jaw_moving": mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, f"{rid}/moving_jaw_so101_v1"),
                     "jaw_fixed": mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, f"{rid}/gripper"),
                 }
+        self._screen_tex = {rid: mj.mj_name2id(model, mj.mjtObj.mjOBJ_TEXTURE, f"screen.{rid}") for rid in rover_parts}
+        if self._screen_feed is None:
+            from utils.config import get_settings
+
+            self._screen_feed = mujoco_screen.ScreenFeed(get_settings().picky_gateway_url, list(rover_parts))
+        else:
+            self._screen_feed.robot_ids = list(rover_parts)
+        self._screen_tick.last = 0.0
         self._ikd = mj.MjData(model)
         self._pending = set()
         self._grasped = {}
@@ -306,6 +334,32 @@ class MujocoPhysicsBackend(MujocoBackend):
         for rid in self._arm:
             self._control_arm(rid)
         self._advance()
+        if self._screen_tick.due():
+            self._update_screens()
+
+    def _update_screens(self) -> None:
+        m, mj = self._model, self._mj
+        feed = self._screen_feed.info if self._screen_feed else {}
+        for rid, tex in self._screen_tex.items():
+            if tex < 0:
+                continue
+            rover = self.rovers[rid]
+            info = feed.get(rid) or {}
+            local = {"basket": info.get("basket_count", 0), "holding": info.get("holding")}
+            img = mujoco_screen.draw(rover.name, rover.color, local, info)
+            adr, n = m.tex_adr[tex], m.tex_width[tex] * m.tex_height[tex] * m.tex_nchannel[tex]
+            m.tex_data[adr : adr + n] = img.reshape(-1)[:n]
+            for r in self._renderers.values():
+                try:
+                    r._gl_context.make_current()
+                    mj.mjr_uploadTexture(m, r._mjr_context, tex)
+                except Exception:  # noqa: BLE001 - a renderer without a live context picks it up on rebuild
+                    pass
+            if self._viewer is not None:
+                try:
+                    self._viewer.update_texture(tex)
+                except Exception:  # noqa: BLE001
+                    pass
 
     def _advance(self) -> None:
         now = time.monotonic()
