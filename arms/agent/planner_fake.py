@@ -81,6 +81,14 @@ def label_text(product: Any) -> str | None:
     return getattr(asset, "label_text", None) or product.name
 
 
+def target_description(product: Any, name: str) -> str:
+    """'Casa Verde Black Beans 15 oz': brand + name, then the size only when the name does not already carry it
+    (the product name 'Black Beans 15 oz' + size '15 oz' read 'Black Beans 15 oz, 15 oz' on the live trip)."""
+    base = f"{product.brand} {product.name}" if product is not None and product.brand else name
+    size = getattr(product, "size", None) if product is not None else None
+    return f"{base}, {size}" if size and size.lower() not in base.lower() else base
+
+
 _NUM = {
     "one": 1,
     "two": 2,
@@ -464,7 +472,7 @@ class ScriptedPlanner:
                         **group,
                     )
                 )
-            desc = ", ".join(x for x in (f"{p.brand} {p.name}" if p and p.brand else name, p.size if p else None) if x)
+            desc = target_description(p, name)
             hints = [x for x in ((p.brand if p else None), (p.size if p else None)) if x]
             for k in range(1, remaining + 1):
                 unit = it.picked_qty + k
@@ -892,7 +900,7 @@ class ScriptedPlanner:
                 continue
             p = await self._product(it.sku)
             name = it.name or (p.name if p else it.sku)
-            desc = ", ".join(x for x in (f"{p.brand} {p.name}" if p and p.brand else name, p.size if p else None) if x)
+            desc = target_description(p, name)
             hints = [x for x in ((p.brand if p else None), (p.size if p else None)) if x]
             for unit in range(1, it.qty + 1):
                 out.append((it, unit, name, desc, hints))
