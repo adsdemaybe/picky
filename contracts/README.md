@@ -1,7 +1,16 @@
 # contracts — the locked interfaces between arms
 
 Every arm codes against this package and nothing else from other arms. One author per change, so the whole set stays
-consistent. `CONTRACTS_VERSION` (in `contracts/__init__.py`) is currently **0.2.0**.
+consistent. `CONTRACTS_VERSION` (in `contracts/__init__.py`) is currently **0.2.1**.
+
+**v0.2.1 (planner → VLA → verifier loop, additive):** an LLM planner (Gemini) turns a goal into a typed `StepPlan`
+(`plan.py`), a VLA service executes motion steps as an idempotent status stream (`vla.py`), and a verifier
+(Perceptron on face-blurred frames + robot state, `verify.py`, `grounding.py`, `evidence.py`) checks every
+postcondition before stock / cart / goal change; recovery is data decided by code (`policy.py`); demo faults
+(`faults.py`); v0.2 brain-tool bridge (`bridge.py`); inert T1 worker adapter (`skill_server.py`). New OPTIONAL
+`Services` fields + Protocols in `services.py`, 12 events in `events.py`, routes in `api.md`. Off unless
+`PICKY_EXEC_MODE=plan|tools`. Patch bump: the deployed Isaac worker (0.2.0) still connects. Details:
+[`CHANGES-0.2.1.md`](CHANGES-0.2.1.md).
 
 **v0.2.0 (fleet architecture):** natural-language requests → fleet manager (`fleet.py`, `FleetService`) → goals
 assigned to robots across multiple stores (`choose_robot`) → per-robot managing LLM (`RobotBrainService`, brain tools
@@ -33,10 +42,19 @@ and produce, the events, and the `services.<field>` you may call.
 | `perception.py` | `Detection`, `ScanReport`, `FreshnessCandidate`, `PickChoice` (≤ `PICK_CHOICE_MAX`=3), `BasketCheck` (+ `BasketCheck.compare`) | perception, catalog, gateway |
 | `trust.py` | `IntentMandate`, `CartMandate`, `compute_cart_hash(cart, trip_id)`, `MandateDecision` (+ `MandateVerdict`, `MandateReason`, `MandateViolation`), `ApprovalKind`/`ApprovalRequest`/`ApprovalResponse`, `CheckoutRequest`, `Receipt`, `TransparencyEntry`, `AuditEntry`, `TrustLedger` | trust, gateway, messaging, frontend |
 | `messaging.py` | `InboundMessage`, `OutboundMessage` (+ `about_skus`), `SendResult`, `ReplyInterpretation`, `normalize_handle()` | messaging, agent |
-| `events.py` | `Event` union on `type` (38 types; envelope `trip_id`/`store_id`/`robot_id`/`user_id`/`request_id`), `EVENT_PRODUCERS` (gateway / fleet / agent / catalog / any), `LIVE_ONLY_EVENT_TYPES`, `make_event`, `goal_envelope` / `trip_envelope`, `event_matches` (THE `/ws` filter rule), `parse_event`, `with_seq`, `event_json_schema()` | gateway, fleet, agent, catalog, frontend |
+| `events.py` | `Event` union on `type` (50 types incl. the 12 loop events of 0.2.1, `plan_envelope`; envelope `trip_id`/`store_id`/`robot_id`/`user_id`/`request_id`), `EVENT_PRODUCERS` (gateway / fleet / agent / catalog / any), `LIVE_ONLY_EVENT_TYPES`, `make_event`, `goal_envelope` / `trip_envelope`, `event_matches` (THE `/ws` filter rule), `parse_event`, `with_seq`, `event_json_schema()` | gateway, fleet, agent, catalog, frontend |
 | `tools.py` | Shopper LLM tools (`TOOL_DEFINITIONS`, `parse_tool_input`, `AgentReply`, `ToolCallRecord`) and **robot brain tools** (`BRAIN_TOOL_NAMES` incl. `add_item`, `BRAIN_TOOL_DEFINITIONS`, `BRAIN_STRICT_TOOLS`, `strict_schema_budget`, `parse_brain_tool_input`, result models `PickResult` / `AskUserResult` / `RouteSummary` / `PlaceResult` / `BrainToolError`, executor mapping) | agent |
-| `services.py` | One `runtime_checkable` Protocol per service (incl. `FleetService`, `CameraService`, `RobotBrainService`), gateway-owned `TripController`/`ApprovalBroker`/`EventPublisher`, the `Services` DI container, `ARM_NAMES`, `SERVICE_PROTOCOLS`, `EXTRA_SERVICE_PROTOCOLS`, `SERVICE_FACTORIES`, `GATEWAY_PROTOCOLS` | everyone |
+| `services.py` | One `runtime_checkable` Protocol per service (incl. `FleetService`, `CameraService`, `RobotBrainService`; 0.2.1: `PlannerService`, `LoopRunner`, `VlaService`, `VerifierService`, `VisionProvider`, `FaultInjector`, `run_vla_to_terminal`, `exec_mode`, `LOOP_SERVICE_FACTORIES`), gateway-owned `TripController`/`ApprovalBroker`/`EventPublisher`, the `Services` DI container, `ARM_NAMES`, `SERVICE_PROTOCOLS`, `EXTRA_SERVICE_PROTOCOLS`, `SERVICE_FACTORIES`, `GATEWAY_PROTOCOLS` | everyone |
 | `api.py` / `api.md` | Gateway REST + WS request/response models (`CheckoutStatus`, `AddLineResult`, `RobotMessageRequest`, `ObserveRequest`, `WsRobotChat`, ...), the endpoint table and the event producer table | gateway, frontend |
+| `plan.py` (0.2.1) | Loop ids (`make_plan_id` / `make_exec_id` / `make_verify_id` / `make_effect_key`), the condition language (13 atoms + `all`/`any`/`not`, advisory), 9 step kinds (`PlanStep`), `default_conditions`, `StepPlan`, `PlannerInfo`, LLM-facing `DraftStep` / `PlanDraft` + `normalize_draft`, `PlanRequest`, `validate_plan` | agent, gateway, frontend |
+| `vla.py` (0.2.1) | VLA tiers, `VlaErrorCode` + `ERROR_TRAITS`, `VlaCapabilities`, `VlaRequest`, `VlaStatus`, `VlaOutcome`, `ExecRecord`, `resolve_tier`; inert 0.3.0 wire (`RunSkillCmd`, `SkillProgress`, `PolicyServerStatus`) | robot, agent, sim (0.3.0) |
+| `verify.py` (0.2.1) | `VerifyRequest` / `Verdict` / `AtomVerdict` / `VerifyBaseline`, verifier modes, Kleene `combine`, `combine_verdicts`, `evaluate_on_truth` / `evaluate_on_state`, grounding requests, `VisionAnswer`, `PERCEPTRON_CALLS` | perception, agent |
+| `grounding.py` (0.2.1) | `NormBox` / `NormPoint` (0–1000 grid), `box_iou`, `GRIPPER_ROI_WRIST`, `Evidence`, `ProviderCall`, `SlotLocation`, `TargetSpec`, `GroundedTarget` | perception, agent, robot |
+| `evidence.py` (0.2.1) | `FrameRef` (blurred-only, `/api/evidence/{id}.jpg`), `TruthSnapshot`, `GroundTruthSidecar`, `FrameAnnotations`, Protocols `EvidenceCameras` (perception) / `TruthSource` (robot) | perception, robot, gateway |
+| `policy.py` (0.2.1) | `RetryPolicy` + `decide_recovery`, `failure_from_verdict` / `failure_from_vla`, `COMMIT_ON_VERIFIED`, `EffectRecord`, `StepAttempt`, `PlanRunState`, `LoopMetrics`, `PlanOutcome`, `ReplanRequest` | agent |
+| `faults.py` (0.2.1) | Demo faults: `FaultEffect`, `FaultRule` / `FaultMatch`, `fault_fires`, `FaultScenario`, `DEMO_SCENARIOS` | robot, perception, gateway |
+| `bridge.py` (0.2.1) | Brain tools ↔ plan steps (tools mode), `ToolStepOutcome`, v0.2 result mapping, `goal_update_from_outcome`, `mirror_brain_step`, `ExecMode` | agent |
+| `skill_server.py` (0.2.1, inert) | Worker-side T1 policy-server adapter: `PolicyServerSpec`, `PolicyClient`, `build_observation`, `check_action_chunk` | sim (0.3.0) |
 | `db/schema.sql` | Postgres 17 + pgvector DDL mirroring the models (money = integer cents, `vector(384)`; v0.2: robots, cameras, requests, goals, brain_steps, stock_movements, stock_alerts, categories) | catalog, recommender, trust, gateway, fleet |
 
 ## Rules of use
@@ -78,6 +96,8 @@ and produce, the events, and the `services.<field>` you may call.
 1. Branch `contracts/<slug>` off `main` — never change contracts inside an arm PR.
 2. Make the change **and bump `CONTRACTS_VERSION`** in `contracts/__init__.py` (and the version in `api.md`):
    patch = additive optional field/docs, minor = new model/endpoint/event or new required field, major = rename/removal.
+   Exception (0.2.1): purely additive modules / events / optional fields that do NOT touch the sim wire may ship as a
+   patch, because a minor bump makes the gateway refuse the deployed Isaac worker (major.minor check).
 3. Update every affected arm's `fake.py` in the same PR so `main` stays green, plus `db/schema.sql` / `api.md` /
    `OVERVIEW.md` if the shape they mirror changed. Sim wire: patch changes are safe because both ends parse with
    `sim.parse_sim_message` / `parse_gateway_to_sim`, which drop unknown keys at any depth (nested models are

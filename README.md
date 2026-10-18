@@ -215,13 +215,18 @@ make setup               # uv sync --locked (base deps + dev tools)
 cp .env.example .env     # every key is optional; blank = fakes
 make secret NAME=ANTHROPIC_API_KEY   # optional: API keys live in your OS keychain (docs/secrets.md)
 make check               # lint, format check, rules check, tests (what CI runs)
-make demo                # headless trip 1 → follow-up → trip 2, all arms fake; ends with "DEMO OK"
+make demo                # headless trip 1 → follow-up → trip 2, all arms fake; ends with "DEMO OK" + "LOOP OK"
 make dev                 # gateway on http://localhost:8000
 make web                 # the web app on :3000 (needs pnpm on PATH; or the npx commands in "The web app")
 ```
 
-Then open **http://localhost:8000/debug** (a built-in test page: fleet, cameras, stock alerts, a request box and the
-trip view; `/` redirects there) and **http://localhost:8000/docs** (interactive API docs). `make help` lists every
+`make demo` runs the shop goals through the planner → VLA → verifier loop (contracts 0.2.1) and injects one bad grasp
+(`drop_on_first_grasp`): the summary shows the verifier catching it and the retry succeeding.
+`make demo ARGS="--exec-mode direct"` is the v0.2 brain path (`PICKY_EXEC_MODE=direct` is the kill switch).
+
+Then open **http://localhost:8000/debug** (a built-in test page: fleet, the step plan + VLA progress, the verifier's
+verdicts with evidence, cameras, stock alerts, a request box and the trip view; `/` redirects there; `PICKY_DEV=1 make
+dev` adds the presenter's fault controls) and **http://localhost:8000/docs** (interactive API docs). `make help` lists every
 target.
 
 **Browser test (optional).** `uv sync --group e2e && uv run --group e2e playwright install chromium`, then
@@ -238,9 +243,13 @@ make db-up && make seed                         # local Postgres + pgvector, see
 
 Keys go in the team key vault: `make secret NAME=...` stores one in your OS keychain, `make secrets` lists them
 (masked), `make secrets-pull` fetches the team's age-encrypted bundle ([`docs/secrets.md`](docs/secrets.md)); `.env`
-still works as the lowest-priority fallback. `ANTHROPIC_API_KEY` switches the agent and robot brains to Claude
-(blank = deterministic fakes); also `STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`,
-`PERCEPTRON_ROBOTICS_API_KEY`. The web app reads its own `arms/frontend/.env.local`.
+(see [`.env.example`](.env.example)) still works as the lowest-priority fallback. `GEMINI_API_KEY` switches the agent and robot brains to
+Gemini (needs `uv sync --extra agent`; `PICKY_LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` for Claude; blank =
+deterministic fakes); `PERCEPTRON_API_KEY` switches the loop verifier's vision to Perceptron Mk1.5 with
+`PICKY_REAL_ARMS=perception` (needs `uv sync --extra perception`; blank = the ground-truth fake verifier); also
+`STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`. `PICKY_REAL_ARMS=evidence` (no key) gives the
+verifier panel real camera thumbnails instead of the fakes' flat frames. The web app reads its own
+`arms/frontend/.env.local`.
 `make setup` removes extras, so re-run `uv sync --extra <arm>` after it.
 
 ## API at a glance (for the web app)
@@ -350,8 +359,8 @@ Honest snapshot. Each arm's README has the detailed checklist.
 - Synthetic data only: fictional stores, retailers, prices, devices and users.
 - No login in the demo; the app opens as a fictional user (Maya; the account menu says "Demo account (fictional
   data)"). The browser never queries the DB, only the gateway.
-- We don't claim a privacy mode: model calls go to the Claude API, and faces are blurred before any frame leaves the
-  pipeline.
+- We don't claim a privacy mode: model calls go to the Gemini API (Claude if configured), and faces are blurred before any
+  frame leaves the pipeline.
 
 ## Contributing
 

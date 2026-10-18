@@ -33,7 +33,7 @@ from typing import Any
 
 from arms.robot._fanout import Fanout
 from arms.robot.controllers.pure_pursuit import PurePursuit, PurePursuitConfig
-from arms.robot.instances import basket_position, layout_bboxes
+from arms.robot.instances import _n_of, basket_position, layout_bboxes
 from arms.robot.placeholder import PLACEHOLDER_H, PLACEHOLDER_JPEG_B64, PLACEHOLDER_W
 from arms.robot.render import (
     Rendered,
@@ -450,6 +450,53 @@ class FakeRobot:
     async def pick(
         self, robot_id: RobotId, slot_id: SlotId, sku: Sku, instance_id: InstanceId | None = None
     ) -> ItemInstance:
+        return await self._pick(robot_id, slot_id, sku, instance_id, strict_reach=self.strict_reach)
+
+    # ---- extras for the VLA layer (arms/robot/vla.py; not in the RobotService Protocol) ------------------------------
+    def can_put_back(self, robot_id: RobotId) -> bool:
+        """The 2D fake can always return a held unit to its own slot (``put_back``)."""
+        self._rover(robot_id)
+        return True
+
+    async def grab_unit(
+        self, robot_id: RobotId, slot_id: SlotId, instance_id: InstanceId | None = None
+    ) -> ItemInstance:
+        """Fault injection ('wrong_item'): really grasp a unit of ``slot_id`` (the neighbouring SKU) WITHOUT the reach
+        check, so the held unit, the wrist frame and the ground truth all show the wrong product."""
+        rv = self._rover(robot_id)
+        world = await self._world(rv.store_id)
+        return await self._pick(robot_id, slot_id, world.slot(slot_id).sku, instance_id, strict_reach=False)
+
+    async def put_back(self, robot_id: RobotId, slot_id: SlotId | None = None) -> RobotState:
+        """Put the held unit back on ITS OWN slot (``ItemInstance.slot_id``; ``slot_id`` is only a hint). Magic-grasp
+        assisted like ``pick`` but without the reach check, so a wrong unit grabbed from the neighbouring slot can be
+        returned from where the robot stands. ``no_instance`` when the gripper is empty."""
+        rv = self._rover(robot_id)
+        if rv.holding is None:
+            raise RobotError("no_instance", "gripper is empty")
+        world = await self._world(rv.store_id)
+        home = rv.holding.slot_id or slot_id
+        slot = world.slot(home)
+        if slot_id is not None and slot_id != home:
+            log.info("put_back on %s: returning %s to its own slot %s", slot_id, rv.holding.instance_id, home)
+        self._settle(rv)
+        with self._motion(rv, "put_back", RobotStatus.PLACING):
+            rv.focus_slot = slot.slot_id
+            rv.auto_task = f"putting {rv.holding.sku} back"
+            lift_to = lift_for(slot.item_position.z)
+            await self._emit(rv, force=True)
+            await self._wait(rv, motion_duration("place_in_basket", rv.lift, lift_to))
+            held, rv.holding = rv.holding, None
+            units = world.units(slot.slot_id)
+            units.append(held.model_copy(update={"in_basket": False, "store_id": rv.store_id, "bbox": None}))
+            units.sort(key=_n_of)
+            rv.lift = lift_to
+        await self._emit(rv, force=True)
+        return self._snapshot(rv)
+
+    async def _pick(
+        self, robot_id: RobotId, slot_id: SlotId, sku: Sku, instance_id: InstanceId | None, *, strict_reach: bool
+    ) -> ItemInstance:
         rv = self._rover(robot_id)
         world = await self._world(rv.store_id)
         slot = world.slot(slot_id)
@@ -460,7 +507,7 @@ class FakeRobot:
         target = self._target(world, slot_id, sku, instance_id)
         if not slot_reachable(rv.pose, slot.approach_pose, slot.item_position):
             dist = rv.pose.distance_to(slot.approach_pose)
-            if self.strict_reach:
+            if strict_reach:
                 raise RobotError(
                     "grasp_failed",
                     f"{slot_id} out of reach ({dist:.2f} m from its approach pose, z={slot.item_position.z})",

@@ -6,8 +6,9 @@ replaces the ranking step:
 1. Heuristic shortlist (``scoring.score_candidate``) of the eligible in-stock candidates (~4x limit).
 2. Embedding similarity: cosine(profile taste vector, product vector) with ``BAAI/bge-small-en-v1.5``
    (``EMBED_DIM`` = 384, extra ``recommender``). Without sentence-transformers it degrades to the heuristic only.
-3. LLM rerank of the shortlist via ``utils.llm.complete_json`` (Sonnet, kind='brain'): new order + a one-line "why".
-   Without ``ANTHROPIC_API_KEY`` (``LLMNotConfigured``) or on malformed output it keeps the heuristic order/reasons.
+3. LLM rerank of the shortlist via ``utils.llm.complete_json`` (kind='brain', Gemini by default): new order + a
+   one-line "why". Without an LLM key (``LLMNotConfigured``) or on malformed output it keeps the heuristic
+   order/reasons.
 The LLM never sees prices it could change and never decides money; ``sponsored`` is always False.
 
 TODO (numbered, maps to CLAUDE.md §3 recommender scope):

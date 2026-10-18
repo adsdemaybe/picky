@@ -83,7 +83,7 @@ already shows the planning-phase SKIP / WAIT cards and the zero case on demo dat
 ```bash
 uv run pytest arms/recommender                         # base deps; data/ test skips until data/ exists
 make demo                                              # fake (default)
-uv sync --extra recommender && PICKY_REAL_ARMS=recommender make demo   # real (needs ANTHROPIC_API_KEY for the rerank)
+uv sync --extra recommender && PICKY_REAL_ARMS=recommender make demo   # real (needs GEMINI_API_KEY for the rerank)
 ```
 
 ## How to contribute

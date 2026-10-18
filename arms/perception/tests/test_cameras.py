@@ -29,6 +29,7 @@ from contracts.common import BBox, Point3, Pose2D, Rect2D
 from contracts.planogram import Fixture, Planogram, Slot
 from contracts.services import CameraService, Services
 from contracts.sim import CameraFrame, ItemInstance, SimStatus, SimWorkerStatus
+from utils import llm
 
 STORE = "store_ave"
 
@@ -209,6 +210,18 @@ def test_factories_conform_and_are_lazy(monkeypatch):
     monkeypatch.setattr(llm, "is_configured", lambda: True)
     assert isinstance(create_cameras(services), RealCameras)
     assert calls == []
+
+
+def test_real_cameras_name_the_missing_key_of_the_configured_provider() -> None:
+    """/health shows this note: it must name GEMINI_API_KEY (the default provider), not a stale Anthropic key."""
+    from utils.config import reset_settings, set_settings
+
+    set_settings(picky_llm_provider="gemini", gemini_api_key="")
+    try:
+        with pytest.raises(llm.LLMNotConfigured, match="GEMINI_API_KEY"):
+            create_cameras(Services())
+    finally:
+        reset_settings()
 
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -459,14 +472,14 @@ async def test_real_observe_uses_vision_with_ground_truth_counts(no_data):
     services = Services(catalog=StubCatalog(), robot=StubRobot(SALSA, "S_SALSA"))
     c = RealCameras(services, client=client, data_root=no_data)
     obs = await c.observe("rover-ave-1.front", "Is the mild salsa in stock?")
-    assert obs.method == "vlm" and obs.model == "claude-haiku-5-5" and obs.people == 1
+    assert obs.method == "vlm" and obs.model == llm.model("fast") and obs.people == 1
     assert obs.answer.startswith("Yes, the mild salsa")
     salsa, mystery = obs.items
     assert (salsa.sku, salsa.count, salsa.shelf_tag_cents, salsa.slot_id) == ("salsa_mild", 4, 399, "S_SALSA")
     assert mystery.sku is None and mystery.confidence == 1.0
 
     [call] = messages.calls
-    assert call["model"] == "claude-haiku-5-5"
+    assert call["model"] == llm.model("fast")  # gemini-3.8-flash by default (PICKY_LLM_PROVIDER)
     content = call["messages"][0]["content"]
     assert content[0]["type"] == "image" and content[1]["type"] == "text"  # image before text
     assert "sku=salsa_mild" in content[1]["text"] and "Is the mild salsa in stock?" in content[1]["text"]
