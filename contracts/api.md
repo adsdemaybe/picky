@@ -279,7 +279,7 @@ P0 = needed for the demo. P1 = nice to have. Dev routes exist only with `PICKY_D
 | dev | POST | `/api/dev/faults` | `faults.FaultRule` | `faults.FaultRule` | faults (`inject`) |
 | dev | POST | `/api/dev/faults/scenario` | `{name}` (a `faults.DEMO_SCENARIOS` key) or a full `faults.FaultScenario` | `faults.FaultScenario` | faults (`load_scenario`) |
 | dev | DELETE | `/api/dev/faults` | – | `204` | faults (`clear_faults`) |
-| dev | POST | `/api/dev/plans` | `plan.PlanRequest` `{robot_id, text \| goal, store_id?, budget_cents?}` | `plan.StepPlan` (planned and started on that robot, bypassing the fleet; for testing T0 / faults) | planner + runner |
+| dev | POST | `/api/dev/plans` | `plan.PlanRequest` `{robot_id, text \| goal, store_id (required with text), budget_cents?}` (422 without a store) | `plan.StepPlan` (planned and started on that robot, bypassing the fleet; for testing T0 / faults) | planner + runner |
 
 Demo scenarios (`PICKY_FAULTS=<name>` at boot or `POST /api/dev/faults/scenario`): `drop_on_first_grasp` (THE demo
 moment), `slow_vla`, `verifier_down`, `flaky_t1`, `isaac_drop`, `wrong_salsa` (2D fake only), `foggy_basket`.
@@ -315,7 +315,7 @@ v0.2 ThinkingLog keeps working.
 | P1 | `target.grounded` | `plan_id, step_id, grounding: GroundedTarget` | box + grasp point on the evidence frame |
 | P1 | `vla.tier_changed` | `from_tier, to_tier, reason, breaker` | banner "switched to the scripted grasp" (right after the `step.failed` that caused it) |
 | P1 | `demo.fault` | `firing: FaultFiring, scenario` | presenter / staff view only |
-| P1 | `camera.overlay` | `camera_id, frame: FrameRef, evidence, label, ttl_ms, step_id` | live-only overlay on a camera tile |
+| P1 | `camera.overlay` | `camera_id, frame: FrameRef, evidence, label, ttl_ms, step_id` | live-only overlay on a camera tile (the gateway forwards it; the runner does not emit it yet) |
 
 ### Who writes what (single writer per record)
 

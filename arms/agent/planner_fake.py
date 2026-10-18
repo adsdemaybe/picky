@@ -85,6 +85,12 @@ def _per(k: int) -> Callable[[int, int, int], int]:
     return lambda n, m, v: max(1, math.ceil(n / k))
 
 
+def _a(name: str) -> str:
+    """'a salsa' / 'an avocado' (step titles shown in the plan panel)."""
+    first = name[:1].lower()
+    return f"{'an' if first and first in 'aeiou' else 'a'} {name}"
+
+
 TACO_RECIPE: list[tuple[str, str, Callable[[int, int, int], int], str]] = [
     ("tortillas", "bakery", lambda n, m, v: max(1, math.ceil(n * 3 / 12)), "TORT-CORN"),
     ("ground beef", "meat", lambda n, m, v: math.ceil(m / 4) if m else 0, "BEEF-GROUND"),
@@ -441,7 +447,7 @@ class ScriptedPlanner:
                 steps.append(
                     GroundTargetStep(
                         step_id=sid(),
-                        title=f"Find a {name} {tag}",
+                        title=f"Find {_a(name)} {tag}",
                         target=target,
                         binding=bkey,
                         unit=unit,
@@ -761,7 +767,7 @@ class ScriptedPlanner:
                 out.append(
                     GroundTargetStep(
                         step_id=sid(),
-                        title=f"Find a {name}",
+                        title=f"Find {_a(name)}",
                         target=target,
                         binding=bkey,
                         item_id=item_id,

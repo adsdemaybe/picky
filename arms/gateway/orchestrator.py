@@ -513,6 +513,10 @@ class TripOrchestrator:
             if trip.state not in (S.PAID, S.FOLLOWUP, S.DONE):
                 await self._error(trip_id, "gateway", f"checkout is not available in state {trip.state.value}")
             return self._checkout_status(trip)
+        unaudited = await self._unaudited_basket(trip)
+        if unaudited:
+            await self._error(trip_id, "gateway", unaudited, code="basket_audit_pending")
+            return self._checkout_status(trip)
         await self._transition(trip, S.CHECKOUT, note or "checkout started")
         cart_hash = compute_cart_hash(trip.cart, trip_id)
         decision = await self._evaluate(trip, None)
@@ -1300,6 +1304,28 @@ class TripOrchestrator:
             text=f"How was the {line.name or line.sku}? Reply 1-5." if line else "How was your trip? Reply 1-5.",
             about_skus=[line.sku] if line else [],
             quick_replies=["1", "2", "3", "4", "5"],
+        )
+
+    async def _unaudited_basket(self, trip: Trip) -> str | None:
+        """contracts/api.md "Who writes what": checkout starts only when the loop's basket audit has closed every
+        provisional line (``PlanRunState.provisional_open`` is false). None = go ahead (also in direct mode, without a
+        runner or plan, or when the run state can't be read: the guard never breaks a v0.2 checkout)."""
+        runner = getattr(self.services, "runner", None)
+        if runner is None or not trip.goal_id:
+            return None
+        try:
+            plan = await runner.current_plan(trip.goal_id)
+            if plan is None:
+                return None
+            state = await runner.run_state(plan.plan_id)
+        except Exception as exc:  # noqa: BLE001 - a lookup error must not block a v0.2 checkout
+            log.debug("checkout guard: no run state for goal %s (%s)", trip.goal_id, exc)
+            return None
+        if not getattr(state, "provisional_open", False):
+            return None
+        return (
+            "checkout blocked: the basket camera could not confirm some items and the robot's basket audit has not "
+            "passed yet"
         )
 
     def _checkout_status(
