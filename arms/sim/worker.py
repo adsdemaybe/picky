@@ -104,11 +104,14 @@ from contracts.planogram import Planogram, RobotSpec, Slot, StoreCameraSpec
 from contracts.sim import (
     ARM_IK_CAPABILITY,
     ARM_JOINTS_CAPABILITY,
+    BASKET_UNLOAD_CAPABILITY,
     IK_TOLERANCE_M,
+    ArmIkCmd,
     ArmJointState,
     CameraFrame,
     CommandResult,
     IkSolution,
+    IkTarget,
     InstanceInfo,
     ItemInstance,
     PolicyFrame,
@@ -137,6 +140,13 @@ STATE_MIN_PERIOD_S = 0.1  # RobotState <= 10 Hz per robot
 DEFAULT_STREAM_FPS = 2.0
 MAX_STREAM_FPS = 15.0
 BASKET_DROP_LIFT_M = BASKET_OFFSET_M[2] + 0.25
+BASKET_REACH_LIFT_M = 0.32
+"""0.2.4 checkout unload: lift height at which the SO-101 (non-level IK) reaches back into the basket."""
+COUNTER_REACH_M = 0.6
+"""place_on_counter: the counter spot must be within this horizontal distance of the robot base."""
+COUNTER_CLEAR_M = 0.05
+UNLOAD_KEY_S: dict[str, float] = {"reach": 0.9, "down": 0.5, "close": 0.3, "up": 0.6, "stow": 0.8}
+"""Joint-space segment durations of the basket grasp / counter place animations (seconds)."""
 CAPABILITIES = [
     "multi_store",
     "multi_robot",
@@ -157,6 +167,7 @@ CAPABILITIES = [
     "camera:ceiling",
     ARM_JOINTS_CAPABILITY,
     ARM_IK_CAPABILITY,
+    BASKET_UNLOAD_CAPABILITY,
     "camera:policy_side",
     "camera:policy_wrist",
 ]
@@ -363,6 +374,8 @@ class Rover:
         """Joint mode (ArmJointsCmd): the 6 SO-101 joint angles, USD degrees; None = the scripted rig owns the arm."""
         self.sticky: _Sticky | None = None
         """The unit the sticky grasp holds in joint mode (rigidly attached to the gripper link)."""
+        self.counter: list[str] = []
+        """0.2.4: units this rover put on the checkout counter (removed by unload_basket / a reset)."""
 
     @property
     def robot_id(self) -> str:
@@ -597,13 +610,216 @@ class _Unload(_Action):
         r = self.rover
         scene = self.core.scene_of(r)
         out: list[ItemInstance] = []
-        for iid in r.basket:
+        for iid in [*r.basket, *r.counter]:  # 0.2.4: staff bag what the arm put on the counter too
             inst = scene.instances.pop(iid, None)
             if inst is not None:
                 out.append(inst)
                 self.core.backend.remove_instance(scene.store_id, iid)
-        r.basket = []
+        r.basket, r.counter = [], []
         return self.core.result(self.cmd, ok=True, rover=r, instances=out)
+
+
+class _JointPath(_Action):
+    """Scripted joint-space animation (0.2.4 checkout unload): move the lift first, then play keyframes (6 USD joint
+    degrees each, linear interpolation over the segment's duration) in joint mode; ``on_key(i)`` runs when keyframe
+    ``i`` is reached (grasp / release happen there). Subclasses fill ``lift_target`` + ``keys`` lazily in ``plan()``
+    once the lift is in place (IK depends on it)."""
+
+    def __init__(self, core: "WorkerCore", rover: Rover, cmd: Any) -> None:
+        super().__init__(core, rover, cmd)
+        self.lift_target = rover.lift
+        self.keys: list[tuple[list[float], float]] = []
+        self.k = 0
+        self.t = 0.0
+        self.planned = False
+        self.prev: list[float] = []
+
+    def plan(self) -> None:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def on_key(self, i: int) -> None:  # pragma: no cover - interface
+        pass
+
+    def finish(self) -> CommandResult:  # pragma: no cover - interface
+        raise NotImplementedError
+
+    def ik(self, point: tuple[float, float, float], *, level: bool, gripper: float, seed: list[float]) -> list[float]:
+        """One TCP target (store frame) -> joint degrees (the closest pose when out of reach: an animation, the
+        attach is decided by code, not by the jaw distance)."""
+        r = self.rover
+        cmd = ArmIkCmd(
+            cmd_id="unload-ik",
+            robot_id=r.robot_id,
+            targets=[IkTarget(point=Point3(x=point[0], y=point[1], z=point[2]), level=level, gripper_deg=gripper)],
+            lift_height_m=r.lift,
+            seed_deg=list(seed),
+        )
+        return list(self.core.solve_ik(r, cmd)[0].q_deg)
+
+    def step(self, dt: float) -> CommandResult | None:
+        self.elapsed += dt
+        r, core = self.rover, self.core
+        if abs(r.lift - self.lift_target) > 1e-6:
+            self._approach_lift(self.lift_target, dt)
+            core.sync_carried(r)
+            return None
+        if not self.planned:
+            self.planned = True
+            core.enter_joint_mode(r)
+            assert r.arm_q is not None
+            self.prev = list(r.arm_q)
+            self.plan()
+        while self.k < len(self.keys):
+            target, dur = self.keys[self.k]
+            self.t += dt
+            dt = 0.0
+            frac = 1.0 if dur <= 0 else min(1.0, self.t / dur)
+            row = [a + (b - a) * frac for a, b in zip(self.prev, target, strict=True)]
+            kin = core.kinematics(r)
+            r.arm_q = kin.clamp_deg(row)
+            core.sync_carried(r)
+            if frac < 1.0:
+                return None
+            self.t -= dur
+            self.prev = list(target)
+            self.on_key(self.k)
+            self.k += 1
+            core.sync_carried(r)
+        return self.finish()
+
+
+class _PickFromBasket(_JointPath):
+    """0.2.4 ``pick_from_basket``: lower the lift, swing the SO-101 back over the basket, reach down to the unit,
+    close (the unit attaches to the gripper: magic grasp, decided by code), lift it out and fold the arm (the unit
+    stays in the gripper; joint mode is kept so it does not jump)."""
+
+    status = RobotStatus.PICKING
+
+    def __init__(self, core: "WorkerCore", rover: Rover, cmd: Any) -> None:
+        super().__init__(core, rover, cmd)
+        if rover.battery < BATTERY_MOTION_MIN_PCT:
+            raise _Fail("battery_low", f"battery {rover.battery:.1f}%: send it to its dock")
+        if rover.holding is not None:
+            raise _Fail("grasp_failed", f"gripper already holds {rover.holding}")
+        scene = core.scene_of(rover)
+        pick = None
+        for iid in rover.basket:
+            inst = scene.instances.get(iid)
+            if inst is None:
+                continue
+            if (cmd.instance_id is not None and iid == cmd.instance_id) or (
+                cmd.instance_id is None and cmd.sku is not None and inst.sku == cmd.sku
+            ):
+                pick = inst
+                break
+        if pick is None:
+            raise _Fail("no_instance", f"no {cmd.instance_id or cmd.sku} in the basket of {rover.robot_id}")
+        self.iid = pick.instance_id
+        self.lift_target = clamp_lift(BASKET_REACH_LIFT_M)
+
+    def plan(self) -> None:
+        r, scene = self.rover, self.core.scene_of(self.rover)
+        p = scene.instances[self.iid].position
+        dz = scene.item_dims(self.iid)[2]
+        top = (p.x, p.y, p.z + dz / 2)
+        q0 = list(self.prev)
+        above = self.ik((top[0], top[1], top[2] + 0.10), level=False, gripper=35.0, seed=q0)
+        at = self.ik((top[0], top[1], top[2] - 0.02), level=False, gripper=35.0, seed=above)
+        closed = [*at[:5], 3.0]
+        up = [*above[:5], 3.0]
+        stow = list(q_deg(self.core.kinematics(r).scripted_q(r.lift, ARM_STOW_EXT_M, closed=True)))
+        stow = [*stow[:5], 3.0]
+        ks = UNLOAD_KEY_S
+        self.keys = [(above, ks["reach"]), (at, ks["down"]), (closed, ks["close"]), (up, ks["up"]), (stow, ks["stow"])]
+
+    def on_key(self, i: int) -> None:
+        if i != 2:  # jaws closed on the unit
+            return
+        r, core = self.rover, self.core
+        scene = core.scene_of(r)
+        inst = scene.instances[self.iid].model_copy(update={"in_basket": False, "on_counter": False})
+        scene.instances[self.iid] = inst
+        r.basket = [b for b in r.basket if b != self.iid]
+        core._stick(r, scene, inst, core._gripper_matrix(r))
+        core.emit(SimLog(level="info", robot_id=r.robot_id, message=f"basket grasp: {self.iid} ({inst.sku}) attached"))
+        core.emit(InstanceInfo(store_id=scene.store_id, robot_id=r.robot_id, slot_id=inst.slot_id, instances=[inst]))
+
+    def finish(self) -> CommandResult:
+        r = self.rover
+        held = self.core.scene_of(r).instances[self.iid]
+        return self.core.result(self.cmd, ok=True, rover=r, instance_id=self.iid, instances=[held])
+
+
+class _PlaceOnCounter(_JointPath):
+    """0.2.4 ``place_on_counter``: raise the lift to counter height, carry the held unit over the spot, lower it,
+    open (the unit stands on the counter: ``on_counter``), lift the arm off and stow (joint mode off)."""
+
+    status = RobotStatus.PLACING
+
+    def __init__(self, core: "WorkerCore", rover: Rover, cmd: Any) -> None:
+        super().__init__(core, rover, cmd)
+        if rover.holding is None:
+            raise _Fail("no_instance", "gripper is empty")
+        pos = cmd.position
+        dist = math.hypot(pos.x - rover.pose.x, pos.y - rover.pose.y)
+        if dist > COUNTER_REACH_M:
+            raise _Fail("grasp_failed", f"counter spot out of reach ({dist:.2f} m from the robot)")
+        self.iid = rover.holding
+        self.lift_target = clamp_lift(pos.z - 0.05)
+
+    def plan(self) -> None:
+        r, scene = self.rover, self.core.scene_of(self.rover)
+        pos = self.cmd.position
+        dz = scene.item_dims(self.iid)[2]
+        q0 = list(self.prev)
+        cz = pos.z + dz / 2 + 0.01
+        carry = self.ik((pos.x, pos.y, cz + 0.10), level=True, gripper=3.0, seed=q0)
+        down = self.ik((pos.x, pos.y, cz), level=True, gripper=3.0, seed=carry)
+        opened = [*down[:5], 35.0]
+        lift_off = [*carry[:5], 35.0]
+        stow = list(q_deg(self.core.kinematics(r).scripted_q(r.lift, ARM_STOW_EXT_M, closed=False)))
+        ks = UNLOAD_KEY_S
+        self.keys = [
+            (carry, ks["reach"]),
+            (down, ks["down"]),
+            (opened, ks["close"]),
+            (lift_off, ks["up"]),
+            (stow, ks["stow"]),
+        ]
+
+    def on_key(self, i: int) -> None:
+        if i != 2:  # jaws open over the spot: the unit stands on the counter
+            return
+        r, core = self.rover, self.core
+        scene = core.scene_of(r)
+        pos = self.cmd.position
+        for old in list(r.counter):  # a unit left on this spot by an earlier trip is cleared first
+            o = scene.instances.get(old)
+            if (
+                o is not None
+                and old != self.iid
+                and math.hypot(o.position.x - pos.x, o.position.y - pos.y) < COUNTER_CLEAR_M
+            ):
+                scene.instances.pop(old, None)
+                core.backend.remove_instance(scene.store_id, old)
+                r.counter.remove(old)
+        r.holding, r.sticky = None, None
+        dz = scene.item_dims(self.iid)[2]
+        inst = scene.instances[self.iid].model_copy(update={"in_basket": False, "on_counter": True})
+        scene.instances[self.iid] = inst
+        core.move_instance(scene, self.iid, Point3(x=pos.x, y=pos.y, z=pos.z + dz / 2), self.cmd.yaw)
+        r.counter.append(self.iid)
+        now = scene.instances[self.iid]
+        core.emit(
+            SimLog(level="info", robot_id=r.robot_id, message=f"counter place: {self.iid} on spot {self.cmd.spot}")
+        )
+        core.emit(InstanceInfo(store_id=scene.store_id, robot_id=r.robot_id, slot_id=now.slot_id, instances=[now]))
+
+    def finish(self) -> CommandResult:
+        r = self.rover
+        self.core.leave_joint_mode(r)
+        placed = self.core.scene_of(r).instances[self.iid]
+        return self.core.result(self.cmd, ok=True, rover=r, instance_id=self.iid, instances=[placed])
 
 
 class _ArmJoints(_Action):
@@ -682,6 +898,8 @@ _ACTIONS: dict[str, type[_Action]] = {
     "place_in_basket": _Place,
     "unload_basket": _Unload,
     "arm_joints": _ArmJoints,
+    "pick_from_basket": _PickFromBasket,
+    "place_on_counter": _PlaceOnCounter,
 }
 
 SceneLoader = Callable[[str], tuple[Planogram, list[Product]]]
@@ -851,9 +1069,10 @@ class WorkerCore:
     def _respawn(self, rover: Rover, robot: RobotSpec | None = None) -> Rover:
         """Robot-level reset: dock, empty basket + gripper (those units leave the scene), battery from the spec."""
         scene = self.stores.get(rover.store_id)
-        for iid in [*rover.basket, *([rover.holding] if rover.holding else [])]:
+        for iid in [*rover.basket, *rover.counter, *([rover.holding] if rover.holding else [])]:
             if scene is not None and scene.instances.pop(iid, None) is not None:
                 self.backend.remove_instance(scene.store_id, iid)
+        rover.counter = []
         if robot is not None and robot != rover.robot:
             self.backend.remove_robot(rover.robot_id)
             del self.rovers[rover.robot_id]
@@ -1497,7 +1716,7 @@ class WorkerCore:
                     raise _Fail(
                         "busy", f"{rover.active.cmd.type} {rover.active.cmd.cmd_id} is running on {rover.robot_id}"
                     )
-                if kind != "arm_joints":
+                if kind not in ("arm_joints", "place_on_counter"):  # 0.2.4: the counter place continues the held pose
                     self.leave_joint_mode(rover)  # the scripted rig owns the arm for every other motion
                 action = _ACTIONS[kind](self, rover, cmd)
                 rover.active = action
