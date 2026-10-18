@@ -100,12 +100,12 @@ slots:
   item_position: {x: 0.6, y: 7.5, z: 0.6}
   approach_pose: {x: 0.975, y: 7.5, theta: 3.142}
   facings: 1
-  capacity: 18
-  qty: 14
+  capacity: 60
+  qty: 60
   low_threshold: 5
   price_cents: 139
   lots:
-  - {lot_id: hil-TOMATOES-DICED-L1, qty: 14}
+  - {lot_id: hil-TOMATOES-DICED-L1, qty: 60}
 - slot_id: HILL-WALL-L-E2-00
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -115,12 +115,12 @@ slots:
   item_position: {x: 0.6, y: 7.5, z: 1.05}
   approach_pose: {x: 0.975, y: 7.5, theta: 3.142}
   facings: 1
-  capacity: 18
-  qty: 12
+  capacity: 25
+  qty: 25
   low_threshold: 5
   price_cents: 159
   lots:
-  - {lot_id: hil-TUNA-L1, qty: 12}
+  - {lot_id: hil-TUNA-L1, qty: 25}
 - slot_id: HILL-WALL-L-E2-01
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -130,12 +130,12 @@ slots:
   item_position: {x: 0.6, y: 8.05, z: 1.05}
   approach_pose: {x: 0.975, y: 8.05, theta: 3.142}
   facings: 1
-  capacity: 18
-  qty: 15
+  capacity: 33
+  qty: 33
   low_threshold: 5
   price_cents: 119
   lots:
-  - {lot_id: hil-MAC-CHEESE-L1, qty: 15}
+  - {lot_id: hil-MAC-CHEESE-L1, qty: 33}
 - slot_id: HILL-WALL-L-E0-02
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -145,12 +145,12 @@ slots:
   item_position: {x: 0.6, y: 8.6, z: 0.15}
   approach_pose: {x: 0.975, y: 8.6, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 24
+  qty: 24
   low_threshold: 3
   price_cents: 279
   lots:
-  - {lot_id: hil-RICE-WHITE-L1, qty: 10}
+  - {lot_id: hil-RICE-WHITE-L1, qty: 24}
 - slot_id: HILL-WALL-L-E1-03
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -160,12 +160,12 @@ slots:
   item_position: {x: 0.6, y: 9.7, z: 0.6}
   approach_pose: {x: 0.975, y: 9.7, theta: 3.142}
   facings: 1
-  capacity: 14
-  qty: 14
+  capacity: 120
+  qty: 120
   low_threshold: 4
   price_cents: 179
   lots:
-  - {lot_id: hil-PASTA-L1, qty: 14}
+  - {lot_id: hil-PASTA-L1, qty: 120}
 - slot_id: HILL-WALL-L-E1-04
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -175,12 +175,12 @@ slots:
   item_position: {x: 0.6, y: 10.8, z: 0.6}
   approach_pose: {x: 0.975, y: 10.8, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 63
+  qty: 63
   low_threshold: 3
   price_cents: 1099
   lots:
-  - {lot_id: hil-OLIVE-OIL-L1, qty: 6}
+  - {lot_id: hil-OLIVE-OIL-L1, qty: 63}
 - slot_id: HILL-WALL-L-E1-05
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -190,12 +190,12 @@ slots:
   item_position: {x: 0.6, y: 11.6, z: 0.6}
   approach_pose: {x: 0.975, y: 11.6, theta: 3.142}
   facings: 1
-  capacity: 20
-  qty: 20
+  capacity: 48
+  qty: 48
   low_threshold: 5
   price_cents: 109
   lots:
-  - {lot_id: hil-BEANS-BLACK-L1, qty: 20}
+  - {lot_id: hil-BEANS-BLACK-L1, qty: 48}
 - slot_id: HILL-G1-E1-00
   fixture_id: G1
   aisle_id: aisle_2
@@ -205,12 +205,12 @@ slots:
   item_position: {x: 3.4, y: 7.5, z: 0.6}
   approach_pose: {x: 3.775, y: 7.5, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 14
+  qty: 14
   low_threshold: 3
   price_cents: 419
   lots:
-  - {lot_id: hil-PRETZELS-L1, qty: 9}
+  - {lot_id: hil-PRETZELS-L1, qty: 14}
 - slot_id: HILL-G1-E2-00
   fixture_id: G1
   aisle_id: aisle_2
@@ -220,12 +220,12 @@ slots:
   item_position: {x: 3.4, y: 7.5, z: 1.05}
   approach_pose: {x: 3.775, y: 7.5, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 7
+  capacity: 32
+  qty: 32
   low_threshold: 3
   price_cents: 469
   lots:
-  - {lot_id: hil-COOKIES-CHOC-CHIP-L1, qty: 7}
+  - {lot_id: hil-COOKIES-CHOC-CHIP-L1, qty: 32}
 - slot_id: HILL-G1-E1-01
   fixture_id: G1
   aisle_id: aisle_2
@@ -235,12 +235,12 @@ slots:
   item_position: {x: 3.4, y: 8.05, z: 0.6}
   approach_pose: {x: 3.775, y: 8.05, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 16
+  qty: 16
   low_threshold: 3
   price_cents: 529
   lots:
-  - {lot_id: hil-GRANOLA-BARS-L1, qty: 8}
+  - {lot_id: hil-GRANOLA-BARS-L1, qty: 16}
 - slot_id: HILL-G1-E2-02
   fixture_id: G1
   aisle_id: aisle_2
@@ -250,12 +250,12 @@ slots:
   item_position: {x: 3.4, y: 8.6, z: 1.05}
   approach_pose: {x: 3.775, y: 8.6, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 15
+  qty: 15
   low_threshold: 3
   price_cents: 349
   lots:
-  - {lot_id: hil-CHIPS-TORTILLA-L1, qty: 12}
+  - {lot_id: hil-CHIPS-TORTILLA-L1, qty: 15}
 - slot_id: HILL-G1-E2-03
   fixture_id: G1
   aisle_id: aisle_2
@@ -265,12 +265,12 @@ slots:
   item_position: {x: 3.4, y: 9.7, z: 1.05}
   approach_pose: {x: 3.775, y: 9.7, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 20
+  qty: 20
   low_threshold: 3
   price_cents: 479
   lots:
-  - {lot_id: hil-CHIPS-SPICY-LIME-L1, qty: 8}
+  - {lot_id: hil-CHIPS-SPICY-LIME-L1, qty: 20}
 - slot_id: HILL-G1-E1-04
   fixture_id: G1
   aisle_id: aisle_2
@@ -280,12 +280,12 @@ slots:
   item_position: {x: 3.4, y: 10.8, z: 0.6}
   approach_pose: {x: 3.775, y: 10.8, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 44
+  qty: 44
   low_threshold: 3
   price_cents: 349
   lots:
-  - {lot_id: hil-POPCORN-L1, qty: 8}
+  - {lot_id: hil-POPCORN-L1, qty: 44}
 - slot_id: HILL-G1-W1-00
   fixture_id: G1
   aisle_id: aisle_1
@@ -295,12 +295,12 @@ slots:
   item_position: {x: 2.2, y: 11.6, z: 0.6}
   approach_pose: {x: 1.825, y: 11.6, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 48
+  qty: 48
   low_threshold: 3
   price_cents: 189
   lots:
-  - {lot_id: hil-BEANS-REFRIED-L1, qty: 12}
+  - {lot_id: hil-BEANS-REFRIED-L1, qty: 48}
 - slot_id: HILL-G1-W0-01
   fixture_id: G1
   aisle_id: aisle_1
@@ -310,12 +310,12 @@ slots:
   item_position: {x: 2.2, y: 11.35, z: 0.15}
   approach_pose: {x: 1.825, y: 11.35, theta: 0.0}
   facings: 1
-  capacity: 6
-  qty: 4
+  capacity: 15
+  qty: 15
   low_threshold: 2
   price_cents: 479
   lots:
-  - {lot_id: hil-MASA-HARINA-L1, qty: 4}
+  - {lot_id: hil-MASA-HARINA-L1, qty: 15}
 - slot_id: HILL-G1-W2-01
   fixture_id: G1
   aisle_id: aisle_1
@@ -325,12 +325,12 @@ slots:
   item_position: {x: 2.2, y: 11.35, z: 1.05}
   approach_pose: {x: 1.825, y: 11.35, theta: 0.0}
   facings: 1
-  capacity: 10
-  qty: 6
+  capacity: 42
+  qty: 42
   low_threshold: 3
   price_cents: 349
   lots:
-  - {lot_id: hil-SOY-SAUCE-L1, qty: 6}
+  - {lot_id: hil-SOY-SAUCE-L1, qty: 42}
 - slot_id: HILL-G1-W3-01
   fixture_id: G1
   aisle_id: aisle_1
@@ -355,14 +355,14 @@ slots:
   item_position: {x: 2.2, y: 10.8, z: 0.6}
   approach_pose: {x: 1.825, y: 10.8, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 42
+  qty: 42
   low_threshold: 3
   price_cents: 429
   lots:
-  - {lot_id: hil-SALSA-CHIPOTLE-L1, qty: 8}
-  deal: {kind: percent_off, price_cents: 386, original_cents: 429, percent_off: 10, reason: 'Weekend special: 10% off',
-    valid_until: '2026-10-19T23:59:00Z'}
+  - {lot_id: hil-SALSA-CHIPOTLE-L1, qty: 42}
+  deal: {kind: percent_off, price_cents: 386, original_cents: 429, percent_off: 10, reason: 'Weekend special: 10% off', 
+      valid_until: '2026-10-19T23:59:00Z'}
 - slot_id: HILL-G1-W2-02
   fixture_id: G1
   aisle_id: aisle_1
@@ -372,12 +372,12 @@ slots:
   item_position: {x: 2.2, y: 10.8, z: 1.05}
   approach_pose: {x: 1.825, y: 10.8, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 4
+  capacity: 90
+  qty: 90
   low_threshold: 3
   price_cents: 749
   lots:
-  - {lot_id: hil-HOTSAUCE-GHOST-L1, qty: 4}
+  - {lot_id: hil-HOTSAUCE-GHOST-L1, qty: 90}
 - slot_id: HILL-G1-W1-03
   fixture_id: G1
   aisle_id: aisle_1
@@ -387,12 +387,12 @@ slots:
   item_position: {x: 2.2, y: 9.7, z: 0.6}
   approach_pose: {x: 1.825, y: 9.7, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 60
+  qty: 60
   low_threshold: 3
   price_cents: 329
   lots:
-  - {lot_id: hil-SALSA-MILD-L1, qty: 10}
+  - {lot_id: hil-SALSA-MILD-L1, qty: 60}
 - slot_id: HILL-G1-W2-03
   fixture_id: G1
   aisle_id: aisle_1
@@ -402,12 +402,12 @@ slots:
   item_position: {x: 2.2, y: 9.7, z: 1.05}
   approach_pose: {x: 1.825, y: 9.7, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 120
+  qty: 120
   low_threshold: 3
   price_cents: 279
   lots:
-  - {lot_id: hil-HOTSAUCE-RED-L1, qty: 12}
+  - {lot_id: hil-HOTSAUCE-RED-L1, qty: 120}
 - slot_id: HILL-G1-W1-04
   fixture_id: G1
   aisle_id: aisle_1
@@ -417,12 +417,12 @@ slots:
   item_position: {x: 2.2, y: 8.6, z: 0.6}
   approach_pose: {x: 1.825, y: 8.6, theta: 0.0}
   facings: 1
-  capacity: 18
-  qty: 18
+  capacity: 120
+  qty: 120
   low_threshold: 5
   price_cents: 129
   lots:
-  - {lot_id: hil-TACO-SEASONING-L1, qty: 18}
+  - {lot_id: hil-TACO-SEASONING-L1, qty: 120}
 - slot_id: HILL-G1-W1-05
   fixture_id: G1
   aisle_id: aisle_1
@@ -432,13 +432,13 @@ slots:
   item_position: {x: 2.2, y: 7.5, z: 0.6}
   approach_pose: {x: 1.825, y: 7.5, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 36
+  qty: 36
   low_threshold: 3
   price_cents: 299
   lots:
-  - {lot_id: hil-TORT-CORN-L1, qty: 5, expiry: '2026-10-26'}
-  - {lot_id: hil-TORT-CORN-L2, qty: 5, expiry: '2026-10-31'}
+  - {lot_id: hil-TORT-CORN-L1, qty: 18, expiry: '2026-10-26'}
+  - {lot_id: hil-TORT-CORN-L2, qty: 18, expiry: '2026-10-31'}
 - slot_id: HILL-G1-W2-05
   fixture_id: G1
   aisle_id: aisle_1
@@ -448,13 +448,13 @@ slots:
   item_position: {x: 2.2, y: 7.5, z: 1.05}
   approach_pose: {x: 1.825, y: 7.5, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 33
+  qty: 33
   low_threshold: 3
   price_cents: 349
   lots:
-  - {lot_id: hil-TORT-FLOUR-L1, qty: 4, expiry: '2026-10-30'}
-  - {lot_id: hil-TORT-FLOUR-L2, qty: 4, expiry: '2026-11-07'}
+  - {lot_id: hil-TORT-FLOUR-L1, qty: 16, expiry: '2026-10-30'}
+  - {lot_id: hil-TORT-FLOUR-L2, qty: 17, expiry: '2026-11-07'}
 - slot_id: HILL-G2-E0-00
   fixture_id: G2
   aisle_id: aisle_3
@@ -479,12 +479,12 @@ slots:
   item_position: {x: 6.2, y: 7.5, z: 0.6}
   approach_pose: {x: 6.575, y: 7.5, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 60
+  qty: 60
   low_threshold: 3
   price_cents: 199
   lots:
-  - {lot_id: hil-SPORTS-DRINK-L1, qty: 9}
+  - {lot_id: hil-SPORTS-DRINK-L1, qty: 60}
 - slot_id: HILL-G2-E2-00
   fixture_id: G2
   aisle_id: aisle_3
@@ -494,12 +494,12 @@ slots:
   item_position: {x: 6.2, y: 7.5, z: 1.05}
   approach_pose: {x: 6.575, y: 7.5, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 22
+  qty: 22
   low_threshold: 3
   price_cents: 429
   lots:
-  - {lot_id: hil-TOOTHPASTE-L1, qty: 8}
+  - {lot_id: hil-TOOTHPASTE-L1, qty: 22}
 - slot_id: HILL-G2-E0-01
   fixture_id: G2
   aisle_id: aisle_3
@@ -524,12 +524,12 @@ slots:
   item_position: {x: 6.2, y: 8.05, z: 1.05}
   approach_pose: {x: 6.575, y: 8.05, theta: 3.142}
   facings: 1
-  capacity: 10
-  qty: 6
+  capacity: 77
+  qty: 77
   low_threshold: 3
   price_cents: 649
   lots:
-  - {lot_id: hil-DEODORANT-L1, qty: 6}
+  - {lot_id: hil-DEODORANT-L1, qty: 77}
 - slot_id: HILL-G2-E0-02
   fixture_id: G2
   aisle_id: aisle_3
@@ -569,12 +569,12 @@ slots:
   item_position: {x: 6.2, y: 10.8, z: 0.6}
   approach_pose: {x: 6.575, y: 10.8, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 15
+  qty: 15
   low_threshold: 3
   price_cents: 279
   lots:
-  - {lot_id: hil-NAPKINS-L1, qty: 10}
+  - {lot_id: hil-NAPKINS-L1, qty: 15}
 - slot_id: HILL-G2-E0-05
   fixture_id: G2
   aisle_id: aisle_3
@@ -584,12 +584,12 @@ slots:
   item_position: {x: 6.2, y: 11.6, z: 0.15}
   approach_pose: {x: 6.575, y: 11.6, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 24
+  qty: 24
   low_threshold: 3
   price_cents: 279
   lots:
-  - {lot_id: hil-COLA-L1, qty: 10}
+  - {lot_id: hil-COLA-L1, qty: 24}
 - slot_id: HILL-G2-W1-00
   fixture_id: G2
   aisle_id: aisle_2
@@ -600,12 +600,12 @@ slots:
   approach_pose: {x: 4.625, y: 11.35, theta: 0.0}
   facings: 1
   capacity: 10
-  qty: 6
+  qty: 10
   low_threshold: 3
   price_cents: 429
   lots:
-  - {lot_id: hil-BAGELS-L1, qty: 3, expiry: '2026-10-24'}
-  - {lot_id: hil-BAGELS-L2, qty: 3, expiry: '2026-10-27'}
+  - {lot_id: hil-BAGELS-L1, qty: 5, expiry: '2026-10-24'}
+  - {lot_id: hil-BAGELS-L2, qty: 5, expiry: '2026-10-27'}
 - slot_id: HILL-G2-W1-01
   fixture_id: G2
   aisle_id: aisle_2
@@ -615,12 +615,12 @@ slots:
   item_position: {x: 5.0, y: 10.8, z: 0.6}
   approach_pose: {x: 4.625, y: 10.8, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 25
+  qty: 25
   low_threshold: 3
   price_cents: 399
   lots:
-  - {lot_id: hil-PEANUT-BUTTER-L1, qty: 10}
+  - {lot_id: hil-PEANUT-BUTTER-L1, qty: 25}
 - slot_id: HILL-G2-W1-02
   fixture_id: G2
   aisle_id: aisle_2
@@ -630,12 +630,12 @@ slots:
   item_position: {x: 5.0, y: 10.25, z: 0.6}
   approach_pose: {x: 4.625, y: 10.25, theta: 0.0}
   facings: 1
-  capacity: 8
-  qty: 5
+  capacity: 42
+  qty: 42
   low_threshold: 2
   price_cents: 649
   lots:
-  - {lot_id: hil-HONEY-L1, qty: 5}
+  - {lot_id: hil-HONEY-L1, qty: 42}
 - slot_id: HILL-G2-W2-03
   fixture_id: G2
   aisle_id: aisle_2
@@ -645,12 +645,12 @@ slots:
   item_position: {x: 5.0, y: 9.7, z: 1.05}
   approach_pose: {x: 4.625, y: 9.7, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 49
+  qty: 49
   low_threshold: 3
   price_cents: 1149
   lots:
-  - {lot_id: hil-COFFEE-L1, qty: 6}
+  - {lot_id: hil-COFFEE-L1, qty: 49}
 - slot_id: HILL-G2-W2-04
   fixture_id: G2
   aisle_id: aisle_2
@@ -660,12 +660,12 @@ slots:
   item_position: {x: 5.0, y: 8.6, z: 1.05}
   approach_pose: {x: 4.625, y: 8.6, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 28
+  qty: 28
   low_threshold: 3
   price_cents: 459
   lots:
-  - {lot_id: hil-CEREAL-OATS-L1, qty: 8}
+  - {lot_id: hil-CEREAL-OATS-L1, qty: 28}
 - slot_id: HILL-FRIDGE-R-W0-00
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -676,12 +676,12 @@ slots:
   approach_pose: {x: 7.825, y: 12.25, theta: 0.0}
   facings: 1
   capacity: 8
-  qty: 6
+  qty: 8
   low_threshold: 2
   price_cents: 449
   lots:
-  - {lot_id: hil-MILK-WHOLE-L1, qty: 3, expiry: '2026-10-24'}
-  - {lot_id: hil-MILK-WHOLE-L2, qty: 3, expiry: '2026-10-30'}
+  - {lot_id: hil-MILK-WHOLE-L1, qty: 4, expiry: '2026-10-24'}
+  - {lot_id: hil-MILK-WHOLE-L2, qty: 4, expiry: '2026-10-30'}
 - slot_id: HILL-FRIDGE-R-W1-00
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -691,13 +691,13 @@ slots:
   item_position: {x: 8.2, y: 12.25, z: 0.65}
   approach_pose: {x: 7.825, y: 12.25, theta: 0.0}
   facings: 1
-  capacity: 8
-  qty: 6
+  capacity: 12
+  qty: 12
   low_threshold: 2
   price_cents: 949
   lots:
-  - {lot_id: hil-CHICKEN-BREAST-L1, qty: 3, expiry: '2026-10-24'}
-  - {lot_id: hil-CHICKEN-BREAST-L2, qty: 3, expiry: '2026-10-27'}
+  - {lot_id: hil-CHICKEN-BREAST-L1, qty: 6, expiry: '2026-10-24'}
+  - {lot_id: hil-CHICKEN-BREAST-L2, qty: 6, expiry: '2026-10-27'}
 - slot_id: HILL-FRIDGE-R-W2-00
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -707,13 +707,13 @@ slots:
   item_position: {x: 8.2, y: 12.25, z: 1.05}
   approach_pose: {x: 7.825, y: 12.25, theta: 0.0}
   facings: 1
-  capacity: 10
-  qty: 6
+  capacity: 25
+  qty: 25
   low_threshold: 3
   price_cents: 679
   lots:
-  - {lot_id: hil-BACON-L1, qty: 3, expiry: '2026-10-27'}
-  - {lot_id: hil-BACON-L2, qty: 3, expiry: '2026-11-05'}
+  - {lot_id: hil-BACON-L1, qty: 12, expiry: '2026-10-27'}
+  - {lot_id: hil-BACON-L2, qty: 13, expiry: '2026-11-05'}
 - slot_id: HILL-FRIDGE-R-W0-01
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -723,13 +723,13 @@ slots:
   item_position: {x: 8.2, y: 11.7, z: 0.25}
   approach_pose: {x: 7.825, y: 11.7, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 28
+  qty: 28
   low_threshold: 3
   price_cents: 379
   lots:
-  - {lot_id: hil-MILK-2PCT-L1, qty: 4, expiry: '2026-10-25'}
-  - {lot_id: hil-MILK-2PCT-L2, qty: 4, expiry: '2026-10-29'}
+  - {lot_id: hil-MILK-2PCT-L1, qty: 14, expiry: '2026-10-25'}
+  - {lot_id: hil-MILK-2PCT-L2, qty: 14, expiry: '2026-10-29'}
 - slot_id: HILL-FRIDGE-R-W1-01
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -739,13 +739,13 @@ slots:
   item_position: {x: 8.2, y: 11.7, z: 0.65}
   approach_pose: {x: 7.825, y: 11.7, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 15
+  qty: 15
   low_threshold: 3
   price_cents: 549
   lots:
-  - {lot_id: hil-YOGURT-GREEK-L1, qty: 3, expiry: '2026-10-30'}
-  - {lot_id: hil-YOGURT-GREEK-L2, qty: 3, expiry: '2026-11-07'}
+  - {lot_id: hil-YOGURT-GREEK-L1, qty: 8, expiry: '2026-10-30'}
+  - {lot_id: hil-YOGURT-GREEK-L2, qty: 7, expiry: '2026-11-07'}
 - slot_id: HILL-FRIDGE-R-W2-01
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -755,13 +755,13 @@ slots:
   item_position: {x: 8.2, y: 11.7, z: 1.05}
   approach_pose: {x: 7.825, y: 11.7, theta: 0.0}
   facings: 1
-  capacity: 10
-  qty: 7
+  capacity: 57
+  qty: 57
   low_threshold: 3
   price_cents: 429
   lots:
-  - {lot_id: hil-CHEESE-CHEDDAR-L1, qty: 4, expiry: '2026-11-16'}
-  - {lot_id: hil-CHEESE-CHEDDAR-L2, qty: 3, expiry: '2026-12-10'}
+  - {lot_id: hil-CHEESE-CHEDDAR-L1, qty: 33, expiry: '2026-11-16'}
+  - {lot_id: hil-CHEESE-CHEDDAR-L2, qty: 24, expiry: '2026-12-10'}
 - slot_id: HILL-FRIDGE-R-W1-02
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -771,13 +771,13 @@ slots:
   item_position: {x: 8.2, y: 11.15, z: 0.65}
   approach_pose: {x: 7.825, y: 11.15, theta: 0.0}
   facings: 1
-  capacity: 10
-  qty: 6
+  capacity: 24
+  qty: 24
   low_threshold: 3
   price_cents: 429
   lots:
-  - {lot_id: hil-HUMMUS-L1, qty: 3, expiry: '2026-11-01'}
-  - {lot_id: hil-HUMMUS-L2, qty: 3, expiry: '2026-11-13'}
+  - {lot_id: hil-HUMMUS-L1, qty: 12, expiry: '2026-11-01'}
+  - {lot_id: hil-HUMMUS-L2, qty: 12, expiry: '2026-11-13'}
 - slot_id: HILL-FRIDGE-R-W2-02
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -787,13 +787,13 @@ slots:
   item_position: {x: 8.2, y: 11.15, z: 1.05}
   approach_pose: {x: 7.825, y: 11.15, theta: 0.0}
   facings: 1
-  capacity: 10
-  qty: 2
+  capacity: 60
+  qty: 60
   low_threshold: 3
   price_cents: 299
   lots:
-  - {lot_id: hil-CREAM-CHEESE-L1, qty: 1, expiry: '2026-11-08'}
-  - {lot_id: hil-CREAM-CHEESE-L2, qty: 1, expiry: '2026-11-26'}
+  - {lot_id: hil-CREAM-CHEESE-L1, qty: 30, expiry: '2026-11-08'}
+  - {lot_id: hil-CREAM-CHEESE-L2, qty: 30, expiry: '2026-11-26'}
 - slot_id: HILL-FRIDGE-R-W1-03
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -819,13 +819,13 @@ slots:
   item_position: {x: 8.2, y: 10.05, z: 0.65}
   approach_pose: {x: 7.825, y: 10.05, theta: 0.0}
   facings: 1
-  capacity: 10
-  qty: 6
+  capacity: 24
+  qty: 24
   low_threshold: 3
   price_cents: 579
   lots:
-  - {lot_id: hil-STRING-CHEESE-L1, qty: 3, expiry: '2026-11-16'}
-  - {lot_id: hil-STRING-CHEESE-L2, qty: 3, expiry: '2026-12-10'}
+  - {lot_id: hil-STRING-CHEESE-L1, qty: 12, expiry: '2026-11-16'}
+  - {lot_id: hil-STRING-CHEESE-L2, qty: 12, expiry: '2026-12-10'}
 - slot_id: HILL-FRIDGE-R-W1-05
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -836,12 +836,12 @@ slots:
   approach_pose: {x: 7.825, y: 9.5, theta: 0.0}
   facings: 1
   capacity: 12
-  qty: 4
+  qty: 10
   low_threshold: 3
   price_cents: 629
   lots:
-  - {lot_id: hil-GUAC-KIT-L1, qty: 2, expiry: '2026-10-21'}
-  - {lot_id: hil-GUAC-KIT-L2, qty: 2, expiry: '2026-10-23'}
+  - {lot_id: hil-GUAC-KIT-L1, qty: 5, expiry: '2026-10-21'}
+  - {lot_id: hil-GUAC-KIT-L2, qty: 5, expiry: '2026-10-23'}
 - slot_id: HILL-FRIDGE-R-W1-06
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -851,13 +851,13 @@ slots:
   item_position: {x: 8.2, y: 8.4, z: 0.65}
   approach_pose: {x: 7.825, y: 8.4, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 95
+  qty: 95
   low_threshold: 3
   price_cents: 399
   lots:
-  - {lot_id: hil-CHEESE-MEX-L1, qty: 5, expiry: '2026-11-04'}
-  - {lot_id: hil-CHEESE-MEX-L2, qty: 5, expiry: '2026-11-16'}
+  - {lot_id: hil-CHEESE-MEX-L1, qty: 48, expiry: '2026-11-04'}
+  - {lot_id: hil-CHEESE-MEX-L2, qty: 47, expiry: '2026-11-16'}
 - slot_id: HILL-FRIDGE-R-W1-07
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -867,13 +867,13 @@ slots:
   item_position: {x: 8.2, y: 7.3, z: 0.65}
   approach_pose: {x: 7.825, y: 7.3, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 96
+  qty: 96
   low_threshold: 3
   price_cents: 499
   lots:
-  - {lot_id: hil-SOYRIZO-L1, qty: 3, expiry: '2026-11-04'}
-  - {lot_id: hil-SOYRIZO-L2, qty: 3, expiry: '2026-11-16'}
+  - {lot_id: hil-SOYRIZO-L1, qty: 48, expiry: '2026-11-04'}
+  - {lot_id: hil-SOYRIZO-L2, qty: 48, expiry: '2026-11-16'}
 - slot_id: HILL-FRIDGE-R-W1-08
   fixture_id: FRIDGE-R
   aisle_id: aisle_3
@@ -899,13 +899,13 @@ slots:
   item_position: {x: 8.2, y: 6.75, z: 1.05}
   approach_pose: {x: 7.825, y: 6.75, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 50
+  qty: 50
   low_threshold: 3
   price_cents: 579
   lots:
-  - {lot_id: hil-TURKEY-GROUND-L1, qty: 3, expiry: '2026-10-20'}
-  - {lot_id: hil-TURKEY-GROUND-L2, qty: 3, expiry: '2026-10-22'}
+  - {lot_id: hil-TURKEY-GROUND-L1, qty: 25, expiry: '2026-10-20'}
+  - {lot_id: hil-TURKEY-GROUND-L2, qty: 25, expiry: '2026-10-22'}
 - slot_id: HILL-PRODUCE-A-N0-00
   fixture_id: PRODUCE-A
   aisle_id: produce

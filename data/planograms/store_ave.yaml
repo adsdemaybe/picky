@@ -166,8 +166,8 @@ aisles:
 - aisle_id: aisle_3
   label: Aisle 3 - International & Mexican, Canned
   rect: {x: 6.2, y: 9.0, w: 1.6, h: 10.0}
-  categories: [international, mexican, asian, salsa, hot_sauce, tortillas, taco_shells, spices, sauces, canned, soup, grains,
-    pantry, bakery]
+  categories: [international, mexican, asian, salsa, hot_sauce, tortillas, taco_shells, spices, sauces, canned, soup, 
+      grains, pantry, bakery]
   fixture_ids: [G2, G3]
 - aisle_id: aisle_4
   label: Aisle 4 - Pasta, Baking & Bakery
@@ -208,11 +208,11 @@ slots:
   item_position: {x: 0.6, y: 9.6, z: 0.6}
   approach_pose: {x: 0.975, y: 9.6, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 7
+  capacity: 54
+  qty: 54
   low_threshold: 3
   lots:
-  - {lot_id: ave-BODY-WASH-L1, qty: 7}
+  - {lot_id: ave-BODY-WASH-L1, qty: 54}
 - slot_id: AVE-WALL-L-E2-00
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -236,11 +236,11 @@ slots:
   item_position: {x: 0.6, y: 10.3, z: 0.15}
   approach_pose: {x: 0.975, y: 10.3, theta: 3.142}
   facings: 1
-  capacity: 8
-  qty: 5
+  capacity: 12
+  qty: 12
   low_threshold: 2
   lots:
-  - {lot_id: ave-LAUNDRY-DETERGENT-L1, qty: 5}
+  - {lot_id: ave-LAUNDRY-DETERGENT-L1, qty: 12}
 - slot_id: AVE-WALL-L-E1-01
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -250,11 +250,11 @@ slots:
   item_position: {x: 0.6, y: 10.3, z: 0.6}
   approach_pose: {x: 0.975, y: 10.3, theta: 3.142}
   facings: 1
-  capacity: 16
-  qty: 11
+  capacity: 99
+  qty: 99
   low_threshold: 4
   lots:
-  - {lot_id: ave-DEODORANT-L1, qty: 11}
+  - {lot_id: ave-DEODORANT-L1, qty: 99}
 - slot_id: AVE-WALL-L-E2-01
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -264,11 +264,11 @@ slots:
   item_position: {x: 0.6, y: 10.3, z: 1.05}
   approach_pose: {x: 0.975, y: 10.3, theta: 3.142}
   facings: 1
-  capacity: 18
-  qty: 14
+  capacity: 33
+  qty: 33
   low_threshold: 5
   lots:
-  - {lot_id: ave-TOOTHPASTE-L1, qty: 14}
+  - {lot_id: ave-TOOTHPASTE-L1, qty: 33}
 - slot_id: AVE-WALL-L-E0-02
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -292,11 +292,11 @@ slots:
   item_position: {x: 0.6, y: 11.0, z: 1.05}
   approach_pose: {x: 0.975, y: 11.0, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 49
+  qty: 49
   low_threshold: 3
   lots:
-  - {lot_id: ave-SHAMPOO-L1, qty: 8}
+  - {lot_id: ave-SHAMPOO-L1, qty: 49}
 - slot_id: AVE-WALL-L-E1-03
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -306,11 +306,11 @@ slots:
   item_position: {x: 0.6, y: 12.4, z: 0.6}
   approach_pose: {x: 0.975, y: 12.4, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 28
+  qty: 28
   low_threshold: 3
   lots:
-  - {lot_id: ave-TRASH-BAGS-L1, qty: 10}
+  - {lot_id: ave-TRASH-BAGS-L1, qty: 28}
 - slot_id: AVE-WALL-L-E1-04
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -320,11 +320,11 @@ slots:
   item_position: {x: 0.6, y: 13.8, z: 0.6}
   approach_pose: {x: 0.975, y: 13.8, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 72
+  qty: 72
   low_threshold: 3
   lots:
-  - {lot_id: ave-DISH-SOAP-L1, qty: 12}
+  - {lot_id: ave-DISH-SOAP-L1, qty: 72}
 - slot_id: AVE-WALL-L-E1-05
   fixture_id: WALL-L
   aisle_id: aisle_1
@@ -334,11 +334,11 @@ slots:
   item_position: {x: 0.6, y: 15.2, z: 0.6}
   approach_pose: {x: 0.975, y: 15.2, theta: 3.142}
   facings: 1
-  capacity: 15
-  qty: 15
+  capacity: 21
+  qty: 21
   low_threshold: 4
   lots:
-  - {lot_id: ave-NAPKINS-L1, qty: 15}
+  - {lot_id: ave-NAPKINS-L1, qty: 21}
 - slot_id: AVE-G1-E1-00
   fixture_id: G1
   aisle_id: aisle_2
@@ -361,11 +361,11 @@ slots:
   item_position: {x: 3.4, y: 9.6, z: 1.05}
   approach_pose: {x: 3.775, y: 9.6, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 1
+  capacity: 40
+  qty: 40
   low_threshold: 3
   lots:
-  - {lot_id: ave-COOKIES-CHOC-CHIP-L1, qty: 1}
+  - {lot_id: ave-COOKIES-CHOC-CHIP-L1, qty: 40}
 - slot_id: AVE-G1-E1-01
   fixture_id: G1
   aisle_id: aisle_2
@@ -375,11 +375,11 @@ slots:
   item_position: {x: 3.4, y: 10.3, z: 0.6}
   approach_pose: {x: 3.775, y: 10.3, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 2
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-CRACKERS-L1, qty: 2}
+  - {lot_id: ave-CRACKERS-L1, qty: 24}
 - slot_id: AVE-G1-E1-02
   fixture_id: G1
   aisle_id: aisle_2
@@ -389,11 +389,11 @@ slots:
   item_position: {x: 3.4, y: 11.0, z: 0.6}
   approach_pose: {x: 3.775, y: 11.0, theta: 3.142}
   facings: 1
-  capacity: 14
-  qty: 10
+  capacity: 24
+  qty: 24
   low_threshold: 4
   lots:
-  - {lot_id: ave-GRANOLA-BARS-L1, qty: 10}
+  - {lot_id: ave-GRANOLA-BARS-L1, qty: 24}
 - slot_id: AVE-G1-E2-02
   fixture_id: G1
   aisle_id: aisle_2
@@ -403,11 +403,11 @@ slots:
   item_position: {x: 3.4, y: 11.0, z: 1.05}
   approach_pose: {x: 3.775, y: 11.0, theta: 3.142}
   facings: 1
-  capacity: 14
-  qty: 14
+  capacity: 25
+  qty: 25
   low_threshold: 4
   lots:
-  - {lot_id: ave-CHIPS-SPICY-LIME-L1, qty: 14}
+  - {lot_id: ave-CHIPS-SPICY-LIME-L1, qty: 25}
 - slot_id: AVE-G1-E2-03
   fixture_id: G1
   aisle_id: aisle_2
@@ -417,11 +417,11 @@ slots:
   item_position: {x: 3.4, y: 12.4, z: 1.05}
   approach_pose: {x: 3.775, y: 12.4, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 25
+  qty: 25
   low_threshold: 3
   lots:
-  - {lot_id: ave-CHIPS-POTATO-L1, qty: 12}
+  - {lot_id: ave-CHIPS-POTATO-L1, qty: 25}
 - slot_id: AVE-G1-E1-04
   fixture_id: G1
   aisle_id: aisle_2
@@ -431,11 +431,11 @@ slots:
   item_position: {x: 3.4, y: 13.8, z: 0.6}
   approach_pose: {x: 3.775, y: 13.8, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-POPCORN-L1, qty: 10}
+  - {lot_id: ave-POPCORN-L1, qty: 24}
 - slot_id: AVE-G1-E1-05
   fixture_id: G1
   aisle_id: aisle_2
@@ -445,11 +445,11 @@ slots:
   item_position: {x: 3.4, y: 15.2, z: 0.6}
   approach_pose: {x: 3.775, y: 15.2, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 48
+  qty: 48
   low_threshold: 3
   lots:
-  - {lot_id: ave-TRAIL-MIX-L1, qty: 9}
+  - {lot_id: ave-TRAIL-MIX-L1, qty: 48}
 - slot_id: AVE-G1-E2-06
   fixture_id: G1
   aisle_id: aisle_2
@@ -459,11 +459,11 @@ slots:
   item_position: {x: 3.4, y: 16.6, z: 1.05}
   approach_pose: {x: 3.775, y: 16.6, theta: 3.142}
   facings: 1
-  capacity: 20
-  qty: 20
+  capacity: 120
+  qty: 120
   low_threshold: 5
   lots:
-  - {lot_id: ave-CHOC-DARK-L1, qty: 20}
+  - {lot_id: ave-CHOC-DARK-L1, qty: 120}
 - slot_id: AVE-G1-W0-00
   fixture_id: G1
   aisle_id: aisle_1
@@ -487,11 +487,11 @@ slots:
   item_position: {x: 2.2, y: 18.7, z: 0.6}
   approach_pose: {x: 1.825, y: 18.7, theta: 0.0}
   facings: 1
-  capacity: 18
-  qty: 14
+  capacity: 36
+  qty: 36
   low_threshold: 5
   lots:
-  - {lot_id: ave-SPORTS-DRINK-L1, qty: 14}
+  - {lot_id: ave-SPORTS-DRINK-L1, qty: 36}
 - slot_id: AVE-G1-W2-00
   fixture_id: G1
   aisle_id: aisle_1
@@ -501,11 +501,11 @@ slots:
   item_position: {x: 2.2, y: 18.7, z: 1.05}
   approach_pose: {x: 1.825, y: 18.7, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 36
+  qty: 36
   low_threshold: 3
   lots:
-  - {lot_id: ave-WINE-RED-L1, qty: 9}
+  - {lot_id: ave-WINE-RED-L1, qty: 36}
 - slot_id: AVE-G1-W1-01
   fixture_id: G1
   aisle_id: aisle_1
@@ -515,11 +515,11 @@ slots:
   item_position: {x: 2.2, y: 16.6, z: 0.6}
   approach_pose: {x: 1.825, y: 16.6, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 36
+  qty: 36
   low_threshold: 3
   lots:
-  - {lot_id: ave-LAGER-6PK-L1, qty: 12}
+  - {lot_id: ave-LAGER-6PK-L1, qty: 36}
 - slot_id: AVE-G1-W1-02
   fixture_id: G1
   aisle_id: aisle_1
@@ -529,11 +529,11 @@ slots:
   item_position: {x: 2.2, y: 13.8, z: 0.6}
   approach_pose: {x: 1.825, y: 13.8, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 48
+  qty: 48
   low_threshold: 3
   lots:
-  - {lot_id: ave-COLA-CANE-L1, qty: 9}
+  - {lot_id: ave-COLA-CANE-L1, qty: 48}
 - slot_id: AVE-G1-W0-03
   fixture_id: G1
   aisle_id: aisle_1
@@ -543,11 +543,11 @@ slots:
   item_position: {x: 2.2, y: 11.0, z: 0.15}
   approach_pose: {x: 1.825, y: 11.0, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-SPARKLING-LIME-L1, qty: 10}
+  - {lot_id: ave-SPARKLING-LIME-L1, qty: 24}
 - slot_id: AVE-G2-E0-00
   fixture_id: G2
   aisle_id: aisle_3
@@ -557,11 +557,11 @@ slots:
   item_position: {x: 6.2, y: 9.6, z: 0.15}
   approach_pose: {x: 6.575, y: 9.6, theta: 3.142}
   facings: 1
-  capacity: 8
-  qty: 6
+  capacity: 15
+  qty: 15
   low_threshold: 2
   lots:
-  - {lot_id: ave-MASA-HARINA-L1, qty: 6}
+  - {lot_id: ave-MASA-HARINA-L1, qty: 15}
 - slot_id: AVE-G2-E1-00
   fixture_id: G2
   aisle_id: aisle_3
@@ -571,12 +571,12 @@ slots:
   item_position: {x: 6.2, y: 9.6, z: 0.6}
   approach_pose: {x: 6.575, y: 9.6, theta: 3.142}
   facings: 1
-  capacity: 14
-  qty: 14
+  capacity: 27
+  qty: 27
   low_threshold: 4
   lots:
-  - {lot_id: ave-TORT-CORN-L1, qty: 7, expiry: '2026-10-26'}
-  - {lot_id: ave-TORT-CORN-L2, qty: 7, expiry: '2026-10-31'}
+  - {lot_id: ave-TORT-CORN-L1, qty: 14, expiry: '2026-10-26'}
+  - {lot_id: ave-TORT-CORN-L2, qty: 13, expiry: '2026-10-31'}
 - slot_id: AVE-G2-E2-00
   fixture_id: G2
   aisle_id: aisle_3
@@ -586,12 +586,12 @@ slots:
   item_position: {x: 6.2, y: 9.6, z: 1.05}
   approach_pose: {x: 6.575, y: 9.6, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 22
+  qty: 22
   low_threshold: 3
   lots:
-  - {lot_id: ave-TORT-FLOUR-L1, qty: 6, expiry: '2026-10-30'}
-  - {lot_id: ave-TORT-FLOUR-L2, qty: 6, expiry: '2026-11-07'}
+  - {lot_id: ave-TORT-FLOUR-L1, qty: 11, expiry: '2026-10-30'}
+  - {lot_id: ave-TORT-FLOUR-L2, qty: 11, expiry: '2026-11-07'}
 - slot_id: AVE-G2-E1-01
   fixture_id: G2
   aisle_id: aisle_3
@@ -601,11 +601,11 @@ slots:
   item_position: {x: 6.2, y: 10.3, z: 0.6}
   approach_pose: {x: 6.575, y: 10.3, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 49
+  qty: 49
   low_threshold: 3
   lots:
-  - {lot_id: ave-SOY-SAUCE-L1, qty: 9}
+  - {lot_id: ave-SOY-SAUCE-L1, qty: 49}
 - slot_id: AVE-G2-E2-01
   fixture_id: G2
   aisle_id: aisle_3
@@ -615,11 +615,11 @@ slots:
   item_position: {x: 6.2, y: 10.3, z: 1.05}
   approach_pose: {x: 6.575, y: 10.3, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 15
+  qty: 15
   low_threshold: 3
   lots:
-  - {lot_id: ave-RAMEN-L1, qty: 10}
+  - {lot_id: ave-RAMEN-L1, qty: 15}
 - slot_id: AVE-G2-E1-02
   fixture_id: G2
   aisle_id: aisle_3
@@ -629,11 +629,11 @@ slots:
   item_position: {x: 6.2, y: 11.0, z: 0.6}
   approach_pose: {x: 6.575, y: 11.0, theta: 3.142}
   facings: 1
-  capacity: 24
-  qty: 24
+  capacity: 114
+  qty: 114
   low_threshold: 6
   lots:
-  - {lot_id: ave-TACO-SEASONING-L1, qty: 24}
+  - {lot_id: ave-TACO-SEASONING-L1, qty: 114}
 - slot_id: AVE-G2-E2-02
   fixture_id: G2
   aisle_id: aisle_3
@@ -643,11 +643,11 @@ slots:
   item_position: {x: 6.2, y: 11.0, z: 1.05}
   approach_pose: {x: 6.575, y: 11.0, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 18
+  qty: 18
   low_threshold: 3
   lots:
-  - {lot_id: ave-TACO-SHELLS-L1, qty: 10}
+  - {lot_id: ave-TACO-SHELLS-L1, qty: 18}
 - slot_id: AVE-G2-E1-03
   fixture_id: G2
   aisle_id: aisle_3
@@ -657,11 +657,11 @@ slots:
   item_position: {x: 6.2, y: 11.7, z: 0.6}
   approach_pose: {x: 6.575, y: 11.7, theta: 3.142}
   facings: 1
-  capacity: 18
-  qty: 14
+  capacity: 42
+  qty: 42
   low_threshold: 5
   lots:
-  - {lot_id: ave-COCONUT-MILK-L1, qty: 14}
+  - {lot_id: ave-COCONUT-MILK-L1, qty: 42}
 - slot_id: AVE-G2-E1-04
   fixture_id: G2
   aisle_id: aisle_3
@@ -671,11 +671,11 @@ slots:
   item_position: {x: 6.2, y: 12.4, z: 0.6}
   approach_pose: {x: 6.575, y: 12.4, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 36
+  qty: 36
   low_threshold: 3
   lots:
-  - {lot_id: ave-SALSA-MILD-L1, qty: 12}
+  - {lot_id: ave-SALSA-MILD-L1, qty: 36}
 - slot_id: AVE-G2-E2-04
   fixture_id: G2
   aisle_id: aisle_3
@@ -685,11 +685,11 @@ slots:
   item_position: {x: 6.2, y: 12.4, z: 1.05}
   approach_pose: {x: 6.575, y: 12.4, theta: 3.142}
   facings: 1
-  capacity: 16
-  qty: 16
+  capacity: 120
+  qty: 120
   low_threshold: 4
   lots:
-  - {lot_id: ave-HOTSAUCE-RED-L1, qty: 16}
+  - {lot_id: ave-HOTSAUCE-RED-L1, qty: 120}
 - slot_id: AVE-G2-E1-05
   fixture_id: G2
   aisle_id: aisle_3
@@ -699,11 +699,11 @@ slots:
   item_position: {x: 6.2, y: 13.8, z: 0.6}
   approach_pose: {x: 6.575, y: 13.8, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 72
+  qty: 72
   low_threshold: 3
   lots:
-  - {lot_id: ave-SALSA-VERDE-L1, qty: 10}
+  - {lot_id: ave-SALSA-VERDE-L1, qty: 72}
 - slot_id: AVE-G2-E2-05
   fixture_id: G2
   aisle_id: aisle_3
@@ -713,11 +713,11 @@ slots:
   item_position: {x: 6.2, y: 13.8, z: 1.05}
   approach_pose: {x: 6.575, y: 13.8, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 120
+  qty: 120
   low_threshold: 3
   lots:
-  - {lot_id: ave-HOTSAUCE-JALAPENO-L1, qty: 12}
+  - {lot_id: ave-HOTSAUCE-JALAPENO-L1, qty: 120}
 - slot_id: AVE-G2-E1-06
   fixture_id: G2
   aisle_id: aisle_3
@@ -727,11 +727,11 @@ slots:
   item_position: {x: 6.2, y: 15.2, z: 0.6}
   approach_pose: {x: 6.575, y: 15.2, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 72
+  qty: 72
   low_threshold: 3
   lots:
-  - {lot_id: ave-SALSA-CHIPOTLE-L1, qty: 9}
+  - {lot_id: ave-SALSA-CHIPOTLE-L1, qty: 72}
 - slot_id: AVE-G2-E1-07
   fixture_id: G2
   aisle_id: aisle_3
@@ -741,11 +741,11 @@ slots:
   item_position: {x: 6.2, y: 16.6, z: 0.6}
   approach_pose: {x: 6.575, y: 16.6, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 72
+  qty: 72
   low_threshold: 3
   lots:
-  - {lot_id: ave-SALSA-HOT-L1, qty: 8}
+  - {lot_id: ave-SALSA-HOT-L1, qty: 72}
 - slot_id: AVE-G2-E1-08
   fixture_id: G2
   aisle_id: aisle_3
@@ -755,11 +755,11 @@ slots:
   item_position: {x: 6.2, y: 18.0, z: 0.6}
   approach_pose: {x: 6.575, y: 18.0, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 84
+  qty: 84
   low_threshold: 3
   lots:
-  - {lot_id: ave-ENCHILADA-SAUCE-L1, qty: 10}
+  - {lot_id: ave-ENCHILADA-SAUCE-L1, qty: 84}
 - slot_id: AVE-G2-W1-00
   fixture_id: G2
   aisle_id: aisle_2
@@ -769,11 +769,11 @@ slots:
   item_position: {x: 5.0, y: 18.7, z: 0.6}
   approach_pose: {x: 4.625, y: 18.7, theta: 0.0}
   facings: 1
-  capacity: 10
-  qty: 7
+  capacity: 42
+  qty: 42
   low_threshold: 3
   lots:
-  - {lot_id: ave-HONEY-L1, qty: 7}
+  - {lot_id: ave-HONEY-L1, qty: 42}
 - slot_id: AVE-G2-W1-01
   fixture_id: G2
   aisle_id: aisle_2
@@ -783,11 +783,11 @@ slots:
   item_position: {x: 5.0, y: 16.6, z: 0.6}
   approach_pose: {x: 4.625, y: 16.6, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 60
+  qty: 60
   low_threshold: 3
   lots:
-  - {lot_id: ave-PEANUT-BUTTER-L1, qty: 12}
+  - {lot_id: ave-PEANUT-BUTTER-L1, qty: 60}
 - slot_id: AVE-G2-W2-02
   fixture_id: G2
   aisle_id: aisle_2
@@ -797,11 +797,11 @@ slots:
   item_position: {x: 5.0, y: 15.2, z: 1.05}
   approach_pose: {x: 4.625, y: 15.2, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 84
+  qty: 84
   low_threshold: 3
   lots:
-  - {lot_id: ave-COFFEE-L1, qty: 10}
+  - {lot_id: ave-COFFEE-L1, qty: 84}
 - slot_id: AVE-G2-W1-03
   fixture_id: G2
   aisle_id: aisle_2
@@ -811,11 +811,11 @@ slots:
   item_position: {x: 5.0, y: 13.8, z: 0.6}
   approach_pose: {x: 4.625, y: 13.8, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 48
+  qty: 48
   low_threshold: 3
   lots:
-  - {lot_id: ave-OATMEAL-L1, qty: 8}
+  - {lot_id: ave-OATMEAL-L1, qty: 48}
 - slot_id: AVE-G2-W2-04
   fixture_id: G2
   aisle_id: aisle_2
@@ -825,11 +825,11 @@ slots:
   item_position: {x: 5.0, y: 12.4, z: 1.05}
   approach_pose: {x: 4.625, y: 12.4, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 56
+  qty: 56
   low_threshold: 3
   lots:
-  - {lot_id: ave-GRANOLA-L1, qty: 8}
+  - {lot_id: ave-GRANOLA-L1, qty: 56}
 - slot_id: AVE-G2-W2-05
   fixture_id: G2
   aisle_id: aisle_2
@@ -839,11 +839,11 @@ slots:
   item_position: {x: 5.0, y: 11.0, z: 1.05}
   approach_pose: {x: 4.625, y: 11.0, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 42
+  qty: 42
   low_threshold: 3
   lots:
-  - {lot_id: ave-CEREAL-OATS-L1, qty: 10}
+  - {lot_id: ave-CEREAL-OATS-L1, qty: 42}
 - slot_id: AVE-G3-E0-00
   fixture_id: G3
   aisle_id: aisle_4
@@ -853,11 +853,11 @@ slots:
   item_position: {x: 9.0, y: 9.6, z: 0.15}
   approach_pose: {x: 9.375, y: 9.6, theta: 3.142}
   facings: 1
-  capacity: 8
-  qty: 6
+  capacity: 15
+  qty: 15
   low_threshold: 2
   lots:
-  - {lot_id: ave-FLOUR-AP-L1, qty: 6}
+  - {lot_id: ave-FLOUR-AP-L1, qty: 15}
 - slot_id: AVE-G3-E1-00
   fixture_id: G3
   aisle_id: aisle_4
@@ -867,11 +867,11 @@ slots:
   item_position: {x: 9.0, y: 9.6, z: 0.6}
   approach_pose: {x: 9.375, y: 9.6, theta: 3.142}
   facings: 1
-  capacity: 24
-  qty: 20
+  capacity: 66
+  qty: 66
   low_threshold: 6
   lots:
-  - {lot_id: ave-MAC-CHEESE-L1, qty: 20}
+  - {lot_id: ave-MAC-CHEESE-L1, qty: 66}
 - slot_id: AVE-G3-E0-01
   fixture_id: G3
   aisle_id: aisle_4
@@ -881,11 +881,11 @@ slots:
   item_position: {x: 9.0, y: 10.3, z: 0.15}
   approach_pose: {x: 9.375, y: 10.3, theta: 3.142}
   facings: 1
-  capacity: 8
-  qty: 7
+  capacity: 18
+  qty: 18
   low_threshold: 2
   lots:
-  - {lot_id: ave-SUGAR-L1, qty: 7}
+  - {lot_id: ave-SUGAR-L1, qty: 18}
 - slot_id: AVE-G3-E1-02
   fixture_id: G3
   aisle_id: aisle_4
@@ -895,11 +895,11 @@ slots:
   item_position: {x: 9.0, y: 11.0, z: 0.6}
   approach_pose: {x: 9.375, y: 11.0, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 84
+  qty: 84
   low_threshold: 3
   lots:
-  - {lot_id: ave-OLIVE-OIL-L1, qty: 8}
+  - {lot_id: ave-OLIVE-OIL-L1, qty: 84}
 - slot_id: AVE-G3-E1-03
   fixture_id: G3
   aisle_id: aisle_4
@@ -909,11 +909,11 @@ slots:
   item_position: {x: 9.0, y: 12.4, z: 0.6}
   approach_pose: {x: 9.375, y: 12.4, theta: 3.142}
   facings: 1
-  capacity: 20
-  qty: 20
+  capacity: 120
+  qty: 120
   low_threshold: 5
   lots:
-  - {lot_id: ave-PASTA-L1, qty: 20}
+  - {lot_id: ave-PASTA-L1, qty: 120}
 - slot_id: AVE-G3-E1-04
   fixture_id: G3
   aisle_id: aisle_4
@@ -923,11 +923,11 @@ slots:
   item_position: {x: 9.0, y: 13.8, z: 0.6}
   approach_pose: {x: 9.375, y: 13.8, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 72
+  qty: 72
   low_threshold: 3
   lots:
-  - {lot_id: ave-MARINARA-L1, qty: 12}
+  - {lot_id: ave-MARINARA-L1, qty: 72}
 - slot_id: AVE-G3-W1-00
   fixture_id: G3
   aisle_id: aisle_3
@@ -937,11 +937,11 @@ slots:
   item_position: {x: 7.8, y: 18.7, z: 0.6}
   approach_pose: {x: 7.425, y: 18.7, theta: 0.0}
   facings: 1
-  capacity: 24
-  qty: 20
+  capacity: 36
+  qty: 36
   low_threshold: 6
   lots:
-  - {lot_id: ave-TOMATOES-DICED-L1, qty: 20}
+  - {lot_id: ave-TOMATOES-DICED-L1, qty: 36}
 - slot_id: AVE-G3-W1-01
   fixture_id: G3
   aisle_id: aisle_3
@@ -951,11 +951,11 @@ slots:
   item_position: {x: 7.8, y: 18.0, z: 0.6}
   approach_pose: {x: 7.425, y: 18.0, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 35
+  qty: 35
   low_threshold: 3
   lots:
-  - {lot_id: ave-BROTH-CHICKEN-L1, qty: 9}
+  - {lot_id: ave-BROTH-CHICKEN-L1, qty: 35}
 - slot_id: AVE-G3-W1-02
   fixture_id: G3
   aisle_id: aisle_3
@@ -965,11 +965,11 @@ slots:
   item_position: {x: 7.8, y: 17.3, z: 0.6}
   approach_pose: {x: 7.425, y: 17.3, theta: 0.0}
   facings: 1
-  capacity: 24
-  qty: 18
+  capacity: 36
+  qty: 36
   low_threshold: 6
   lots:
-  - {lot_id: ave-TUNA-L1, qty: 18}
+  - {lot_id: ave-TUNA-L1, qty: 36}
 - slot_id: AVE-G3-W0-03
   fixture_id: G3
   aisle_id: aisle_3
@@ -979,11 +979,11 @@ slots:
   item_position: {x: 7.8, y: 15.2, z: 0.15}
   approach_pose: {x: 7.425, y: 15.2, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-RICE-WHITE-L1, qty: 12}
+  - {lot_id: ave-RICE-WHITE-L1, qty: 24}
 - slot_id: AVE-G3-W1-04
   fixture_id: G3
   aisle_id: aisle_3
@@ -993,12 +993,12 @@ slots:
   item_position: {x: 7.8, y: 13.8, z: 0.6}
   approach_pose: {x: 7.425, y: 13.8, theta: 0.0}
   facings: 1
-  capacity: 15
-  qty: 15
+  capacity: 84
+  qty: 84
   low_threshold: 4
   shelf_tag_cents: 249
   lots:
-  - {lot_id: ave-BEANS-REFRIED-L1, qty: 15}
+  - {lot_id: ave-BEANS-REFRIED-L1, qty: 84}
 - slot_id: AVE-G3-W1-05
   fixture_id: G3
   aisle_id: aisle_3
@@ -1008,11 +1008,11 @@ slots:
   item_position: {x: 7.8, y: 12.4, z: 0.6}
   approach_pose: {x: 7.425, y: 12.4, theta: 0.0}
   facings: 1
-  capacity: 18
-  qty: 18
+  capacity: 84
+  qty: 84
   low_threshold: 5
   lots:
-  - {lot_id: ave-BEANS-PINTO-L1, qty: 18}
+  - {lot_id: ave-BEANS-PINTO-L1, qty: 84}
 - slot_id: AVE-G3-W1-06
   fixture_id: G3
   aisle_id: aisle_3
@@ -1022,11 +1022,11 @@ slots:
   item_position: {x: 7.8, y: 11.0, z: 0.6}
   approach_pose: {x: 7.425, y: 11.0, theta: 0.0}
   facings: 1
-  capacity: 24
-  qty: 24
+  capacity: 84
+  qty: 84
   low_threshold: 6
   lots:
-  - {lot_id: ave-BEANS-BLACK-L1, qty: 24}
+  - {lot_id: ave-BEANS-BLACK-L1, qty: 84}
 - slot_id: AVE-G4-E1-00
   fixture_id: G4
   aisle_id: aisle_5
@@ -1036,11 +1036,11 @@ slots:
   item_position: {x: 11.8, y: 9.6, z: 0.6}
   approach_pose: {x: 12.175, y: 9.6, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 16
+  qty: 16
   low_threshold: 3
   lots:
-  - {lot_id: ave-APPLE-JUICE-L1, qty: 9}
+  - {lot_id: ave-APPLE-JUICE-L1, qty: 16}
 - slot_id: AVE-G4-E2-01
   fixture_id: G4
   aisle_id: aisle_5
@@ -1064,11 +1064,11 @@ slots:
   item_position: {x: 11.8, y: 15.2, z: 0.15}
   approach_pose: {x: 12.175, y: 15.2, theta: 3.142}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 16
+  qty: 16
   low_threshold: 3
   lots:
-  - {lot_id: ave-COLA-L1, qty: 12}
+  - {lot_id: ave-COLA-L1, qty: 16}
 - slot_id: AVE-G4-W1-00
   fixture_id: G4
   aisle_id: aisle_4
@@ -1079,11 +1079,11 @@ slots:
   approach_pose: {x: 10.225, y: 18.7, theta: 0.0}
   facings: 1
   capacity: 12
-  qty: 8
+  qty: 10
   low_threshold: 3
   lots:
-  - {lot_id: ave-BAGELS-L1, qty: 4, expiry: '2026-10-24'}
-  - {lot_id: ave-BAGELS-L2, qty: 4, expiry: '2026-10-27'}
+  - {lot_id: ave-BAGELS-L1, qty: 5, expiry: '2026-10-24'}
+  - {lot_id: ave-BAGELS-L2, qty: 5, expiry: '2026-10-27'}
 - slot_id: AVE-G4-W2-00
   fixture_id: G4
   aisle_id: aisle_4
@@ -1123,12 +1123,12 @@ slots:
   item_position: {x: 10.6, y: 13.8, z: 0.6}
   approach_pose: {x: 10.225, y: 13.8, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 16
+  qty: 16
   low_threshold: 3
   lots:
-  - {lot_id: ave-BREAD-SOURDOUGH-L1, qty: 2, expiry: '2026-10-18'}
-  - {lot_id: ave-BREAD-SOURDOUGH-L2, qty: 4, expiry: '2026-10-21'}
+  - {lot_id: ave-BREAD-SOURDOUGH-L1, qty: 5, expiry: '2026-10-18'}
+  - {lot_id: ave-BREAD-SOURDOUGH-L2, qty: 11, expiry: '2026-10-21'}
   deal: {kind: near_expiry, price_cents: 249, original_cents: 499, percent_off: 50, reason: 'Near expiry: best by Oct 18,
       half price', valid_until: '2026-10-18T23:59:00Z', lot_id: ave-BREAD-SOURDOUGH-L1}
 - slot_id: AVE-G4-W1-03
@@ -1140,12 +1140,12 @@ slots:
   item_position: {x: 10.6, y: 12.4, z: 0.6}
   approach_pose: {x: 10.225, y: 12.4, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 36
+  qty: 36
   low_threshold: 3
   lots:
-  - {lot_id: ave-BREAD-WHEAT-L1, qty: 5, expiry: '2026-10-23'}
-  - {lot_id: ave-BREAD-WHEAT-L2, qty: 5, expiry: '2026-10-26'}
+  - {lot_id: ave-BREAD-WHEAT-L1, qty: 18, expiry: '2026-10-23'}
+  - {lot_id: ave-BREAD-WHEAT-L2, qty: 18, expiry: '2026-10-26'}
 - slot_id: AVE-FREEZER-R-W0-00
   fixture_id: FREEZER-R
   aisle_id: aisle_5
@@ -1155,11 +1155,11 @@ slots:
   item_position: {x: 13.4, y: 18.7, z: 0.25}
   approach_pose: {x: 13.025, y: 18.7, theta: 0.0}
   facings: 1
-  capacity: 16
-  qty: 12
+  capacity: 33
+  qty: 33
   low_threshold: 4
   lots:
-  - {lot_id: ave-PEAS-FROZEN-L1, qty: 12, expiry: '2027-10-17'}
+  - {lot_id: ave-PEAS-FROZEN-L1, qty: 33, expiry: '2027-10-17'}
 - slot_id: AVE-FREEZER-R-W1-00
   fixture_id: FREEZER-R
   aisle_id: aisle_5
@@ -1170,10 +1170,10 @@ slots:
   approach_pose: {x: 13.025, y: 18.7, theta: 0.0}
   facings: 1
   capacity: 10
-  qty: 7
+  qty: 9
   low_threshold: 3
   lots:
-  - {lot_id: ave-PIZZA-FROZEN-L1, qty: 7, expiry: '2027-07-14'}
+  - {lot_id: ave-PIZZA-FROZEN-L1, qty: 9, expiry: '2027-07-14'}
 - slot_id: AVE-FREEZER-R-W2-00
   fixture_id: FREEZER-R
   aisle_id: aisle_5
@@ -1183,11 +1183,11 @@ slots:
   item_position: {x: 13.4, y: 18.7, z: 1.05}
   approach_pose: {x: 13.025, y: 18.7, theta: 0.0}
   facings: 1
-  capacity: 10
-  qty: 6
+  capacity: 18
+  qty: 18
   low_threshold: 3
   lots:
-  - {lot_id: ave-SHRIMP-FROZEN-L1, qty: 6, expiry: '2027-07-14'}
+  - {lot_id: ave-SHRIMP-FROZEN-L1, qty: 18, expiry: '2027-07-14'}
 - slot_id: AVE-FREEZER-R-W1-01
   fixture_id: FREEZER-R
   aisle_id: aisle_5
@@ -1197,11 +1197,11 @@ slots:
   item_position: {x: 13.4, y: 15.2, z: 0.65}
   approach_pose: {x: 13.025, y: 15.2, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 32
+  qty: 32
   low_threshold: 3
   lots:
-  - {lot_id: ave-BURRITOS-FROZEN-L1, qty: 10, expiry: '2027-04-15'}
+  - {lot_id: ave-BURRITOS-FROZEN-L1, qty: 32, expiry: '2027-04-15'}
 - slot_id: AVE-FREEZER-R-W1-02
   fixture_id: FREEZER-R
   aisle_id: aisle_5
@@ -1211,11 +1211,11 @@ slots:
   item_position: {x: 13.4, y: 13.8, z: 0.65}
   approach_pose: {x: 13.025, y: 13.8, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 63
+  qty: 63
   low_threshold: 3
   lots:
-  - {lot_id: ave-CORN-FROZEN-L1, qty: 10, expiry: '2027-10-17'}
+  - {lot_id: ave-CORN-FROZEN-L1, qty: 63, expiry: '2027-10-17'}
 - slot_id: AVE-FREEZER-R-W1-03
   fixture_id: FREEZER-R
   aisle_id: aisle_5
@@ -1225,11 +1225,11 @@ slots:
   item_position: {x: 13.4, y: 12.4, z: 0.65}
   approach_pose: {x: 13.025, y: 12.4, theta: 0.0}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 21
+  qty: 21
   low_threshold: 3
   lots:
-  - {lot_id: ave-ICE-CREAM-L1, qty: 8, expiry: '2027-04-15'}
+  - {lot_id: ave-ICE-CREAM-L1, qty: 21, expiry: '2027-04-15'}
 - slot_id: AVE-FRIDGE-BACK-S0-00
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1239,12 +1239,12 @@ slots:
   item_position: {x: 1.4, y: 21.2, z: 0.25}
   approach_pose: {x: 1.4, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 10
-  qty: 8
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-CHICKEN-BREAST-L1, qty: 4, expiry: '2026-10-24'}
-  - {lot_id: ave-CHICKEN-BREAST-L2, qty: 4, expiry: '2026-10-27'}
+  - {lot_id: ave-CHICKEN-BREAST-L1, qty: 12, expiry: '2026-10-24'}
+  - {lot_id: ave-CHICKEN-BREAST-L2, qty: 12, expiry: '2026-10-27'}
 - slot_id: AVE-FRIDGE-BACK-S1-00
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1270,11 +1270,11 @@ slots:
   approach_pose: {x: 1.4, y: 20.825, theta: 1.571}
   facings: 1
   capacity: 12
-  qty: 8
+  qty: 10
   low_threshold: 3
   lots:
-  - {lot_id: ave-TURKEY-GROUND-L1, qty: 4, expiry: '2026-10-20'}
-  - {lot_id: ave-TURKEY-GROUND-L2, qty: 4, expiry: '2026-10-22'}
+  - {lot_id: ave-TURKEY-GROUND-L1, qty: 5, expiry: '2026-10-20'}
+  - {lot_id: ave-TURKEY-GROUND-L2, qty: 5, expiry: '2026-10-22'}
 - slot_id: AVE-FRIDGE-BACK-S0-01
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1284,12 +1284,12 @@ slots:
   item_position: {x: 2.0, y: 21.2, z: 0.25}
   approach_pose: {x: 2.0, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 10
-  qty: 7
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-CHICKEN-THIGHS-L1, qty: 4, expiry: '2026-10-24'}
-  - {lot_id: ave-CHICKEN-THIGHS-L2, qty: 3, expiry: '2026-10-27'}
+  - {lot_id: ave-CHICKEN-THIGHS-L1, qty: 14, expiry: '2026-10-24'}
+  - {lot_id: ave-CHICKEN-THIGHS-L2, qty: 10, expiry: '2026-10-27'}
 - slot_id: AVE-FRIDGE-BACK-S1-01
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1299,12 +1299,12 @@ slots:
   item_position: {x: 2.0, y: 21.2, z: 0.65}
   approach_pose: {x: 2.0, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 8
-  qty: 5
+  capacity: 30
+  qty: 30
   low_threshold: 2
   lots:
-  - {lot_id: ave-SALMON-FILLET-L1, qty: 3, expiry: '2026-10-24'}
-  - {lot_id: ave-SALMON-FILLET-L2, qty: 2, expiry: '2026-10-27'}
+  - {lot_id: ave-SALMON-FILLET-L1, qty: 18, expiry: '2026-10-24'}
+  - {lot_id: ave-SALMON-FILLET-L2, qty: 12, expiry: '2026-10-27'}
 - slot_id: AVE-FRIDGE-BACK-S2-01
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1314,12 +1314,12 @@ slots:
   item_position: {x: 2.0, y: 21.2, z: 1.05}
   approach_pose: {x: 2.0, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 8
-  qty: 5
+  capacity: 15
+  qty: 15
   low_threshold: 2
   lots:
-  - {lot_id: ave-STEAK-FLANK-L1, qty: 3, expiry: '2026-10-24'}
-  - {lot_id: ave-STEAK-FLANK-L2, qty: 2, expiry: '2026-10-27'}
+  - {lot_id: ave-STEAK-FLANK-L1, qty: 9, expiry: '2026-10-24'}
+  - {lot_id: ave-STEAK-FLANK-L2, qty: 6, expiry: '2026-10-27'}
 - slot_id: AVE-FRIDGE-BACK-S0-02
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1329,12 +1329,12 @@ slots:
   item_position: {x: 2.6, y: 21.2, z: 0.25}
   approach_pose: {x: 2.6, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 48
+  qty: 48
   low_threshold: 3
   lots:
-  - {lot_id: ave-TOFU-FIRM-L1, qty: 5, expiry: '2026-11-01'}
-  - {lot_id: ave-TOFU-FIRM-L2, qty: 5, expiry: '2026-11-13'}
+  - {lot_id: ave-TOFU-FIRM-L1, qty: 24, expiry: '2026-11-01'}
+  - {lot_id: ave-TOFU-FIRM-L2, qty: 24, expiry: '2026-11-13'}
 - slot_id: AVE-FRIDGE-BACK-S1-02
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1344,12 +1344,12 @@ slots:
   item_position: {x: 2.6, y: 21.2, z: 0.65}
   approach_pose: {x: 2.6, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 108
+  qty: 108
   low_threshold: 3
   lots:
-  - {lot_id: ave-SOYRIZO-L1, qty: 5, expiry: '2026-11-04'}
-  - {lot_id: ave-SOYRIZO-L2, qty: 5, expiry: '2026-11-16'}
+  - {lot_id: ave-SOYRIZO-L1, qty: 54, expiry: '2026-11-04'}
+  - {lot_id: ave-SOYRIZO-L2, qty: 54, expiry: '2026-11-16'}
 - slot_id: AVE-FRIDGE-BACK-S2-02
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1359,12 +1359,12 @@ slots:
   item_position: {x: 2.6, y: 21.2, z: 1.05}
   approach_pose: {x: 2.6, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 50
+  qty: 50
   low_threshold: 3
   lots:
-  - {lot_id: ave-BACON-L1, qty: 5, expiry: '2026-10-27'}
-  - {lot_id: ave-BACON-L2, qty: 4, expiry: '2026-11-05'}
+  - {lot_id: ave-BACON-L1, qty: 28, expiry: '2026-10-27'}
+  - {lot_id: ave-BACON-L2, qty: 22, expiry: '2026-11-05'}
 - slot_id: AVE-FRIDGE-BACK-S0-03
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1374,12 +1374,12 @@ slots:
   item_position: {x: 3.2, y: 21.2, z: 0.25}
   approach_pose: {x: 3.2, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 10
-  qty: 8
+  capacity: 12
+  qty: 12
   low_threshold: 3
   lots:
-  - {lot_id: ave-MILK-WHOLE-L1, qty: 4, expiry: '2026-10-24'}
-  - {lot_id: ave-MILK-WHOLE-L2, qty: 4, expiry: '2026-10-30'}
+  - {lot_id: ave-MILK-WHOLE-L1, qty: 6, expiry: '2026-10-24'}
+  - {lot_id: ave-MILK-WHOLE-L2, qty: 6, expiry: '2026-10-30'}
 - slot_id: AVE-FRIDGE-BACK-S1-03
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1389,12 +1389,12 @@ slots:
   item_position: {x: 3.2, y: 21.2, z: 0.65}
   approach_pose: {x: 3.2, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-HUMMUS-L1, qty: 5, expiry: '2026-11-01'}
-  - {lot_id: ave-HUMMUS-L2, qty: 4, expiry: '2026-11-13'}
+  - {lot_id: ave-HUMMUS-L1, qty: 13, expiry: '2026-11-01'}
+  - {lot_id: ave-HUMMUS-L2, qty: 11, expiry: '2026-11-13'}
 - slot_id: AVE-FRIDGE-BACK-S2-03
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1404,12 +1404,12 @@ slots:
   item_position: {x: 3.2, y: 21.2, z: 1.05}
   approach_pose: {x: 3.2, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 54
+  qty: 54
   low_threshold: 3
   lots:
-  - {lot_id: ave-HALF-HALF-L1, qty: 5, expiry: '2026-10-27'}
-  - {lot_id: ave-HALF-HALF-L2, qty: 4, expiry: '2026-11-05'}
+  - {lot_id: ave-HALF-HALF-L1, qty: 30, expiry: '2026-10-27'}
+  - {lot_id: ave-HALF-HALF-L2, qty: 24, expiry: '2026-11-05'}
 - slot_id: AVE-FRIDGE-BACK-S1-04
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1420,11 +1420,11 @@ slots:
   approach_pose: {x: 3.8, y: 20.825, theta: 1.571}
   facings: 1
   capacity: 12
-  qty: 6
+  qty: 10
   low_threshold: 3
   lots:
-  - {lot_id: ave-GUAC-KIT-L1, qty: 4, expiry: '2026-10-18'}
-  - {lot_id: ave-GUAC-KIT-L2, qty: 2, expiry: '2026-10-22'}
+  - {lot_id: ave-GUAC-KIT-L1, qty: 7, expiry: '2026-10-18'}
+  - {lot_id: ave-GUAC-KIT-L2, qty: 3, expiry: '2026-10-22'}
   deal: {kind: near_expiry, price_cents: 399, original_cents: 599, percent_off: 33, reason: 'Near expiry: best by Oct 18,
       $2 off', valid_until: '2026-10-18T23:59:00Z', lot_id: ave-GUAC-KIT-L1}
 - slot_id: AVE-FRIDGE-BACK-S2-04
@@ -1436,12 +1436,12 @@ slots:
   item_position: {x: 3.8, y: 21.2, z: 1.05}
   approach_pose: {x: 3.8, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-PICO-FRESH-L1, qty: 4, expiry: '2026-10-20'}
-  - {lot_id: ave-PICO-FRESH-L2, qty: 4, expiry: '2026-10-22'}
+  - {lot_id: ave-PICO-FRESH-L1, qty: 12, expiry: '2026-10-20'}
+  - {lot_id: ave-PICO-FRESH-L2, qty: 12, expiry: '2026-10-22'}
 - slot_id: AVE-FRIDGE-BACK-S1-05
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1451,12 +1451,12 @@ slots:
   item_position: {x: 4.4, y: 21.2, z: 0.65}
   approach_pose: {x: 4.4, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 30
+  qty: 30
   low_threshold: 3
   lots:
-  - {lot_id: ave-TURKEY-DELI-L1, qty: 4, expiry: '2026-10-24'}
-  - {lot_id: ave-TURKEY-DELI-L2, qty: 4, expiry: '2026-10-30'}
+  - {lot_id: ave-TURKEY-DELI-L1, qty: 15, expiry: '2026-10-24'}
+  - {lot_id: ave-TURKEY-DELI-L2, qty: 15, expiry: '2026-10-30'}
 - slot_id: AVE-FRIDGE-BACK-S2-05
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1466,12 +1466,12 @@ slots:
   item_position: {x: 4.4, y: 21.2, z: 1.05}
   approach_pose: {x: 4.4, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 57
+  qty: 57
   low_threshold: 3
   lots:
-  - {lot_id: ave-CHEESE-CHEDDAR-L1, qty: 5, expiry: '2026-11-16'}
-  - {lot_id: ave-CHEESE-CHEDDAR-L2, qty: 5, expiry: '2026-12-10'}
+  - {lot_id: ave-CHEESE-CHEDDAR-L1, qty: 28, expiry: '2026-11-16'}
+  - {lot_id: ave-CHEESE-CHEDDAR-L2, qty: 29, expiry: '2026-12-10'}
 - slot_id: AVE-FRIDGE-BACK-S1-06
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1481,12 +1481,12 @@ slots:
   item_position: {x: 5.0, y: 21.2, z: 0.65}
   approach_pose: {x: 5.0, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 28
+  qty: 28
   low_threshold: 3
   lots:
-  - {lot_id: ave-SOUR-CREAM-L1, qty: 5, expiry: '2026-10-30'}
-  - {lot_id: ave-SOUR-CREAM-L2, qty: 5, expiry: '2026-11-07'}
+  - {lot_id: ave-SOUR-CREAM-L1, qty: 14, expiry: '2026-10-30'}
+  - {lot_id: ave-SOUR-CREAM-L2, qty: 14, expiry: '2026-11-07'}
 - slot_id: AVE-FRIDGE-BACK-S2-06
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1496,12 +1496,12 @@ slots:
   item_position: {x: 5.0, y: 21.2, z: 1.05}
   approach_pose: {x: 5.0, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 28
+  qty: 28
   low_threshold: 3
   lots:
-  - {lot_id: ave-QUESO-DIP-L1, qty: 3, expiry: '2026-11-04'}
-  - {lot_id: ave-QUESO-DIP-L2, qty: 3, expiry: '2026-11-16'}
+  - {lot_id: ave-QUESO-DIP-L1, qty: 14, expiry: '2026-11-04'}
+  - {lot_id: ave-QUESO-DIP-L2, qty: 14, expiry: '2026-11-16'}
 - slot_id: AVE-FRIDGE-BACK-S1-07
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1511,12 +1511,12 @@ slots:
   item_position: {x: 5.6, y: 21.2, z: 0.65}
   approach_pose: {x: 5.6, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 9
+  capacity: 60
+  qty: 60
   low_threshold: 3
   lots:
-  - {lot_id: ave-CREAM-CHEESE-L1, qty: 5, expiry: '2026-11-08'}
-  - {lot_id: ave-CREAM-CHEESE-L2, qty: 4, expiry: '2026-11-26'}
+  - {lot_id: ave-CREAM-CHEESE-L1, qty: 33, expiry: '2026-11-08'}
+  - {lot_id: ave-CREAM-CHEESE-L2, qty: 27, expiry: '2026-11-26'}
 - slot_id: AVE-FRIDGE-BACK-S2-07
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1526,12 +1526,12 @@ slots:
   item_position: {x: 5.6, y: 21.2, z: 1.05}
   approach_pose: {x: 5.6, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 10
-  qty: 7
+  capacity: 24
+  qty: 24
   low_threshold: 3
   lots:
-  - {lot_id: ave-STRING-CHEESE-L1, qty: 4, expiry: '2026-11-16'}
-  - {lot_id: ave-STRING-CHEESE-L2, qty: 3, expiry: '2026-12-10'}
+  - {lot_id: ave-STRING-CHEESE-L1, qty: 14, expiry: '2026-11-16'}
+  - {lot_id: ave-STRING-CHEESE-L2, qty: 10, expiry: '2026-12-10'}
 - slot_id: AVE-FRIDGE-BACK-S1-08
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1541,12 +1541,12 @@ slots:
   item_position: {x: 6.2, y: 21.2, z: 0.65}
   approach_pose: {x: 6.2, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 14
-  qty: 14
+  capacity: 57
+  qty: 57
   low_threshold: 4
   lots:
-  - {lot_id: ave-CHEESE-MEX-L1, qty: 7, expiry: '2026-11-04'}
-  - {lot_id: ave-CHEESE-MEX-L2, qty: 7, expiry: '2026-11-16'}
+  - {lot_id: ave-CHEESE-MEX-L1, qty: 28, expiry: '2026-11-04'}
+  - {lot_id: ave-CHEESE-MEX-L2, qty: 29, expiry: '2026-11-16'}
 - slot_id: AVE-FRIDGE-BACK-S2-08
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1556,12 +1556,12 @@ slots:
   item_position: {x: 6.2, y: 21.2, z: 1.05}
   approach_pose: {x: 6.2, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 28
+  qty: 28
   low_threshold: 3
   lots:
-  - {lot_id: ave-CHEESE-COTIJA-L1, qty: 3, expiry: '2026-11-13'}
-  - {lot_id: ave-CHEESE-COTIJA-L2, qty: 3, expiry: '2026-12-01'}
+  - {lot_id: ave-CHEESE-COTIJA-L1, qty: 14, expiry: '2026-11-13'}
+  - {lot_id: ave-CHEESE-COTIJA-L2, qty: 14, expiry: '2026-12-01'}
 - slot_id: AVE-FRIDGE-BACK-S1-09
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1571,12 +1571,12 @@ slots:
   item_position: {x: 7.4, y: 21.2, z: 0.65}
   approach_pose: {x: 7.4, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 40
+  qty: 40
   low_threshold: 3
   lots:
-  - {lot_id: ave-YOGURT-GREEK-L1, qty: 3, expiry: '2026-10-19'}
-  - {lot_id: ave-YOGURT-GREEK-L2, qty: 5, expiry: '2026-11-04'}
+  - {lot_id: ave-YOGURT-GREEK-L1, qty: 15, expiry: '2026-10-19'}
+  - {lot_id: ave-YOGURT-GREEK-L2, qty: 25, expiry: '2026-11-04'}
   deal: {kind: near_expiry, price_cents: 349, original_cents: 599, percent_off: 42, reason: 'Near expiry: best by Oct 19',
     valid_until: '2026-10-19T23:59:00Z', lot_id: ave-YOGURT-GREEK-L1}
 - slot_id: AVE-FRIDGE-BACK-S1-10
@@ -1588,12 +1588,12 @@ slots:
   item_position: {x: 8.6, y: 21.2, z: 0.65}
   approach_pose: {x: 8.6, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 63
+  qty: 63
   low_threshold: 3
   lots:
-  - {lot_id: ave-BUTTER-L1, qty: 5, expiry: '2026-11-22'}
-  - {lot_id: ave-BUTTER-L2, qty: 5, expiry: '2026-12-16'}
+  - {lot_id: ave-BUTTER-L1, qty: 32, expiry: '2026-11-22'}
+  - {lot_id: ave-BUTTER-L2, qty: 31, expiry: '2026-12-16'}
 - slot_id: AVE-FRIDGE-BACK-S1-11
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1603,12 +1603,12 @@ slots:
   item_position: {x: 9.8, y: 21.2, z: 0.65}
   approach_pose: {x: 9.8, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 21
+  qty: 21
   low_threshold: 3
   lots:
-  - {lot_id: ave-EGGS-L1, qty: 6, expiry: '2026-11-03'}
-  - {lot_id: ave-EGGS-L2, qty: 6, expiry: '2026-11-14'}
+  - {lot_id: ave-EGGS-L1, qty: 10, expiry: '2026-11-03'}
+  - {lot_id: ave-EGGS-L2, qty: 11, expiry: '2026-11-14'}
 - slot_id: AVE-FRIDGE-BACK-S0-12
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1618,12 +1618,12 @@ slots:
   item_position: {x: 11.0, y: 21.2, z: 0.25}
   approach_pose: {x: 11.0, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 10
+  capacity: 84
+  qty: 84
   low_threshold: 3
   lots:
-  - {lot_id: ave-MILK-2PCT-L1, qty: 5, expiry: '2026-10-25'}
-  - {lot_id: ave-MILK-2PCT-L2, qty: 5, expiry: '2026-10-29'}
+  - {lot_id: ave-MILK-2PCT-L1, qty: 42, expiry: '2026-10-25'}
+  - {lot_id: ave-MILK-2PCT-L2, qty: 42, expiry: '2026-10-29'}
 - slot_id: AVE-FRIDGE-BACK-S1-12
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1633,12 +1633,12 @@ slots:
   item_position: {x: 11.0, y: 21.2, z: 0.65}
   approach_pose: {x: 11.0, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 70
+  qty: 70
   low_threshold: 3
   lots:
-  - {lot_id: ave-OAT-MILK-L1, qty: 4, expiry: '2026-11-04'}
-  - {lot_id: ave-OAT-MILK-L2, qty: 4, expiry: '2026-11-16'}
+  - {lot_id: ave-OAT-MILK-L1, qty: 35, expiry: '2026-11-04'}
+  - {lot_id: ave-OAT-MILK-L2, qty: 35, expiry: '2026-11-16'}
 - slot_id: AVE-FRIDGE-BACK-S1-13
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1648,12 +1648,12 @@ slots:
   item_position: {x: 12.4, y: 21.2, z: 0.65}
   approach_pose: {x: 12.4, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 8
+  capacity: 84
+  qty: 84
   low_threshold: 3
   lots:
-  - {lot_id: ave-OJ-L1, qty: 4, expiry: '2026-10-26'}
-  - {lot_id: ave-OJ-L2, qty: 4, expiry: '2026-10-31'}
+  - {lot_id: ave-OJ-L1, qty: 42, expiry: '2026-10-26'}
+  - {lot_id: ave-OJ-L2, qty: 42, expiry: '2026-10-31'}
 - slot_id: AVE-FRIDGE-BACK-S2-13
   fixture_id: FRIDGE-BACK
   aisle_id: back_wall
@@ -1663,12 +1663,12 @@ slots:
   item_position: {x: 12.4, y: 21.2, z: 1.05}
   approach_pose: {x: 12.4, y: 20.825, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 96
+  qty: 96
   low_threshold: 3
   lots:
-  - {lot_id: ave-HORCHATA-L1, qty: 3, expiry: '2026-10-30'}
-  - {lot_id: ave-HORCHATA-L2, qty: 3, expiry: '2026-11-07'}
+  - {lot_id: ave-HORCHATA-L1, qty: 48, expiry: '2026-10-30'}
+  - {lot_id: ave-HORCHATA-L2, qty: 48, expiry: '2026-11-07'}
 - slot_id: AVE-ENDCAP-G2-S1-00
   fixture_id: ENDCAP-G2
   aisle_id: promo
@@ -1683,8 +1683,8 @@ slots:
   low_threshold: 3
   lots:
   - {lot_id: ave-CHIPS-TORTILLA-L1, qty: 12}
-  deal: {kind: percent_off, price_cents: 299, original_cents: 399, percent_off: 25, reason: 'Taco night: 25% off chips',
-    valid_until: '2026-10-24T23:59:00Z'}
+  deal: {kind: percent_off, price_cents: 299, original_cents: 399, percent_off: 25, reason: 'Taco night: 25% off chips', 
+      valid_until: '2026-10-24T23:59:00Z'}
 - slot_id: AVE-ENDCAP-G2-S1-01
   fixture_id: ENDCAP-G2
   aisle_id: promo
@@ -1694,11 +1694,11 @@ slots:
   item_position: {x: 5.9, y: 8.4, z: 0.8}
   approach_pose: {x: 5.9, y: 8.025, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 6
+  capacity: 90
+  qty: 90
   low_threshold: 3
   lots:
-  - {lot_id: ave-HOTSAUCE-GHOST-L1, qty: 6}
+  - {lot_id: ave-HOTSAUCE-GHOST-L1, qty: 90}
 - slot_id: AVE-ENDCAP-G4-S1-00
   fixture_id: ENDCAP-G4
   aisle_id: promo
@@ -1723,12 +1723,13 @@ slots:
   item_position: {x: 11.5, y: 8.4, z: 0.3}
   approach_pose: {x: 11.5, y: 8.025, theta: 1.571}
   facings: 1
-  capacity: 12
-  qty: 12
+  capacity: 16
+  qty: 16
   low_threshold: 3
   lots:
-  - {lot_id: ave-COLA-L1, qty: 12}
-  deal: {kind: bogo, price_cents: 150, original_cents: 299, percent_off: 50, reason: 'Buy one get one: 2 for $2.99', valid_until: '2026-10-24T23:59:00Z'}
+  - {lot_id: ave-COLA-L1, qty: 16}
+  deal: {kind: bogo, price_cents: 150, original_cents: 299, percent_off: 50, reason: 'Buy one get one: 2 for $2.99', 
+      valid_until: '2026-10-24T23:59:00Z'}
 - slot_id: AVE-PRODUCE-A-N0-00
   fixture_id: PRODUCE-A
   aisle_id: produce
