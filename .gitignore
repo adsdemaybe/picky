@@ -37,3 +37,9 @@ recordings/
 .idea/
 .vscode/*
 !.vscode/extensions.json
+
+# fetched / generated assets
+arms/robot/so101/assets/
+arms/robot/so101/homography.json
+arms/robot/so101/last_detection.jpg
+arms/sim/assets/build/
