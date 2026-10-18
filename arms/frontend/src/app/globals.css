@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+/* Replace (not extend) Tailwind's palette and radii: default tokens like bg-indigo-600 or rounded-2xl don't exist here. */
+@theme {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  --color-paper: #f4f1ea;
+  --color-card: #fbf9f4;
+  --color-sunk: #ebe6da;
+  --color-line: #d9d2c2;
+  --color-line-strong: #b9b09b;
+  --color-ink: #1c2420;
+  --color-ink-2: #3d4640;
+  --color-muted: #6b6f66;
+
+  --color-tomato: #c4472b;
+  --color-tomato-deep: #9f3520;
+  --color-tomato-wash: #f6dfd6;
+  --color-basil: #2f6b45;
+  --color-basil-wash: #dde9de;
+  --color-turmeric: #b07a10;
+  --color-turmeric-wash: #f5e7c4;
+  --color-plum: #6d3f74;
+  --color-plum-wash: #ece0ec;
+  --color-night: #121614;
+
+  /* chart categories: validated with the dataviz palette checker on #FBF9F4 (all checks pass) */
+  --color-cat-1: #2e8b57;
+  --color-cat-2: #2f6fbf;
+  --color-cat-3: #c8741f;
+  --color-cat-4: #b23a6e;
+  --color-cat-5: #6f6f1a;
+
+  --radius-*: initial;
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-full: 9999px;
+
+  --shadow-*: initial;
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.label-caps {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-muted);
+}
+
+::selection {
+  background: var(--color-turmeric-wash);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-tomato);
+  outline-offset: 2px;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.live-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot {
+    animation: none;
+  }
+}
