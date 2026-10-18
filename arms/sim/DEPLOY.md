@@ -234,6 +234,28 @@ tmux -L picky-pvla ls        # picky-pvla-db (Postgres :5433), picky-pvla-gw (:8
   test) the worker's replicator steps go from ~15-30 ms to 150-560 ms. Keep live streams off (`record.py` does not ask
   for `/ws/frames` unless `--live-frames`): every streamed camera is one more render product in every step.
 
+Measured (2026-10-18 02:00-02:30, taco request, Gemini plans, Mk1.5 T1 + verifier, catalog on Postgres; the GPU shared
+with a SmolVLA fine-tune): T1 Mk1.5 grasps 10 of 11 ok in run 3 (one `policy_timeout` after 9 chunks -> T0 scripted
+grasp, ok); 0.6-1.2 s per Mk1.5 call; 1.3-1.8 side + wrist pairs/s while the arm moved; navigation 30-90 s per leg
+(one 90 s `navigate_to` deadline hit, retried). What broke and is fixed on this branch: the basket audit failed on
+occlusion (top-down camera sees 2 of 11 units) and a passing re-verify did not close the provisional lines (checkout
+stayed `basket_audit_pending`); Perceptron called a held cheese bag / meat tray "gripper empty" and overrode the sim's
+grasp state (redo loops, one item skipped); a silent evidence capture tripped the stall detector; Mk1.5 re-closed the
+gripper where it had just missed.
+
+Open at 03:40 PT:
+- **Run 5** (02:36, with most of the fixes above) had picked 4 items when vhagar went offline at about 02:47. Its
+  outcome is unknown.
+- Commit 095f604 (Mk1.5 re-aims after a missed close) is pushed but not deployed.
+
+When the host is back:
+1. Read run 5: `python3 /data/$USER/picky/pvla-tools/timeline.py /data/$USER/picky/pvla-runs/run5` and its
+   `summary.json`.
+2. Render it with `render.py`.
+3. Rsync the branch to `repo-pvla`, re-seed the catalog, and restart `picky-pvla-gw` on `-L picky-pvla`.
+4. Run the spread-out list (dish soap, sports drink, coffee, olive oil, rice, muffins, frozen peas, ground turkey:
+   8 fixtures, shelf levels 0–2) and the same request with `PICKY_VLA_T1=smolvla`.
+
 ## 10. Judges' demo: checkout unload by the arm (contracts 0.2.4)
 
 The worker now implements `pick_from_basket` / `place_on_counter` and advertises the `basket_unload` capability in its

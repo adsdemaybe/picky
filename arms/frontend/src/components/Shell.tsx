@@ -1,5 +1,5 @@
 "use client";
-import { Bot, ChartPie, House, LogOut, ScanSearch, Search, ShieldHalf, Sparkles, Store, Video } from "lucide-react";
+import { Bot, ChartPie, House, LogOut, Mic, ScanSearch, Search, ShieldHalf, Sparkles, Store, Video } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -25,10 +25,11 @@ const NAV = [
   { href: "/purchases", label: "Spending", icon: ChartPie, match: (p: string) => p.startsWith("/purchases") },
   { href: "/order", label: "Robot", icon: Bot, match: (p: string) => p.startsWith("/order") || p.startsWith("/trip") || p.startsWith("/watch") },
   { href: "/live", label: "Live", icon: Video, match: (p: string) => p.startsWith("/live") },
+  { href: "/voice", label: "Voice", icon: Mic, match: (p: string) => p.startsWith("/voice") },
   { href: "/ask", label: "Ask", icon: Sparkles, match: (p: string) => p.startsWith("/ask") },
 ];
-// phones get five tabs; Ask stays one tap away in the search box
-const MOBILE_NAV = NAV.filter((n) => n.href !== "/ask");
+// Five phone tabs. Ask stays in search; Live is linked from the robot camera panel.
+const MOBILE_NAV = NAV.filter((n) => n.href !== "/ask" && n.href !== "/live");
 
 const QUESTION = /\?$|^(is|are|can|could|should|where|what|how|why|when|do|does|did|will|am|show|tell|help)\b/i;
 

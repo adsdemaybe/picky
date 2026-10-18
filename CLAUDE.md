@@ -272,6 +272,8 @@ Not required: every edge case, scale beyond the demo, perfect polish.
 - Config only via `utils.config.settings` (env/.env). Logging only via `utils.log.get_logger(__name__)`. Two tooling
   knobs are process-env only (not in Settings, not read from `.env`): `PICKY_LOG_LEVEL` and `PICKY_ID_SEED`. DB access
   only via `utils.db` (one shared pool).
+  Secrets via `utils.secrets` / `make secret NAME=...` (OS keychain, team bundle `make secrets-pull`; `docs/secrets.md`);
+  `settings` resolves env > vault > `.env`. Never commit keys or paste them in chat, PRs or issues.
   LLM calls go through `utils.llm` (one place for provider, model ids, retries, JSON/tool helpers). **The LLM is
   Gemini** (`PICKY_LLM_PROVIDER=gemini`, default: `google-genai` in the `agent` extra, `GEMINI_API_KEY`; models
   `gemini-3.8-flash` brain/fast, `gemini-4-argon` smart). Claude is optional (`PICKY_LLM_PROVIDER=anthropic`,

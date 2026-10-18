@@ -1,5 +1,7 @@
 """Central configuration: every env var picky reads lives here (and in ``.env.example``).
 
+Secrets (API keys) resolve env > OS keychain > ``~/.config/picky/secrets.env`` > repo ``.env`` (``utils.secrets``).
+
 Usage::
 
     from utils.config import settings          # lazily constructed on first access
@@ -13,7 +15,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict
+
+from utils.secrets import redact_repr_args, settings_sources
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -161,10 +165,29 @@ class Settings(BaseSettings):
     photon_api_key: str = ""
     photon_project_id: str = ""
     deepgram_api_key: str = ""
+    # API keys added with the vault (utils.secrets; `make secret NAME=...`)
+    perceptron_robotics_api_key: str = ""
+    hf_token: str = ""
     picky_rec_max_stops: int = 3
     picky_scripted_shopper: bool = False
     """Gateway server only: True = the fake messaging's scripted shopper answers every texted approval (and the
     follow-up) by itself. False (default) = approvals wait for a person (web app click or a real text)."""
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """env > vault (OS keychain, ~/.config/picky/secrets.env) > repo .env; ``_env_file=None`` skips the vault."""
+        return settings_sources(settings_cls, init_settings, env_settings, dotenv_settings, file_secret_settings)
+
+    def __repr_args__(self) -> Any:
+        """``repr(settings)`` / ``str(settings)`` / tracebacks show API keys as ``••••`` (utils.secrets registry)."""
+        return list(redact_repr_args(super().__repr_args__()))
 
     # --- helpers -------------------------------------------------------------------------------------------------
     def real_arms(self) -> set[str]:

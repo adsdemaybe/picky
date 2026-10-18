@@ -543,3 +543,22 @@ async def test_mk15_reopens_an_empty_closed_gripper_instead_of_closing_again():
     rows, outcome, done = await pol._execute("set_gripper", {"state": "close"}, closed)
     assert not done and "opened it again" in outcome
     assert rows[-1][5] == GRIPPER_OPEN_DEG
+
+
+async def test_mk15_marks_a_missed_close_and_refuses_to_close_there_again():
+    from types import SimpleNamespace
+
+    pol = Mk15Policy(client=Mk15Client(key=""), budget=CallBudget(limit=5))
+    pol.ctx = SimpleNamespace(attached=False, tcp=None)
+    pol.history = [
+        "reach_point(camera=side, x=500, y=500) -> moved",
+        "set_gripper(state=close) -> closed the gripper on NOTHING (missed)",
+        "set_gripper(state=open) -> opened the gripper",
+    ]
+    open_state = [0.0, -100.0, 90.0, 50.0, 90.0, 40.0]
+    assert "MISSED" in pol._state_text(open_state)
+    rows, outcome, done = await pol._execute("set_gripper", {"state": "close"}, open_state)
+    assert outcome.startswith("refused") and rows == [open_state] and not done
+    pol.history.append("reach_point(camera=side, x=600, y=500) -> moved")
+    rows, outcome, _ = await pol._execute("set_gripper", {"state": "close"}, open_state)
+    assert outcome == "closed the gripper"

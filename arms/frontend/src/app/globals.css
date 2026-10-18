@@ -150,9 +150,15 @@ h3 {
   letter-spacing: -0.02em;
 }
 
-/* grid children may hold truncated text; let them shrink instead of widening the page on phones */
-main .grid > * {
-  min-width: 0;
+/* Phones: a grid with no column class gets one implicit column sized to its widest content, which pushes long
+   text off-screen. Default every grid to one shrinkable column; responsive grid-cols-* utilities (a later layer) win. */
+@layer base {
+  main .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  main .grid > * {
+    min-width: 0;
+  }
 }
 
 /* numbers line up in tables and totals without switching to a monospace face */

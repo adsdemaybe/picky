@@ -1839,8 +1839,10 @@ class WorkerCore:
             fx = scene.planogram.fixture(slot.fixture_id)
             if fx is None:
                 raise _Fail("unknown_slot", f"slot {cmd.slot_id} has no fixture")
-            # same dims / model / width as the build (restocks match)
-            layout = layout_for(slot, fx, product, self.assets, slot_lateral_room(scene.planogram, slot, fx))
+            # same dims / model / width / store style as the build (restocks match)
+            layout = layout_for(
+                slot, fx, product, self.assets, slot_lateral_room(scene.planogram, slot, fx), cmd.store_id
+            )
             scene.spec.slot_layouts[cmd.slot_id] = layout
             if product.sku not in scene.spec.products:
                 scene.spec.products[product.sku] = product

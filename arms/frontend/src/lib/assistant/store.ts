@@ -1,5 +1,6 @@
 "use client";
 import { create } from "zustand";
+import { useTripGuide } from "../trip-guide";
 import { useTrip } from "../trip";
 import type { Card } from "./tools";
 
@@ -26,11 +27,16 @@ export const useAsk = create<AskStore>((set, get) => ({
   busy: false,
   messages: [hello],
   setOpen: (open) => set({ open }),
-  clear: () => set({ messages: [hello] }),
+  clear: () => { useTripGuide.getState().reset(); set({ messages: [hello] }); },
   ask: async (text) => {
     const q = text.trim();
     if (!q || get().busy) return;
     const user: Msg = { id: ++id, role: "user", text: q };
+    const tripReply = useTripGuide.getState().handle(q);
+    if (tripReply) {
+      set((state) => ({ open: true, messages: [...state.messages, user, { id: ++id, role: "assistant", text: tripReply, source: "offline" }] }));
+      return;
+    }
     set((s) => ({ open: true, busy: true, messages: [...s.messages, user] }));
     try {
       const history = get()

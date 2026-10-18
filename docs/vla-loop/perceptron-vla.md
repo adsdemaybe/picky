@@ -30,6 +30,70 @@ run, which is recorded in `~/.cache/picky/perceptron-vla.json`; that file holds 
 are not Settings fields yet, so add them in a `utils/` PR before relying on `.env` alone. Until then they resolve from
 env / `.env` through `perceptron_vla.resolve_setting`.
 
+## Runbook: the real Perceptron VLA test (what the lead does once)
+
+Status on 2026-10-18 at 03:40 PT:
+- `GET /healthz` answers 200.
+- No team key exists in the repo `.env`, the vault, the macOS Keychain or vhagar's `~/.config/picky/secrets.env`.
+- The key pasted in chat is the same one as `PERCEPTRON_API_KEY`, the Mk1.5 key. `/v1/capabilities` rejected it with
+  401 at 01:20 PT.
+- So no dataset, job or deployment exists on the service yet.
+- The dataset is ready and validated on vhagar (`dataset.md`).
+- The loop already runs in Isaac with the Mk1.5 tool policy as T1 (`arms/sim/DEPLOY.md` §8–9). It stands in for the
+  trained VLA, so step 4 below only switches T1 to the trained deployment.
+
+1. **Get the team key.** Ask Perceptron staff (the DubHacks sponsor team) for the **robotics team API key** for
+   `https://robotics.perceptron.inc` (the "Isaac SO100 participant API"). The `platform.perceptron.inc` Mk1.5 key
+   won't work there: it gets 401.
+2. **Store it** (once per machine; do it on vhagar, where the dataset lives). Never paste it into chat or a file in
+   the repo.
+   - Once the key-vault PR (`utils/keyvault`, #18) is merged, use
+     `make secret NAME=PERCEPTRON_ROBOTICS_API_KEY`. It prompts with hidden input and writes
+     `~/.config/picky/secrets.env` with mode 600.
+   - On this branch, before #18 lands, the client reads that file directly. Write the key there with hidden input:
+     ```bash
+     install -d -m 700 ~/.config/picky && (umask 077; read -rs -p 'team key: ' K && echo && \
+       printf 'PERCEPTRON_ROBOTICS_API_KEY=%s\n' "$K" >> ~/.config/picky/secrets.env; unset K)
+     ```
+   - On the Mac, the Keychain also works (it prompts): `security add-generic-password -s picky -a PERCEPTRON_ROBOTICS_API_KEY -w`.
+
+   Check with `uv run --frozen python -m arms.robot.perceptron_vla doctor`. You want the key shown as `set (…last4)`
+   with its source, `/healthz` 200, and `/v1/capabilities` 200. A 401 means the key is the Mk1.5 key or has been
+   revoked.
+3. **The one command.** Run it on vhagar in the test copy `/data/$USER/picky/repo-pvla`, never in the live demo repo.
+   It uploads, validates, trains, deploys, reads the contract, opens a session and runs one predict:
+   ```bash
+   cd /data/$USER/picky/repo-pvla
+   uv run --frozen python -m arms.robot.perceptron_vla pipeline /data/$USER/picky-vla/datasets/picky_shelf_pick_v1 \
+     --steps 1000 --instruction "pick up the mild chunky salsa 16 oz and put it in the basket"
+   ```
+   - Exit codes: 0 ok, 1 the local dataset check failed, 2 config (the key), 3 API error, 4 timeout.
+   - Re-running the same command resumes. `--fresh` submits again on purpose.
+   - Optional smoke test first, with no upload: `... pipeline lerobot/svla_so100_stacking --steps 1000` (a public
+     LeRobot SO100 dataset).
+   - The deployment id lands in `~/.cache/picky/perceptron-vla.json` (ids only). From there the T1 backend picks it
+     up; `PERCEPTRON_ROBOTICS_DEPLOYMENT_ID` overrides it.
+4. **In-sim test: the trained deployment as the T1 grasp policy.** This uses the separate test stack on vhagar
+   (gateway :8101, worker `isaac-pvla`, its own tmux socket `-L picky-pvla`; `arms/sim/DEPLOY.md` §8–9). The live
+   demo on :8100 is never touched.
+   ```bash
+   # in /data/$USER/picky/run_pvla_gw.sh set PICKY_VLA_T1=perceptron_vla (was: perceptron = the Mk1.5 stand-in), then
+   tmux -L picky-pvla kill-session -t picky-pvla-gw
+   tmux -L picky-pvla new -d -s picky-pvla-gw /data/$USER/picky/run_pvla_gw.sh
+   curl -s localhost:8101/api/fleet/robots/rover-ave-1/vla | python3 -m json.tool   # t1_pretrained available, model = the deployment
+   # one grasp:
+   curl -s -X POST localhost:8101/api/dev/plans -H 'content-type: application/json' \
+     -d '{"robot_id":"rover-ave-1","store_id":"store_ave","text":"pick up a jar of salsa"}'
+   # the whole trip, recorded (events + approvals answered like the web app):
+   uv run --frozen --no-sync python arms/sim/tools/director/record.py --base http://localhost:8101 --store store_ave \
+     --text "tacos for 6, under \$40, one vegetarian" --out /data/$USER/picky/pvla-runs/vla1
+   grep 'T1 rover-ave-1 ' /data/$USER/picky/logs/pvla-gw.log    # per grasp: ok | code, chunks, pairs/s, infer ms
+   ```
+   - Render the video with `arms/sim/tools/director/render.py` (§9).
+   - SmolVLA comparison: set `PICKY_VLA_T1=smolvla` (vhagar :8200) and run the same request.
+   - A failed or slow T1 grasp falls back to the T0 scripted grasp, so the trip still completes. Count the
+     `T1 ... ok` lines to score the policy.
+
 ## The one command
 
 ```bash
@@ -168,6 +232,14 @@ once T2 is wired.
   only against the fake service, which follows the OpenAPI document + guide. Field names of the untyped responses
   (job → checkpoint / deployment link, contract layout, predict response) are best-effort, with tolerant fallbacks.
   Check the printed raw records on the first real run.
+- **Stand-in policy.** Until a deployment exists, T1 in the Isaac loop is `PICKY_VLA_T1=perceptron`: Perceptron Mk1.5
+  (the vision model) calls Cartesian tools (`vla_mk15.py`: `reach_point` → IK → joint rows, then `set_gripper`). It is
+  not a trained VLA. It drives the same joint-level path (`ArmJointsCmd`, the policy cameras, chunks, the fallback to
+  T0), so swapping in `perceptron_vla` changes only the policy.
+- **Sticky grasp.** The Isaac worker runs no contact physics. A gripper close attaches the target unit rigidly when
+  the jaw center is within `STICKY_RADIUS_M` (3 cm) of the unit's box (`arms/sim/arm_joints.py`). A real gripper
+  might slip on a close that is a few cm off, but here it still counts as a grasp. Judge a policy by its T1 ok
+  rate, its chunks and the verifier, not by physical realism.
 - `dataset-check` can't verify units or per-frame agreement (it needs pyarrow / PyAV); the service's validation is
   authoritative.
 - Inference latency includes a WAN round trip to the Modal GPU, while chunks are 1 s at 30 Hz (30 rows). Use RTC

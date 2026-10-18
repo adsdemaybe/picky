@@ -1062,6 +1062,10 @@ class PlanLoop:
         run.last_verdicts[step.step_id] = v
         if v.passed:
             att.post = v
+            if isinstance(step, VerifyStep) and step.purpose == "audit":
+                # the audit passed on a second look: it closes the provisional lines exactly like a first-look pass
+                # (before, checkout stayed blocked with 'basket_audit_pending' after a passing reverify; vhagar run4)
+                run.state.provisional_open = False
             return await self._succeed(run, step, att)
         f = failure_from_verdict(
             v,
@@ -2352,9 +2356,14 @@ class PlanLoop:
         total = sum(r.payload.get("total_cents", 0) for r in run.ledger.values() if r.kind == "add_cart_line")
         if not summary:
             online = [i for i in plan.items if i.status == "online"]
-            summary = f"Got {len(in_basket)} of {len(plan.items)} items" + (
+            # suggested extras the shopper did not take are not "missing" (same count as brain_script.shop_summary)
+            want = [i for i in plan.items if not i.optional or i.status == "in_basket"]
+            extras = [i for i in plan.items if i.optional and i.status not in ("in_basket", "online")]
+            summary = f"Got {len(in_basket)} of {len(want)} items" + (
                 f"; {len(online)} ordered online" if online else ""
             )
+            if extras:
+                summary += f"; {len(extras)} suggested extra{'' if len(extras) == 1 else 's'} skipped"
             summary += (
                 f" · {m.verifier_catches} verifier catch(es) · {m.retries} retr{'y' if m.retries == 1 else 'ies'}"
             )

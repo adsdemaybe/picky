@@ -1,0 +1,4 @@
+# Team key vault bundle (utils.secrets, docs/secrets.md): ciphertext, so no text diffs and no conflict markers.
+# On a merge conflict git keeps your side; resolve with: git checkout --theirs secrets/team.age && make secrets-pull
+# && make secrets-push && git add secrets/team.age
+secrets/*.age binary

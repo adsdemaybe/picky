@@ -3,7 +3,7 @@
 Shared helpers that **two or more arms** use and that contain **no business logic**. Anything that knows about
 trips, carts, mandates, SKUs or routes belongs in an arm (or, if it is an interface, in `contracts/`).
 
-Base deps only (pydantic, pydantic-settings, pyyaml, numpy, httpx, anthropic; `google-genai` is a lazy import from
+Base deps only (pydantic, pydantic-settings, pyyaml, numpy, httpx, anthropic, keyring; `google-genai` is a lazy import from
 the `agent` extra). `utils` never imports `contracts` or any arm, and `import utils` is free (no eager submodule
 imports, no env reads, no network).
 
@@ -21,6 +21,7 @@ imports, no env reads, no network).
 | `llm.py` | Provider-pluggable LLM access (`PICKY_LLM_PROVIDER`: `gemini` default via `google-genai` in the `agent` extra + `GEMINI_API_KEY`; `anthropic` optional via `ANTHROPIC_API_KEY`). One Anthropic-Messages-shaped API for both: `get_client()` (lazy; `GeminiMessages` adapter or `AsyncAnthropic`; `LLMNotConfigured` without key/SDK), `provider()`, `model("brain"\|"fast"\|"smart")` / `MODEL_BRAIN`... (blank `PICKY_MODEL_*` = provider default: gemini-3.8-flash / gemini-3.8-flash / gemini-4-argon), `is_configured()` / `not_configured_reason()`, `complete_json(prompt, Model, effort=)` (JSON-schema structured output + pydantic validation + 1 repair retry; tool-forcing fallback on a 400), `run_tool_loop(messages, tools, handlers, max_iters=8)` (Gemini: function-call ids and thought signatures echoed), `cached_system` / `cached_tools`, `extract_json`, `tool_from_model`, `to_gemini_request` / `from_gemini_response`. Every call takes `client=` (Anthropic-shaped fake or raw `google.genai.Client`) for tests; `set_client` too. |
 | `signing.py` | `canonical_json(obj, exclude=...)` (sorted keys, compact, pydantic-aware), `sha256_hex(obj)` (cart hash), `sign(obj, key=PICKY_SIGNING_KEY)` / `verify(obj, sig)` (HMAC-SHA256, constant-time). |
 | `fsm.py` | `StateMachine(transitions, initial, any_to=[FAILED], terminal=[...], on_transition=cb)`: `transition(dst, reason)` raises `IllegalTransition`; `can`, `allowed`, `history`, `path()`. Used by the gateway's `TripState`. |
+| `secrets.py` | Team key vault ([`docs/secrets.md`](../docs/secrets.md)). Fixed `REGISTRY` of secret names; each resolves env > OS keychain (`keyring`, service `picky`) > `~/.config/picky/secrets.env` (600; automatic on headless Linux) > repo `.env`. `Settings` reads it via `settings_sources` (`Settings(_env_file=None)` skips it). `get_vault()` / `set_vault(Vault(keyring_backend=..., home=...))` for tests. CLI `python -m utils.secrets set/list/delete/env/check/identity/push/pull`; the age team bundle (`secrets/team.age`) needs the `secrets` extra (`pyrage`); `push` shares the local vault + `.env`, never the shell env. `PICKY_SECRETS_BACKEND=auto\|keyring\|file\|off` (process env only). Values are never logged or echoed (`Resolved` and `repr(settings)` hide them; a broken vault degrades to env/.env instead of failing `Settings()`). |
 | `data.py` | Loaders for `data/` YAML (products, planograms, online store, users). Owned by the contracts author. |
 
 ## Examples

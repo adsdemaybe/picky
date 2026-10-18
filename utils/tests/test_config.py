@@ -73,6 +73,8 @@ EXPECTED = {
     "PHOTON_API_KEY": "",
     "PHOTON_PROJECT_ID": "",
     "DEEPGRAM_API_KEY": "",
+    "PERCEPTRON_ROBOTICS_API_KEY": "",
+    "HF_TOKEN": "",
     "PICKY_REC_MAX_STOPS": 3,
     "PICKY_SCRIPTED_SHOPPER": False,
 }

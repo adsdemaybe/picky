@@ -1,5 +1,6 @@
 "use client";
-import { Eye, Lock, Sparkles } from "lucide-react";
+import { Eye, Lock, Mic, Sparkles } from "lucide-react";
+import Link from "next/link";
 import { useLayoutEffect } from "react";
 import { Conversation } from "@/components/AskPanel";
 import { Panel } from "@/components/picky";
@@ -28,11 +29,17 @@ export default function AskPage() {
         <Conversation wide />
       </Panel>
       <aside className="flex flex-col gap-4">
+        <Panel className="bg-leaf-wash p-5 ring-0">
+          <div className="flex items-center gap-2 font-semibold text-leaf"><Mic className="size-4" aria-hidden />Give Picky some context</div>
+          <p className="mt-2 text-[14px]">Speak or type what you like and what you need. Save it once, and ask Picky to recall it later.</p>
+          <Link href="/voice" className="mt-3 inline-flex min-h-10 items-center text-[14px] font-semibold text-leaf">Open Voice & memory</Link>
+        </Panel>
         <Panel className="p-5">
           <div className="flex items-center gap-2 font-semibold">
             <Eye className="size-4 text-sky" aria-hidden /> What Picky looks at
           </div>
           <ul className="mt-3 flex flex-col gap-2 text-[14px] text-muted-foreground">
+            <li>Your saved voice notes, preferences and shopping requests</li>
             <li>Your purchases since July</li>
             <li>Prices at Picky Market, Picky Express, T-Mobile, Picky Online, a warehouse club, an open-box shop and a delivery app</li>
             <li>13 weeks of price history and announced sales</li>
