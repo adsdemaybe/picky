@@ -35,7 +35,7 @@ class RigConfig:
     place_z: float = 0.10
 
     gripper_open: float = 60.0  # LeRobot gripper range is 0 (closed) .. 100 (open)
-    gripper_closed: float = 5.0
+    gripper_closed: float = 20.0  # stop short of jaws-touching: squeezing nothing latches an overload flag
 
     # URDF joint radians -> LeRobot degrees: deg = sign * rad2deg(q) + offset.
     # so101_new_calib.urdf is built to match LeRobot calibration, so start with identity and tune on the bench.

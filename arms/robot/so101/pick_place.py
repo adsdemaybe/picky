@@ -32,10 +32,23 @@ def connect_robot(cfg: RigConfig):
     except ImportError:  # LeRobot >= 0.6 merged so100/so101 into so_follower
         from lerobot.robots.so_follower import SO101Follower, SO101FollowerConfig
     robot = SO101Follower(SO101FollowerConfig(port=cfg.port, id=cfg.robot_id, use_degrees=True))
-    robot.bus.connect()
-    robot.bus.disable_torque()
-    present = robot.bus.sync_read("Present_Position", normalize=False, num_retry=3)
-    robot.bus.sync_write("Goal_Position", present, normalize=False)
+    bus = robot.bus
+
+    def assert_motors_reply() -> None:
+        # LeRobot treats a servo status flag (e.g. a latched overload after the gripper squeezed something) as a
+        # missing motor and refuses to connect until a power cycle; only a motor that does not answer is fatal.
+        for name, m in bus.motors.items():
+            _, comm, err = bus.packet_handler.ping(bus.port_handler, m.id)
+            if comm != 0:
+                raise ConnectionError(f"SO-101 motor {name} (id {m.id}) does not respond")
+            if err:
+                print(f"warning: {name} reports {bus.packet_handler.getRxPacketError(err)} (continuing)")
+
+    bus._assert_motors_exist = assert_motors_reply
+    bus.connect()
+    bus.disable_torque()
+    present = bus.sync_read("Present_Position", normalize=False, num_retry=3)
+    bus.sync_write("Goal_Position", present, normalize=False)
     robot.configure()  # writes PID/limits with torque off, then enables torque: holds the current pose
     return robot
 
