@@ -41,6 +41,28 @@ Click the markers in the same order. It prints the reprojection error and writes
 
 ## Run
 
+**Chat window (recommended)** — run in Terminal on the Mac that's plugged into the arm:
+
+```bash
+cd ~/picky && export PERCEPTRON_API_KEY=sk_live_...
+~/lerobot/.venv/bin/python -m arms.robot.so101.chat          # asks "execute? [y/N]" before every motion
+~/lerobot/.venv/bin/python -m arms.robot.so101.chat --dry    # plan only, no arm connection
+```
+
+```
+you> pick up the oat milk and put it in the basket
+robot> target: 'oat milk'   put in: 'basket'   (1.4s)
+robot> oat milk at (0.24, -0.06) m, basket at (0.18, 0.15) m
+       hover / descend / grip / lift / over_basket / release   (joint angles shown)
+execute? [y/N] y
+robot> done — oat milk should be in the basket
+```
+
+Slash commands: `/dry` `/status` `/home` (pose captured at connect) `/open` `/close` `/snap` `/help` `/quit`.
+On macOS the camera only works from Terminal (or a `screen` session started there), not from an SSH shell.
+
+One-shot CLI:
+
 ```bash
 python -m arms.robot.so101.pick_place "pick up the oat milk and put it in the basket" --dry-run
 python -m arms.robot.so101.pick_place "pick up the oat milk and put it in the basket"
@@ -60,8 +82,16 @@ python -m arms.robot.so101.pick_place "pick up the oat milk and put it in the ba
 - Fixed grasp height per run (no depth): fine for upright boxes/cans of similar height.
 - Approach pitch is auto-selected: straight down when reachable, tilting toward the target further out (the SO-101's
   upper+lower arm is only ~25 cm). Wrist roll fixed at 0.
-- Tested without hardware: command parsing and IK on the real URDF (targets 15–45 cm out solve in ~0.4 s).
-  Not yet run on the arm, camera or Perceptron API.
+- **Hardware-tested on the team SO-101 (Mac, LeRobot 0.6.1):** safe connect (goals preset to present position before
+  torque-on: zero drift), every arm joint tracks small moves within 1°, gripper closes/opens. Not yet tested: the
+  overhead camera + Perceptron path and a full pick (needs the camera mounted overhead, the API key and calibration).
+- `connect_robot` tolerates servo status flags (a gripper holding something reports *Overload*; stock LeRobot then
+  refuses to connect until a power cycle). A joint that does not answer at all still aborts.
+- Rig notes from bench testing: shoulder_pan stops at ~+26° (physical obstruction — check cables); wrist_flex rests at
+  the edge of its calibrated range (range_max 4205 > 4095) and tripped its overload once — re-run `lerobot-calibrate`
+  for the follower if the wrist misbehaves.
+- URDF ↔ LeRobot joint mapping (`joint_sign` / `joint_offset_deg`) is still unverified on hardware: dry-run and
+  check the printed hover pose before the first real pick.
 
 ## Stretch: SmolVLA
 
