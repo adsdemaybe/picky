@@ -80,6 +80,9 @@ log = get_logger(__name__)
 T = TypeVar("T")
 
 EMPTY_QUESTION = "Look at the robot gripper. Is the gripper empty, with nothing held between its jaws?"
+STATE_AUTHORITATIVE_GRIPPER_BACKENDS = frozenset({"isaac"})
+"""Robot backends whose gripper state is ground truth (the simulator's attach): a disagreeing camera never overrides it
+for gripper_holding / gripper_empty (it does on the 2D fake overlay and on a real robot)."""
 LABEL_PROMPT = "Read the brand, product name and size on the label of the item held in the gripper."
 TAG_PROMPT = "Read the price on the shelf tag under the {name}."
 GRASP_POINT_PROMPT = "Point to the best grasp spot on the {description}."
@@ -482,6 +485,21 @@ class PerceptionVerifier(VerifierBase):
                     return g
                 return AtomVerdict(path=path, op=atom.op, outcome="uncertain", confidence=0.0, reason="no state")
             vis = vision.get(path)
+            if (
+                vis is not None
+                and backend in STATE_AUTHORITATIVE_GRIPPER_BACKENDS
+                and atom.op in GRIPPER_OPS
+                and st is not None
+                and st.outcome != "uncertain"
+                and vis.outcome not in ("uncertain", st.outcome)
+            ):
+                # On Isaac the gripper state IS the simulator's attach / detach (the sticky grasp), so a camera that
+                # disagrees is wrong, not the state: measured on vhagar (taco run 4), Perceptron called a held cheese
+                # bag and a meat tray "gripper is empty" with both cues (0.9) and its override sent the runner into
+                # redo / re-ground loops while the unit sat in the jaws. The disagreement stays in the reason.
+                used.add("state")
+                why = f"{st.reason} (camera disagreed: {vis.reason}; the simulator's grasp state wins)"
+                return st.model_copy(update={"reason": why, "confidence": min(st.confidence, 0.8)})
             if vis is not None:
                 used.add("provider")
                 return combine_verdicts(st, vis) if ("state" in sources and st is not None) else vis
