@@ -17,11 +17,12 @@ shop / fetch goals to the runner and finishes them with `bridge.goal_update_from
 ## Scope (CLAUDE.md §3)
 
 `[x]` = works in `make demo` / `PICKY_REAL_ARMS=agent make demo` (no `GEMINI_API_KEY`: the real classes degrade to
-the same rules / scripted executor). Claude paths are unit-tested with a mocked client only.
+the same rules / scripted executor). LLM paths (Gemini by default, Claude optional) are unit-tested with a mocked
+client only.
 
 - [x] **P0** `interpret_request`: NL → `RequestDraft` (shop list = `expand_intent`'s; shelf_scan categories / aisles;
   return_to_dock; staff-only fetch; status / product questions answered from the catalog; vague → clarifying question;
-  `history` for answers; robot / store hints from robots.yaml + planograms). Real: Claude structured output, code keeps
+  `history` for answers; robot / store hints from robots.yaml + planograms). Real: LLM structured output, code keeps
   only known robots / stores / categories and parses the budget by regex (mocked-client tests)
 - [x] **P0** Intent expansion → items + qty + substitutes + dietary + budget (`expand_intent`)
 - [x] **P0** Split sourcing: in-store vs online, one combined checkout (`source_list`, deterministic)
@@ -38,7 +39,7 @@ the same rules / scripted executor). Claude paths are unit-tested with a mocked 
   `goal_envelope` (shop events carry the trip_id); per-robot ring of 1000 steps (`recent_steps`), `status`
 - [x] **P0** `handle_message`: "also grab limes" → `add_item` (goal + trip list + re-plan), "skip the cilantro" → item
   skipped, "status?" / idle → status, "what do you see?" → front camera `observe`
-- [x] **P1** Real brain: Claude tool loop over `brain_tool_definitions(strict=True)`, ≤ 25 turns, checkpoints every 6
+- [x] **P1** Real brain: LLM tool loop (`utils.llm`, Gemini by default) over `brain_tool_definitions(strict=True)`, ≤ 25 turns, checkpoints every 6
   turns with a front-camera summary (video input) + the `look` tool, user messages injected between turns; any LLM
   failure (no key, API error, refusal, max_tokens, malformed output, turn cap) → error event + `brain.step(kind=error)`
   and the scripted executor finishes from the current goal state (mocked-client tests; untested against the API)
@@ -104,23 +105,24 @@ the same rules / scripted executor). Claude paths are unit-tested with a mocked 
 
 ## Stack
 
-- **Pick:** `claude-sonnet-5-5` (`PICKY_MODEL_BRAIN`) for chat and intent expansion; `claude-haiku-5-5`
-  (`PICKY_MODEL_FAST`) for voice turns and reply classification. The tool loop is hand-written
+- **Pick:** the `utils.llm` brain model (`PICKY_MODEL_BRAIN`; `gemini-3.8-flash` by default, `claude-sonnet-5-5`
+  with `PICKY_LLM_PROVIDER=anthropic`) for chat and intent expansion; the fast model (`PICKY_MODEL_FAST`;
+  `gemini-3.8-flash` / `claude-haiku-5-5`) for voice turns and reply classification. The tool loop is hand-written
   (`utils.llm.run_tool_loop`) and stops after 8 iterations. Prompt caching covers the system prompt and the tools; the
   trip context goes in the user turn so the cached prefix stays stable. Intent expansion uses structured output
   (`utils.llm.complete_json` → `IntentDraft` → `ShoppingList` in code); `interpret_request` → `RequestDraftOut` →
   `RequestDraft` in code.
 - **Robot brain:** one hand-written loop per goal (not `run_tool_loop`: it must stop on `finish_goal`, let fatal
-  `RobotError`s and cancellation through, inject user messages and checkpoints): `claude-sonnet-5-5`, cached system
+  `RobotError`s and cancellation through, inject user messages and checkpoints): the brain model, cached system
   prompt (SO-101 rover + rules) and tools (`brain_tool_definitions(strict=True)`: 6 strict tools, within the strict
-  limits), tools run sequentially (one robot), ≤ 25 turns. Vision = `CameraService.observe` (`claude-haiku-5-5` in the
+  limits), tools run sequentially (one robot), ≤ 25 turns. Vision = `CameraService.observe` (the fast model in the
   perception arm) via the `look` tool and the checkpoint summaries.
 - **Loop planner:** the utils.llm `brain` model (Gemini `gemini-3.8-flash` by default; `PICKY_LLM_PROVIDER=anthropic`
   for Claude), one structured-output call per goal, `effort="low"`, bounded by `PICKY_PLAN_TIMEOUT_S` (20 s). Only the
   draft is the LLM's; compile / replan / recovery / effects are deterministic code (`normalize_draft` repairs any draft).
 - **Fallback:** the rule-based path in `logic.py` / `fake.py`, used automatically when `GEMINI_API_KEY` is missing
   or the LLM fails. You can also swap models by env var. Voice falls back to the browser Web Speech API.
-- **Gotchas (docs/research.md §9.6):** use `anthropic` 1.15; `output_config`, not `output_format`; strict tools allow no
+- **Gotchas (docs/research.md §9.6; Anthropic provider):** use `anthropic` 1.15; `output_config`, not `output_format`; strict tools allow no
   numeric bounds (`tool_definitions(strict=True)` moves them into descriptions); changing `output_config.format`
   invalidates the cache; don't send `thinking.budget_tokens`; spend-cap 429s have no retry-after.
 - **Trust:** the budget is parsed by regex and the model's number is ignored when the text states one. Sourcing is
@@ -149,7 +151,7 @@ the same rules / scripted executor). Claude paths are unit-tested with a mocked 
 uv run pytest arms/agent                       # tests (base deps, no network)
 make demo                                      # all fakes
 PICKY_REAL_ARMS=agent make demo                # real agent + real brain (needs GEMINI_API_KEY; else rules / scripted)
-PICKY_REAL_ARMS=brain make demo                # real robot brain only (Claude tool loop), fake shopper agent
+PICKY_REAL_ARMS=brain make demo                # real robot brain only (LLM tool loop), fake shopper agent
 # planner -> VLA -> verifier loop (the gateway wires it; plan mode is the default, drop_on_first_grasp injected):
 make demo                                                         # "Verifier caught it" + retry, in the summary
 PICKY_REAL_ARMS=planner make demo                                 # LLM planner (GEMINI_API_KEY; else scripted draft)
