@@ -404,7 +404,8 @@ class HeightGrid:
 
     def eye_ok(self, eye, clear=0.25) -> bool:
         m = self.m
-        if np.any(eye[:2] < m.lo - 0.1) or np.any(eye[:2] > m.hi + 0.1) or not (0.4 < eye[2] < 2.45):
+        # inside the building with a margin (an eye just outside the map was rendered from inside the outer wall)
+        if np.any(eye[:2] < m.lo + 0.15) or np.any(eye[:2] > m.hi - 0.15) or not (0.4 < eye[2] < 2.45):
             return False
         r = int(math.ceil(clear / m.res))
         i, j = m.cell(eye[:2])
@@ -437,6 +438,7 @@ class IsaacIO:
         self.wheel_idx = [self.idx[n] for n in self.wheels]
         self.bodies = {}
         self._boxes = {}
+        self._mesh = {}
         self._yaw = None
         q0 = {**{n: 0.0 for n in CTRL}, **kin.k["poses"]["stow"]}
         q0.update({"base_x": spawn[0], "base_y": spawn[1], "base_yaw": spawn[2]})
@@ -518,6 +520,27 @@ class IsaacIO:
             r = bb.GetRange()
             self._boxes[path] = (np.array(r.GetMin()), np.array(r.GetMax()), np.array(bb.GetMatrix()).T)
         return self._boxes[path]
+
+    def mesh_points(self, path, n_max=5000):
+        """the product's render-mesh vertices in its body frame (cached; subsampled)"""
+        if path not in self._mesh:
+            from pxr import Usd, UsdGeom  # noqa: PLC0415
+
+            tc = Usd.TimeCode.Default()
+            ent = self.stage.GetPrimAtPath(path)
+            Mi = UsdGeom.Xformable(ent).ComputeLocalToWorldTransform(tc).GetInverse()
+            pts = []
+            for pr in Usd.PrimRange(ent):
+                if pr.IsA(UsdGeom.Mesh):
+                    P = np.asarray(UsdGeom.Mesh(pr).GetPointsAttr().Get() or [], float).reshape(-1, 3)
+                    if len(P):
+                        A = np.array(UsdGeom.Xformable(pr).ComputeLocalToWorldTransform(tc) * Mi).T
+                        pts.append((A @ np.c_[P, np.ones(len(P))].T).T[:, :3])
+            P = np.concatenate(pts) if pts else np.zeros((0, 3))
+            if len(P) > n_max:
+                P = P[np.random.default_rng(0).choice(len(P), n_max, replace=False)]
+            self._mesh[path] = P
+        return self._mesh[path]
 
     def make_dynamic(self, path):
         prim = self.stage.GetPrimAtPath(path)
@@ -604,6 +627,12 @@ class FakeIO:
 
     def box(self, path):
         return self.boxes[path]
+
+    def mesh_points(self, path):
+        lo, hi, M = self.boxes[path]
+        g = np.stack(np.meshgrid(*[np.linspace(0, 1, 7)] * 3, indexing="ij"), -1).reshape(-1, 3)
+        P = lo + g * (hi - lo)
+        return (M @ np.c_[P, np.ones(len(P))].T).T[:, :3]
 
     def make_dynamic(self, path):
         self.dyn.add(path)
@@ -744,7 +773,16 @@ class Director:
             eye = p - fwd * back + left * side + np.array([0, 0, z])
             if self.hg.eye_ok(eye, clear=0.2) and self.hg.visible(eye, p + np.array([0, 0, 0.6])):
                 return eye, tgt
-        return p - fwd * 0.8 + np.array([0, 0, 2.35]), tgt
+        # backed up against a wall/shelf (no room behind): any free side, looking at the robot. The old fallback put
+        # the eye inside the wall behind it (black director frames in runs full1/t7)
+        for az in (35, -35, 70, -70, 105, -105, 140, -140, 180):
+            a = math.radians(az)
+            d = -fwd * math.cos(a) + left * math.sin(a)
+            for dist, z in ((1.5, 1.8), (1.2, 2.05), (0.9, 2.3)):
+                eye = p + d * dist + np.array([0, 0, z])
+                if self.hg.eye_ok(eye, clear=0.2) and self.hg.visible(eye, p + np.array([0, 0, 0.6])):
+                    return eye, p + np.array([0, 0, 0.55])
+        return p - fwd * 0.25 + np.array([0, 0, 2.4]), p + fwd * 0.3 + np.array([0, 0, 0.4])
 
     def update(self, x, y, yaw, held_drift=0.0):
         if self.mode == "chase":
@@ -879,8 +917,12 @@ class Mission:
         self.t, self.k = 0.0, 0
         self.qm = io.q()
         self.held = None  # (path, rel gripper->body)
+        # basket items, once settled, ride locked to the base (re-posed every step, gravity off): friction alone let
+        # a tall bottle tip over while the rover turned (run t7) and then it could not be lifted out at checkout
+        self.locked: dict[str, np.ndarray] = {}
         self.cargo: list[str] = []
         self.on_counter: list[str] = []
+        self.left_in_basket: list[str] = []  # items the arm could not take out at checkout
         self.done: list[str] = []
         self.queue: list[dict] = []
         self.phase, self.sub, self.target, self.gphase = "idle", "", None, "main"
@@ -947,12 +989,17 @@ class Mission:
                 for n in ARM + ["gripper"]:
                     self.cmd_v[n] = 0.0
         self.io.apply(self.cmd_q, self.cmd_v, self.wheel_speeds())
-        if self.held is not None:
+        if self.held is not None or self.locked:
             # place the held product where the gripper will be after this physics step (measured state + commanded
-            # velocity), so the rendered frame shows it in the jaws without a one-step lag
-            path, rel = self.held
+            # velocity), so the rendered frame shows it in the jaws without a one-step lag; same for basket items
             q_pred = {n: self.qm[n] + self.cmd_v.get(n, 0.0) * DT for n in self.qm}
-            self.io.set_body_T(path, self.world_gripper(q_pred) @ rel)
+            if self.held is not None:
+                path, rel = self.held
+                self.io.set_body_T(path, self.world_gripper(q_pred) @ rel)
+            if self.locked:
+                Tb = self.Tb(q_pred)
+                for path, rel in self.locked.items():
+                    self.io.set_body_T(path, Tb @ rel)
         capture = (self.k + 1) % self.cap_every == 0
         if capture and self.director is not None:  # camera for the frame this step renders
             q = self.qm
@@ -1270,6 +1317,7 @@ class Mission:
         }
 
     def attach(self, path):
+        self.locked.pop(path, None)
         self.tracked.add(path)
         if self.io.make_dynamic(path):
             self.step()
@@ -1451,23 +1499,86 @@ class Mission:
             top = max(top, float(cb[:, 2].max()))
         return top
 
+    def cargo_points(self):
+        """3x3x3 lattice over every basket item's box (base frame): what a new item could come down on"""
+        g = np.array([[i, j, k] for i in (0, 0.5, 1) for j in (0, 0.5, 1) for k in (0, 0.5, 1)])
+        Tbi = np.linalg.inv(self.Tb())
+        pts = []
+        for p in self.cargo:
+            lo, hi, M = self.io.box(p)
+            T = Tbi @ self.io.body_T(p) @ M
+            loc = lo + g * (hi - lo)
+            pts.append((T @ np.c_[loc, np.ones(len(loc))].T).T[:, :3])
+        return np.concatenate(pts) if pts else np.zeros((0, 3))
+
+    def basket_place(self, seeds, n_psi=24):
+        """Drop spot + tool yaw for the held product: over the basket floor, where the basket items under its
+        footprint are lowest (a long item is not lowered into one lying across the middle), central, inside the
+        floor ring. Returns (q, R, z_tcp, corners_b, xy) or None."""
+        bk = self.K["basket"]
+        c0 = np.array(bk["center"][:2])
+        path, rel = self.held
+        lo, hi, M = self.io.box(path)
+        B_tcp = np.linalg.inv(np.array(self.K["tcp_in_gripper_link"])) @ rel @ M  # held box frame in the TCP frame
+        C = (B_tcp @ box_corners(lo, hi).T).T[:, :3]
+        pts = self.cargo_points()
+        r_ok = bk["r_floor"] - 0.012
+        pan = np.array(self.K["pan_axis_xy"][:2], float)
+        cands = []
+        for psi in np.linspace(-math.pi, math.pi, n_psi, endpoint=False):
+            R = self.down_R(psi)
+            cb0 = (R @ C.T).T
+            Tbox = np.eye(4)
+            Tbox[:3, :3] = R @ B_tcp[:3, :3]
+            Tbox[:3, 3] = R @ B_tcp[:3, 3]
+            flat = np.argmax(np.abs(Tbox[2, :3]))  # the box axis that ends up vertical
+            ax_h = [k for k in range(3) if k != flat]
+            long_ax = ax_h[int(np.argmax((hi - lo)[ax_h]))]
+            for rr in (0.0, 0.03, 0.06, 0.09):
+                for a in np.linspace(0, 2 * math.pi, 1 if rr == 0 else 12, endpoint=False):
+                    xy = c0 + rr * np.array([math.cos(a), math.sin(a)])
+                    rad = np.hypot(cb0[:, 0] + xy[0] - c0[0], cb0[:, 1] + xy[1] - c0[1]).max()
+                    if rad > r_ok:
+                        continue
+                    z_floor = bk["floor_z"]
+                    if len(pts):
+                        Tb_ = Tbox.copy()
+                        Tb_[:2, 3] += xy
+                        P = (np.linalg.inv(Tb_) @ np.c_[pts, np.ones(len(pts))].T).T[:, :3]
+                        ax = [k for k in range(3) if k != flat]
+                        under = np.all((P[:, ax] >= lo[ax] - 0.015) & (P[:, ax] <= hi[ax] + 0.015), axis=1)
+                        if under.any():
+                            z_floor = max(z_floor, float(pts[under, 2].max()) + 0.005)
+                    # tie-break: long side across the arm's reach plane (an item that tips over then tips within
+                    # the plane the 5-DoF arm can tilt its tool in)
+                    radial = xy - pan
+                    radial = radial / max(float(np.linalg.norm(radial)), 1e-6)
+                    along = abs(float(Tbox[:2, long_ax] @ radial)) / max(float(np.linalg.norm(Tbox[:2, long_ax])), 1e-6)
+                    cands.append((round(z_floor, 2) + 0.3 * rr + 0.1 * rad + 0.01 * along, z_floor, psi, xy, cb0))
+        cands.sort(key=lambda c_: c_[0])
+        for _score, z_floor, psi, xy, cb0 in cands[:60]:
+            R = self.down_R(psi)
+            z_tcp = z_floor + 0.02 - float(cb0[:, 2].min())
+            p = np.array([xy[0], xy[1], z_tcp])
+            sd_ = [list(s_[:4]) + [float(wrap(psi + s_[4]))] for s_ in seeds] + list(seeds)
+            q, e = self.kin.solve(p, R=R, w_rot=0.25, seeds=sd_)
+            if e[0] < 0.004 and e[1] < math.radians(4):
+                return q, R, z_tcp, cb0 + p, xy
+        return None
+
     def to_basket(self, it):
         bk = self.K["basket"]
         self.phase, self.sub = "basket", "tool down, swing to the basket"
-        # drop where the pile is lowest (items spread over the basket floor before they stack)
-        c0 = np.array(bk["center"][:2])
-        spots = [c0] + [
-            c0 + r * np.array([math.cos(a), math.sin(a)])
-            for r in (0.05, 0.08)
-            for a in np.linspace(0, 2 * math.pi, 8, endpoint=False)
-        ]
-        xy = min(spots, key=lambda s_: self.pile_top(s_, r=0.07) + 0.3 * float(np.linalg.norm(s_ - c0)))
         self.drop_k += 1
-        z_floor = max(bk["floor_z"], self.pile_top(xy, r=0.07) + 0.005)
         seeds = [[1.5708, 0.95, 0.85, -0.23, 0.0], [1.5708, 0.3, 1.07, 0.2, 0.0], [1.5708, -0.07, 1.09, 0.55, 0.0]]
-        pl = self.place_plan(xy, z_floor, self.basket_fit(), seeds)
-        if pl is None:
-            pl = self.place_plan(np.array(bk["center"][:2]), z_floor, self.basket_fit(), seeds)
+        # drop where the pile under the product's footprint is lowest (items spread over the floor before they stack)
+        pl = self.basket_place(seeds)
+        xy = np.array(bk["center"][:2])
+        if pl is not None:
+            *pl, xy = pl
+        else:
+            z_floor = max(bk["floor_z"], self.pile_top(xy, r=0.07) + 0.005)
+            pl = self.place_plan(xy, z_floor, self.basket_fit(), seeds)
         if pl is None:
             self.ev("drop_ik_failed", item=it["id"])
             q_hi = np.array([1.5708, -0.07, 1.09, 0.55, 0.0])
@@ -1512,6 +1623,8 @@ class Mission:
         if inside:
             self.cargo.append(path)
             self.stats["in_basket"] += 1
+            self.io.set_gravity(path, False)
+            self.locked[path] = np.linalg.inv(self.Tb()) @ self.io.body_T(path)
         else:
             self.stats["missed_basket"] += 1
         # up out of the basket, then fold for travel (finishes while the base starts driving)
@@ -1527,36 +1640,69 @@ class Mission:
         return s
 
     # ---- checkout
+    def width_across(self, path, d_b):
+        """extent of the product along the jaw-closing direction d_b (base frame). Its box, except for round
+        cross-sections (bottles, cans: two box sides within 20 %), which are measured as the cylinder they are, so
+        a bottle lying in the basket rotated about its own axis does not count as its box diagonal."""
+        lo, hi, M = self.io.box(path)
+        T = self.io.body_T(path) @ M
+        R = T[:3, :3] / np.linalg.norm(T[:3, :3], axis=0)
+        dims = (hi - lo) * np.linalg.norm(T[:3, :3], axis=0)
+        d_w = self.Tb()[:3, :3] @ np.asarray(d_b, float)
+        proj = np.abs(R.T @ d_w)
+        order = np.argsort(dims)
+        a, b, c = dims[order]
+        if b <= 1.2 * a:
+            cu = float(proj[order[2]])
+            return float(c * cu + b * math.sqrt(max(0.0, 1.0 - cu * cu)))
+        return float(proj @ dims)
+
     def unload_plan(self, path):
+        """Top grasp of a basket item: the tool straight down (any yaw), or, for an item that came to rest tilted,
+        along its most vertical box axis (jaws across one of its other sides), so a bottle leaning on the pile is
+        still taken across its narrow side."""
         cw = self.corners_w(path)
         cb = np.array([self.to_base(c) for c in cw])
         c_b = cb.mean(axis=0)
-        best = None
+        cands = []
+        top = float(cb[:, 2].max())
+        z = max(float(c_b[2]), top - 0.03)
+        lo, hi, M = self.io.box(path)
+        Tbox = np.linalg.inv(self.Tb()) @ self.io.body_T(path) @ M
+        A = Tbox[:3, :3] / np.linalg.norm(Tbox[:3, :3], axis=0)
+        dims = (hi - lo) * np.linalg.norm(Tbox[:3, :3], axis=0)
+        up = int(np.argmax(np.abs(A[2])))
+        u = A[:, up] * np.sign(A[2, up])
+        tilt = math.acos(min(1.0, abs(float(A[2, up]))))
+        # grasp point: on the item's most vertical axis at the grasp height (a leaning bottle's top is not above
+        # its box centre)
+        s_up = float(np.clip((z - c_b[2]) / max(u[2], 0.3), -dims[up] / 2, dims[up] / 2))
+        g_top = c_b + u * s_up
         for k in range(72):
             psi = -math.pi + 2 * math.pi * k / 72
             R = self.down_R(psi)
-            width = float(np.ptp(cb @ R[:, 0]))
-            if width > MAX_W + 0.004:
-                continue
-            off_x = 0.002 - width / 2 - 0.0015
-            top = float(cb[:, 2].max())
-            z = max(float(c_b[2]), top - 0.03)
-            tcp = np.array([c_b[0], c_b[1], z]) - R[:, 0] * off_x
-            seeds = [
-                [1.5708, 1.09, 0.77, -0.29, psi],
-                [1.5708, 0.95, 0.85, -0.23, 0.0],
-                [1.5708, 1.05, 0.6, -0.08, 0.0],
-            ]
-            q, e = self.kin.solve(tcp, R=R, w_rot=0.25, seeds=seeds)
-            if e[0] > 0.004 or e[1] > math.radians(4):
-                continue
-            score = width + 0.02 * abs(wrap(q[4]))
-            if best is None or score < best[0]:
-                best = (score, R, tcp, q, width)
+            cands.append((R, self.width_across(path, R[:, 0]), g_top, psi, 0.0))
+        if math.radians(4) < tilt < math.radians(45):
+            g = Tbox @ np.r_[(lo + hi) / 2, 1.0]
+            grip = g[:3] + u * max(0.0, dims[up] / 2 - 0.03)
+            for k in range(3):
+                if k == up:
+                    continue
+                for sgn in (1.0, -1.0):
+                    x = A[:, k] * sgn
+                    zt = -u
+                    R = np.c_[x, np.cross(zt, x), zt]
+                    psi = math.atan2(x[1], x[0])
+                    cands.append((R, float(dims[k]), grip, psi, tilt))
+        best = self._best_unload(cands)
+        mesh = False
+        if best is None:
+            best = self._best_unload(self.mesh_grasps(path))
+            mesh = best is not None
         if best is None:
             return None
         _, R, tcp, q, width = best
-        pre = tcp + np.array([0, 0, 0.12])
+        pre = tcp - R[:, 2] * 0.12  # back out along the approach (straight up for a top grasp)
         qp, _ = self.kin.solve(pre, R=R, w_rot=0.25, seeds=[q])
         line_dn, err = self.line(qp, pre, tcp, R, n=8)
         return {
@@ -1568,7 +1714,71 @@ class Mission:
             "line": line_dn,
             "width": width,
             "g_open": self.g_open_for(width),
+            "g_close": self.g_contact_for(width) if mesh else None,  # the box says nothing about a neck
+            "mesh": mesh,
         }
+
+    def mesh_grasps(self, path):
+        """Top-down grasps on the real shape (render-mesh vertices) where the box is too wide: for each tool yaw and
+        each slab across the jaw pads (4 cm), the width of what lies between the jaws from the slab top down to
+        3 cm below the pads' centre. Finds the neck of a bottle lying flat."""
+        P = self.io.mesh_points(path)
+        if len(P) < 8:
+            return []
+        Tb = np.linalg.inv(self.Tb()) @ self.io.body_T(path)
+        Pb = (Tb @ np.c_[P, np.ones(len(P))].T).T[:, :3]
+        com = Pb.mean(axis=0)
+        bk = self.K["basket"]
+        c0 = np.array(bk["center"][:2])
+        out = []
+        for k in range(36):
+            psi = -math.pi + 2 * math.pi * k / 36
+            R = self.down_R(psi)
+            x, yt = R[:, 0], np.array([-R[1, 0], R[0, 0], 0.0])
+            px, py = Pb @ x, Pb @ yt
+            for s_ in np.arange(py.min() + 0.01, py.max() - 0.005, 0.01):
+                sl = np.abs(py - s_) <= 0.022
+                if sl.sum() < 6:
+                    continue
+                top = float(Pb[sl, 2].max())
+                z_t = max(top - 0.022, bk["floor_z"] + 0.03)  # jaw tips (~2.7 cm below the TCP) above the floor
+                band = sl & (Pb[:, 2] >= z_t - 0.03)
+                width = float(np.ptp(px[band])) + 0.006  # vertices only: a margin for the faces between them
+                if width > MAX_W:
+                    continue
+                cx = float(px[band].max() + px[band].min()) / 2
+                c = x * cx + yt * s_
+                c[2] = z_t
+                d_com = float(np.linalg.norm((c - com)[:2]))
+                wall = max(0.0, float(np.linalg.norm(c[:2] - c0)) - (bk["r_floor"] - 0.035))  # jaws clear the wires
+                out.append((R, width, c, psi, 2.0 * d_com + 25.0 * wall))
+        out.sort(key=lambda c_: c_[1] + 0.02 * c_[4])
+        return out[:40]
+
+    def g_contact_for(self, width):
+        need = 0.002 - width - 0.0015
+        ok = np.nonzero(self.jaw_x <= need)[0]
+        return float(self.jaw_g[ok[0]]) if len(ok) else 1.2
+
+    def _best_unload(self, cands):
+        best = None
+        for R, width, c, psi, tilt_pen in cands:
+            if width > MAX_W + 0.004:
+                continue
+            off_x = 0.002 - width / 2 - 0.0015
+            tcp = c - R[:, 0] * off_x
+            seeds = [
+                [1.5708, 1.09, 0.77, -0.29, psi],
+                [1.5708, 0.95, 0.85, -0.23, 0.0],
+                [1.5708, 1.05, 0.6, -0.08, 0.0],
+            ]
+            q, e = self.kin.solve(tcp, R=R, w_rot=0.25, seeds=seeds)
+            if e[0] > 0.004 or e[1] > math.radians(4):
+                continue
+            score = width + 0.02 * abs(wrap(q[4])) + 0.02 * tilt_pen
+            if best is None or score < best[0]:
+                best = (score, R, tcp, q, width)
+        return best
 
     def unload_one(self, path, spot_b, counter_top, name):
         self.phase, self.sub = "unload", "taking it out of the basket"
@@ -1596,7 +1806,7 @@ class Mission:
         self.plan_path(pl["line"], T=1.0)
         self.wait_arm()
         self.wait(0.15)
-        g_c = self.contact_angle(path, pl["g_open"])
+        g_c = pl["g_close"] if pl.get("g_close") is not None else self.contact_angle(path, pl["g_open"])
         if g_c is None:
             self.ev("unload_skip", item=name, why="not between the jaws")
             self.plan_path(pl["line"][::-1], T=0.8)
@@ -1707,10 +1917,11 @@ class Mission:
                 n += 1
             elif top in self.cargo:  # could not take it out: leave it in the basket
                 self.cargo.remove(top)
+                self.left_in_basket.append(nm)
         self.plan_move({**self.travel_pose(), "gripper": 0.0}, vscale=0.85)
         self.wait_arm()
         self.phase, self.sub = "paid", ""
-        self.ev("paid", items=n, left_in_basket=len(self.cargo))
+        self.ev("paid", items=n, left_in_basket=len(self.cargo) + len(self.left_in_basket), left=self.left_in_basket)
         return True
 
 

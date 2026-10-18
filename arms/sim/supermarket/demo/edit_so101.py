@@ -33,6 +33,7 @@ for _p in ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/Library/Fon
     if _p not in edit_video.FONT_PATHS:
         edit_video.FONT_PATHS.insert(2, _p)
 W, H, FPS = 1920, 1080, 30
+HL_PICKS = 4  # picks shown at near real time in the highlight
 ORANGE = (255, 150, 40)
 BLUE = (80, 170, 255)
 YELLOW = (255, 214, 90)
@@ -587,7 +588,8 @@ def highlight(ed: Editor):
     o0, o1 = phase_range(r, "outro")
     yield from ed.title_card(i0 or 0, int(2.5 * FPS))
     yield from ed.plan_card(m0, int(3.5 * FPS))
-    # three picks from different sections (slide-in -> in the basket), driving in between at 8x, one unload
+    # four picks from different sections (slide-in -> in the basket), driving in between fast, the first and the
+    # last unload at the checkout (60-90 s in all)
     att = [e for e in r.events if e["kind"] == "attached"]
     secs, wins = set(), []
     for e in att:
@@ -597,10 +599,10 @@ def highlight(ed: Editor):
         secs.add(sec)
         t_in = next((x["t"] for x in r.events if x["kind"] == "in_basket" and x["item"] == e["item"]), e["t"] + 10)
         wins.append((e["t"] - 5.0, t_in + 0.8))
-        if len(wins) == 3:
+        if len(wins) == HL_PICKS:
             break
-    un = next((e for e in r.events if e["kind"] == "unload_attached"), None)
-    if un:
+    uns = [e for e in r.events if e["kind"] == "unload_attached"]
+    for un in uns[:1] + uns[-1:] if len(uns) > 1 else uns:
         wins.append((un["t"] - 4.0, un["t"] + 9.0))
     for fi in main_frames(r, m0, m1, "highlight", wins):
         yield ed.compose(fi)
