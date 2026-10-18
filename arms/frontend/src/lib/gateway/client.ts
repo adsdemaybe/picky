@@ -78,6 +78,13 @@ export const gw = {
   planogram: (storeId: string) => req<S["Planogram"]>(`/api/stores/${enc(storeId)}/planogram`),
   product: (sku: string) => req<S["SearchHit"]>(`/api/products/${enc(sku)}`),
   feedback: (userId: string, b: S["Feedback"]) => req<ProfileUpdate>(`/api/users/${enc(userId)}/feedback`, { method: "POST", body: b }),
+  /** Cart Whisperer (contracts v0.3): 0–3 explained cards for a phase. 404 / 501 = this gateway doesn't have it yet.
+   *  Typed `unknown`: lib/whisper.ts normalizes the shape (TODO(contracts v0.3): generated types). */
+  whisper: (userId: string, q: { store_id: string; phase: string; trip_id?: string | null; skus?: string; intent?: string }) =>
+    req<unknown>(`/api/users/${enc(userId)}/whisper${qs(q)}`, undefined, 10_000),
+  /** accept = a normal cart change (mandate + approval when needed; WAIT schedules a reminder); decline feeds the profile */
+  whisperAnswer: (userId: string, cardId: string, decision: "accept" | "decline", body?: { trip_id?: string; channel?: string; note?: string }) =>
+    req<unknown>(`/api/users/${enc(userId)}/whisper/${enc(cardId)}/${decision}`, { method: "POST", body }),
   mandate: (userId: string) => req<S["IntentMandate-Output"]>(`/api/users/${enc(userId)}/mandate`),
   putMandate: (userId: string, m: S["IntentMandate-Input"]) => req<S["IntentMandate-Output"]>(`/api/users/${enc(userId)}/mandate`, { method: "PUT", body: m }),
   profile: (userId: string) => req<S["UserProfile-Output"]>(`/api/users/${enc(userId)}/profile`),
