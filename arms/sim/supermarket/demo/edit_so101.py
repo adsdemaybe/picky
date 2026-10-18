@@ -631,7 +631,7 @@ class Editor:
         d.text(
             (x, 60),
             "Gemini plans the trip + steps" if r.vla else "Gemini plans the trip",
-            font=font(54, True),
+            font=font(46 if r.vla else 54, True),
             fill=WHITE,
         )
         model = r.plan.get("model") or r.plan.get("source")
@@ -814,7 +814,7 @@ def main_frames(run: Run, m0: int, m1: int, mode="full", windows=None):
         f += sp
 
 
-HOLD_FRAMES = {"full": {"decide": 24, "look": 36, "verify": 36}, "highlight": {"decide": 15, "look": 24, "verify": 27}}
+HOLD_FRAMES = {"full": {"decide": 24, "look": 36, "verify": 36}, "highlight": {"decide": 10, "look": 18, "verify": 20}}
 
 
 def vla_holds(run: Run) -> list[tuple[int, str, dict]]:
