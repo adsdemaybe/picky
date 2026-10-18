@@ -33,6 +33,16 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(f"SO101_{name}", default)
 
 
+def _parse_offsets(text: str) -> dict[str, float]:
+    """'wrist_flex=92,elbow_flex=-3' -> {'wrist_flex': 92.0, 'elbow_flex': -3.0}"""
+    out = {}
+    for part in text.replace(";", ",").split(","):
+        name, _, value = part.partition("=")
+        if name.strip() and value.strip():
+            out[name.strip()] = float(value)
+    return out
+
+
 def _default_port() -> str:
     """First USB serial device that looks like the SO-101 controller (macOS cu.usbmodem*, Linux ttyACM*)."""
     import glob
@@ -70,7 +80,8 @@ class RigConfig:
         "wrist_roll",
     )
     joint_sign: dict[str, float] = field(default_factory=lambda: {})
-    joint_offset_deg: dict[str, float] = field(default_factory=lambda: {})
+    # Per-rig fix-ups, e.g. SO101_JOINT_OFFSETS="wrist_flex=92" when a joint was calibrated off-centre.
+    joint_offset_deg: dict[str, float] = field(default_factory=lambda: _parse_offsets(_env("JOINT_OFFSETS", "")))
 
     # Safe pose (LeRobot degrees) the arm returns to between picks.
     home_deg: dict[str, float] = field(

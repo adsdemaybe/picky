@@ -25,6 +25,8 @@ class SO101Kinematics:
                 str(cfg.urdf_path), base_elements=["base_link"], active_links_mask=mask
             )
         self.active = [i for i, m in enumerate(mask) if m]
+        # LeRobot-degree limits of the real arm (from its calibration); IK solutions outside them are rejected.
+        self.limits_deg: dict[str, tuple[float, float]] = {}
         self.active_names = [next(j for j in cfg.joint_names if j in names[i]) for i in self.active]
 
     def ik(self, xyz: tuple[float, float, float], seed_deg: dict[str, float] | None = None) -> dict[str, float]:
@@ -40,8 +42,11 @@ class SO101Kinematics:
             p = math.radians(pitch_deg)
             approach = np.array([math.cos(p) * math.cos(heading), math.cos(p) * math.sin(heading), -math.sin(p)])
             q, err = self._solve(target, approach, seeds)
-            if err < 0.008:
-                out = {n: self._rad_to_deg(n, q[i]) for i, n in zip(self.active, self.active_names, strict=True)}
+            out = {n: self._rad_to_deg(n, q[i]) for i, n in zip(self.active, self.active_names, strict=True)}
+            within = all(
+                lo <= out[n] <= hi for n, (lo, hi) in self.limits_deg.items() if n in out and n != "wrist_roll"
+            )
+            if err < 0.008 and within:
                 out["wrist_roll"] = 0.0  # keep the jaws square to the table edge
                 return out
         raise ValueError(f"IK target {xyz} unreachable at any approach pitch (best error {err * 1000:.0f} mm)")

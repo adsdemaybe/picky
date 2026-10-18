@@ -11,6 +11,7 @@ Commands: write JSON to <dir>/cmd.json (write to a temp name, then rename):
     {"id": 2, "abs": {"wrist_roll": 90}}             absolute joint target (each step limited to 10 deg)
     {"id": 3, "gripper": 20}                         gripper 0 (closed) .. 100 (open)
     {"id": 4, "find": "green gum packet"}            just re-capture + detect
+    {"id": 7, "xyz": [0.20, -0.05, 0.08], "roll": 130}  gripper tip to x,y,z (m, base frame), pointing down (IK)
     {"id": 5, "home": true}  /  {"id": 6, "quit": true}
 After each command: <dir>/state_<id>.json, cam<i>_<id>.jpg. Any arm-servo error -> home + release + exit.
 No command for --idle-timeout seconds -> home + release + exit.
@@ -27,6 +28,7 @@ import cv2
 
 from .config import RigConfig
 from .grounding import detect
+from .kinematics import SO101Kinematics
 from .pick_place import ARM_JOINTS, connect_robot, move, read_pose
 
 MAX_STEP_DEG = 10.0
@@ -84,7 +86,20 @@ def main() -> None:
                 det = {"error": str(e)}
         return {"images": paths, "detection": det}
 
+    kin = SO101Kinematics(cfg)
+
+    def tip(pose: dict[str, float]) -> list[float]:
+        import numpy as np
+
+        q = np.zeros(len(kin.chain.links))
+        for i, n in zip(kin.active, kin.active_names, strict=True):
+            q[i] = kin._deg_to_rad(n, pose[n])
+        return [round(float(v), 4) for v in kin.chain.forward_kinematics(q)[:3, 3]]
+
     robot = connect_robot(cfg)
+    for name, cal in robot.calibration.items():  # degrees mode: 0 at mid-range, +-half the calibrated span
+        half = (cal.range_max - cal.range_min) / 2 * 360 / 4096
+        kin.limits_deg[name] = (-half + 3.0, half - 3.0)
     rest, rest_grip = read_pose(robot)
     state = {"id": 0, "joints": rest, "gripper": rest_grip, **capture("0")}
     (out / "state_0.json").write_text(json.dumps(state, indent=1))
@@ -109,6 +124,18 @@ def main() -> None:
             note = ""
             if cmd.get("home"):
                 move(robot, rest, rest_grip, seconds=2.5)
+            elif "xyz" in cmd:
+                try:
+                    target = kin.ik(tuple(cmd["xyz"]), pose)
+                    target["wrist_roll"] = float(cmd.get("roll", pose["wrist_roll"]))
+                    jump = max(abs(target[j] - pose[j]) for j in ARM_JOINTS)
+                    if jump > float(cmd.get("max_jump", 45)):
+                        note = f"refused: IK solution needs a {jump:.0f} deg joint jump"
+                    else:
+                        g = float(cmd["gripper"]) if "gripper" in cmd else grip
+                        move(robot, target, g, seconds=max(1.5, jump / 15.0), steps=60)
+                except ValueError as e:
+                    note = f"IK failed: {e}"
             else:
                 target = dict(pose)
                 for j, d in (cmd.get("rel") or {}).items():
@@ -123,6 +150,7 @@ def main() -> None:
             pose, grip = read_pose(robot)
             if arm_bad:
                 note = f"arm servo error {arm_bad}: going home and stopping"
+            note = note or ""
             load = robot.bus.sync_read("Present_Load", normalize=False, num_retry=2)  # contact sensing
             state = {
                 "id": cid,
