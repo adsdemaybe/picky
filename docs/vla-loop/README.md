@@ -1,5 +1,11 @@
 # Planner → VLA → Verifier: final API draft (becomes contracts v0.3)
 
+> **Landed as contracts 0.2.1** (branch `contracts/vla-loop`): the `contracts_v03.*` names in this folder map to
+> `contracts.*` (`camera_fake` → `contracts.evidence`, `ServicesV03` → `contracts.services.Services`, `*_V03` tables →
+> `LOOP_*`, events merged into `contracts.events`). Rename table + what changed: `contracts/CHANGES-0.2.1.md`. LLM
+> provider decision since this was written: the planner / brain use **Gemini** via `utils.llm` (Claude optional with
+> `PICKY_LLM_PROVIDER=anthropic`); read "Claude planner" below as "LLM planner (Gemini)".
+
 The project lead's brief: "the LLM takes the natural language input, and then it splits into steps (movement to the
 actual location + actually grabbing the stuff from the shelf) which these instructions get sent to the vla api. tie
 in a verifier with a fake camera api". This package is that API, plus deterministic fakes, the orchestrator and tests.

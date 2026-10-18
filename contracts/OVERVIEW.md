@@ -1,8 +1,9 @@
-# contracts cheat sheet (v0.2.0)
+# contracts cheat sheet (v0.2.1)
 
 One page per arm owner: what you implement, what flows in and out, which events, and which `services.<field>` you may
 call **at call time** (never in `create()` / `create_fake()`). Full rules: `README.md`; endpoints + event producers:
-`api.md`; what each builder must add this round: `CHANGES-0.2.md`; the pipeline: CLAUDE.md §2.
+`api.md`; what each builder must add this round: `CHANGES-0.2.md` and `CHANGES-0.2.1.md` (the planner → VLA →
+verifier loop, section at the end); the pipeline: CLAUDE.md §2.
 
 **Ground rules.** Import only `contracts` + `utils`. Money = `int` cents. Geometry = meters/radians in the store frame
 (x right, y up, origin bottom-left, theta CCW from +x; the sim uses the same frame per store, Z-up; every wire pose is
@@ -92,3 +93,28 @@ retry / skip (out of reach; item `failed`) · `path_blocked`, `timeout` → re-p
 robot) · `not_ready` · `disconnected` → raised once on Isaac loss; the robot continues on the 2D fake, re-plan ·
 `unknown_robot` (missing / unknown robot_id) · `battery_low` → return_to_dock · `internal` (incl. an unparsable
 command). Goals: `Goal.failure_code` (+ `no_robot`). Mandate: `MandateReason` (+ `MandateViolation.line_id`).
+
+## Planner → VLA → verifier loop (0.2.1, additive; off by default)
+
+`PICKY_EXEC_MODE=direct` (default) = everything above, unchanged. `plan` (and `tools`) turn the loop on once the four
+core services are wired (`services.exec_mode`). The LLM proposes, code decides: Gemini drafts a `plan.PlanDraft`,
+deterministic code compiles it into a `plan.StepPlan` whose steps carry machine-checkable pre/post `Condition`s; the
+VLA's "succeeded" is only a claim until the verifier (Perceptron on blurred frames + robot state) passes the
+postcondition; recovery is data (`policy.RetryPolicy`) decided by code (`policy.decide_recovery`).
+
+| Arm | Implements (new `Services` field) | Consumes | Produces | May call |
+|---|---|---|---|---|
+| **agent** | `PlannerService` (`planner`: `create_planner` / `_fake`; real = Gemini `draft()` + the scripted fallback, never raises for LLM errors) and `LoopRunner` (`runner`: `create_runner` / `_fake`, deterministic); brain hook in `RobotBrainService.run_goal` (plan mode → `runner.run_goal` → `fleet.update_goal(bridge.goal_update_from_outcome(...))`) | `Goal` / `plan.PlanRequest`, `vla.VlaStatus` stream, `verify.Verdict`, `faults` firings | `StepPlan` (+ revisions), `policy.PlanRunState` / `StepAttempt` / `PlanOutcome`; **publishes** `plan.*`, `step.*`, `vla.status`, `vla.tier_changed`, `target.grounded`, `camera.overlay`, the `brain.step` mirror (`bridge.mirror_brain_step`) and the v0.2 execution events | `planner`, `vla` (via `services.run_vla_to_terminal`), `verifier`, `evidence`, `catalog`, `fleet` (update_goal), `trips`, `approvals`, `perception` (rank_freshness), `events` |
+| **robot** | `VlaService` (`vla`: T0 = v0.2 `RobotService`, both backends; T1/T2 = 0.3.0), `TruthSource` (`truth`), `FaultInjector` (`faults`, `PICKY_FAULTS`) | `vla.VlaRequest` (idempotent `exec_id` + `body_hash`), `faults.FaultRule` / scenarios | `VlaStatus` (accepted ▸ running ▸ one terminal; `VlaOutcome.ended_at` gateway clock), `VlaCapabilities`, `ExecRecord`, `evidence.TruthSnapshot` / `GroundTruthSidecar`; **publishes** `demo.fault` only | `robot`, `routing`, `catalog`, `evidence` (capture_after), `events` |
+| **perception** | `VerifierService` (`verifier`; a `VisionProvider` inside: **Perceptron** mk1.5, mocked in tests; modes decide / shadow / gt_only) and `EvidenceCameras` (`evidence`: blurred retention ring, `/api/evidence/{id}.jpg`) | `verify.VerifyRequest` / `GroundRequest` (deadline_s, not_before), blurred `CameraFrame`s, `TruthSource` | `Verdict` (decided_by, provider attribution, shadow opinions, degraded), `GroundingResult` / `GroundedTarget`, `FrameRef`; publishes nothing | `cameras`, `robot` (scan to aim the front camera), `truth`, `perception.blur_faces` |
+| **gateway** | wires `services.LOOP_SERVICE_FACTORIES`; P0 routes + evidence JPEG; loop events on `/ws` (`vla.status` ≤ 2 Hz), `camera.overlay` on the live sockets; `/api/dev/faults`; checkout blocked while `PlanRunState.provisional_open` | everything | – | every service |
+| **frontend** | PlanPanel, VLA bar + tier chip, "Verifier caught it" moment card, evidence viewer (`make gen-types` first) | `plan.*`, `step.*`, `vla.*`, `target.grounded`, `demo.fault`, `camera.overlay` | – | – |
+
+Events added (producer agent = the runner, except `demo.fault` = robot): P0 `plan.created` · `plan.revised` ·
+`step.started` · `vla.status` · `step.verified` · `step.failed` · `step.completed` · `plan.completed`; P1
+`target.grounded` · `vla.tier_changed` · `demo.fault` · `camera.overlay` (live-only). Envelope:
+`events.plan_envelope(plan)` (= `goal_envelope` keys).
+
+Failure codes: `vla.VlaErrorCode` + `ERROR_TRAITS` (retryable / counts_attempt / t1_strike / fatal); v0.2
+`RobotError` codes map with `vla.SIM_TO_VLA_ERROR`, back to brain codes with `vla.VLA_TO_BRAIN_CODE`. Fatal
+(`battery_low`, `unknown_robot`, `gripper_fault`) → the runner raises `RobotError` and the fleet reassigns.

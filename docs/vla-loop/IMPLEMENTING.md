@@ -1,5 +1,11 @@
 # Implementing the real pieces tonight
 
+> **Landed as contracts 0.2.1** (branch `contracts/vla-loop`): the `contracts_v03.*` names in this folder map to
+> `contracts.*` (`camera_fake` → `contracts.evidence`, `ServicesV03` → `contracts.services.Services`, `*_V03` tables →
+> `LOOP_*`, events merged into `contracts.events`). Rename table + what changed: `contracts/CHANGES-0.2.1.md`. LLM
+> provider decision since this was written: the planner / brain use **Gemini** via `utils.llm` (Claude optional with
+> `PICKY_LLM_PROVIDER=anthropic`); read "Claude planner" below as "LLM planner (Gemini)".
+
 Who this is for: the people writing the REAL Claude planner (agent), the T0 VLA on Isaac (robot + sim), the T1
 policy-server adapter (sim + robot) and the Perceptron verifier (perception). It was written from a review of this
 package as that engineer: for each piece, does the API give you every input, output, error code and timing you need,

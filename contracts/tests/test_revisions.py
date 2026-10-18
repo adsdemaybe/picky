@@ -105,7 +105,7 @@ def test_event_registry_and_producers():
     assert EVENT_PRODUCERS["agent.message"] == "agent" and EVENT_PRODUCERS["route.planned"] == "gateway"
     assert EVENT_PRODUCERS["goal.assigned"] == "fleet" and EVENT_PRODUCERS["brain.step"] == "agent"
     assert EVENT_PRODUCERS["stock.alert"] == "catalog" and EVENT_PRODUCERS["error"] == "any"
-    assert LIVE_ONLY_EVENT_TYPES == {"frame", "camera.frame"}
+    assert LIVE_ONLY_EVENT_TYPES == {"frame", "camera.frame", "camera.overlay"}
     recs = RecsReady(trip_id="t", recs=[], checkout_recs=[])
     assert isinstance(parse_event(recs.model_dump_json()), RecsReady)
     ev = make_event("stop.updated", trip_id="t", stop_id="s1", status="declined", rec_id="r1")
