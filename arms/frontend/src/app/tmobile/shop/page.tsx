@@ -1,5 +1,6 @@
 "use client";
-import { Bot, Minus, Plus, Search, Send, Sparkles, Trash2 } from "lucide-react";
+import { Bot, Minus, Plus, Search, Send, Sparkles, Store, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -12,6 +13,7 @@ import { mandateCheck, type Draft } from "@/lib/order";
 import { useTrip } from "@/lib/trip";
 import { cn } from "@/lib/utils";
 import { applySuggestion, cartTotal, suggest, targetDevice, unitPrice, type Suggestion, type WLine } from "@/lib/whisperer";
+import { useTmoCart } from "@/lib/tmoCart";
 import { useWhisper } from "@/lib/whisperStore";
 import { MetricsStrip, WhisperList } from "../bits";
 import { usePhrasing } from "../phrasing";
@@ -55,12 +57,11 @@ function expand(text: string): { cart: WLine[]; budget: number; title: string } 
 }
 
 export default function TmoShop() {
-  const [text, setText] = useState(PRESETS[0].text);
-  const [intent, setIntent] = useState(PRESETS[0].text);
-  const init = useMemo(() => expand(PRESETS[0].text), []);
-  const [cart, setCart] = useState<WLine[]>(init.cart);
-  const [budget, setBudget] = useState(init.budget);
-  const [title, setTitle] = useState(init.title);
+  const { cart, intent, title, budget_cents: budget, touched } = useTmoCart();
+  const [text, setText] = useState(intent || PRESETS[0].text);
+  const setCart = (f: (c: WLine[]) => WLine[]) => useTmoCart.getState().set({ cart: f(useTmoCart.getState().cart) }, "web");
+  const setBudget = (b: number) => useTmoCart.getState().set({ budget_cents: b }, "web");
+  const [fromStore] = useState(() => touched === "store" && cart.length > 0);
   const [cat, setCat] = useState("case");
   const [q, setQ] = useState("");
   const w = useWhisper();
@@ -88,15 +89,21 @@ export default function TmoShop() {
 
   const run = (t: string) => {
     const e = expand(t);
-    setIntent(t);
     setText(t);
-    setCart(e.cart);
-    setBudget(e.budget);
-    setTitle(e.title);
+    useTmoCart.getState().set({ intent: t, cart: e.cart, budget_cents: e.budget, title: e.title }, "web");
     useWhisper.getState().reset();
   };
-  const add = (sku: string) => setCart((c) => (c.some((l) => l.sku === sku) ? c.map((l) => (l.sku === sku ? { ...l, qty: l.qty + 1 } : l)) : [...c, { sku, qty: 1 }]));
-  const setQty = (sku: string, qty: number) => setCart((c) => (qty <= 0 ? c.filter((l) => l.sku !== sku) : c.map((l) => (l.sku === sku ? { ...l, qty } : l))));
+  // first visit: start from the demo's opening request (a basket from the store or an earlier visit is kept)
+  useEffect(() => {
+    // one-time seed of the shared basket store on mount, not derived state
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (useTmoCart.getState().touched === null) run(PRESETS[0].text);
+  }, []);
+  const add = (sku: string) => {
+    useTmoCart.getState().add(sku, 1, "web");
+    toast(`Added ${tmobileProducts.find((p) => p.sku === sku)?.name ?? sku}`, { duration: 1500 });
+  };
+  const setQty = (sku: string, qty: number) => useTmoCart.getState().setQty(sku, qty, "web");
 
   const accept = (s: Suggestion) => {
     w.accept(s);
@@ -160,9 +167,11 @@ export default function TmoShop() {
         </div>
       </section>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
-        <div className="flex flex-col gap-6">
-          <Panel className="p-5">
+      {fromStore && (
+        <p className="-mt-2 rounded-xl bg-magenta-wash px-4 py-2 text-[13.5px] font-medium text-magenta-deep">Picked up where you left off with Magenta in the store.</p>
+      )}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px] lg:grid-rows-[auto_1fr]">
+          <Panel className="p-5 lg:col-start-1">
             <SectionTitle action={<span className="text-[13px] text-muted-foreground">for your {dev.name}{dev.isNew ? " (new)" : ""}</span>}>{title}</SectionTitle>
             {cart.length === 0 && <p className="text-[14px] text-muted-foreground">Nothing in the cart yet. Add something from the store below.</p>}
             <ul className="divide-y divide-border">
@@ -171,15 +180,13 @@ export default function TmoShop() {
                 const deal = slotsOf("store_tmobile")[l.sku]?.deal;
                 const promo = linePromoFor(l.sku);
                 return (
-                  <li key={l.sku} className="flex items-center gap-3 py-3">
+                  <li key={l.sku} className="flex items-start gap-3 py-3">
                     <ProductTile color={p.label_color} category={p.category} name={p.name} size={40} />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-[14.5px] font-semibold">{p.name}</div>
-                      <div className="text-[12.5px] text-muted-foreground">
-                        {p.brand}
-                        {deal && <span className="ml-2 font-semibold text-leaf-deep">{deal.reason}</span>}
-                        {promo && <span className="ml-2">Line offer: {promo.headline}{promo.requires ? ` (needs a ${promo.requires.replace(/_/g, " ")})` : ""}</span>}
-                      </div>
+                      <div className="line-clamp-2 text-[14.5px] leading-tight font-semibold">{p.name}</div>
+                      <div className="text-[12.5px] text-muted-foreground">{p.brand}</div>
+                      {deal && <div className="text-[12.5px] font-semibold text-leaf-deep">{deal.reason}</div>}
+                      {promo && <div className="text-[12.5px] text-muted-foreground">Line offer: {promo.headline}{promo.requires ? ` (needs a ${promo.requires.replace(/_/g, " ")})` : ""}</div>}
                     </div>
                     <div className="flex items-center gap-1">
                       <Button size="icon" variant="ghost" className="size-7" onClick={() => setQty(l.sku, l.qty - 1)} aria-label="Fewer">
@@ -190,7 +197,7 @@ export default function TmoShop() {
                         <Plus className="size-3.5" />
                       </Button>
                     </div>
-                    <Money cents={l.qty * unitPrice(l.sku)} className="w-20 text-right text-[14.5px] font-semibold" />
+                    <Money cents={l.qty * unitPrice(l.sku)} className="w-[72px] shrink-0 text-right text-[14.5px] font-semibold" />
                   </li>
                 );
               })}
@@ -213,7 +220,48 @@ export default function TmoShop() {
             </div>
           </Panel>
 
-          <Panel className="p-5">
+        <aside className="flex flex-col gap-4 lg:sticky lg:top-28 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <h2 className="text-[20px] font-semibold">Cart Whisperer</h2>
+              <span className="text-[11.5px] text-muted-foreground">{source === "claude" ? "Reasons phrased by Claude, checked by code" : "Deterministic reasons"}</span>
+            </div>
+            <WhisperList cards={cards} onAccept={accept} onDecline={decline} />
+          </div>
+
+          <Panel className="p-4">
+            <div className="text-[13px] font-semibold">Your rules (checked in code before checkout)</div>
+            <ul className="mt-2 space-y-1 text-[13px]">
+              {verdict.reasons.map((r) => (
+                <li key={r.code + r.text} className="flex gap-2">
+                  <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", r.level === "ok" ? "bg-leaf" : r.level === "ask" ? "bg-amber" : "bg-tomato")} aria-hidden />
+                  {r.text}
+                </li>
+              ))}
+            </ul>
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <Button onClick={() => send("with_me")} className="bg-magenta text-white hover:bg-magenta-deep" disabled={verdict.verdict === "deny"}>
+                <Bot className="size-4" aria-hidden /> Shop with robot
+              </Button>
+              <Button variant="outline" onClick={() => send("pickup")} disabled={verdict.verdict === "deny"}>
+                <Send className="size-4" aria-hidden /> Robot picks it up
+              </Button>
+            </div>
+            {verdict.verdict === "deny" && <p className="mt-2 text-[12.5px] text-tomato">Over your $150 robot-trip cap, so the robot can&apos;t buy this for you. Drop something, or finish in the store and pay yourself.</p>}
+            <Button asChild variant="ghost" className="mt-2 w-full text-magenta hover:bg-magenta-wash hover:text-magenta-deep">
+              <Link href="/tmobile/store">
+                <Store className="size-4" aria-hidden /> Continue in store with Magenta
+              </Link>
+            </Button>
+          </Panel>
+
+          <MetricsStrip m={w.metrics} />
+          <p className="text-[11.5px] text-muted-foreground">
+            Your line: {mayaDevices.phone.name}, {mayaDevices.phone.age_months} months, {mayaDevices.phone.installments_left} payments left · {mayaDevices.lines} lines · owns {mayaDevices.owns.map((o) => o.name).join(", ")}. Synthetic demo account.
+          </p>
+        </aside>
+
+          <Panel className="p-5 lg:col-start-1">
             <SectionTitle
               action={
                 <div className="relative">
@@ -256,43 +304,6 @@ export default function TmoShop() {
               })}
             </div>
           </Panel>
-        </div>
-
-        <aside className="flex flex-col gap-4 lg:sticky lg:top-28 lg:self-start">
-          <div>
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-[20px] font-semibold">Cart Whisperer</h2>
-              <span className="text-[11.5px] text-muted-foreground">{source === "claude" ? "Reasons phrased by Claude, checked by code" : "Deterministic reasons"}</span>
-            </div>
-            <WhisperList cards={cards} onAccept={accept} onDecline={decline} />
-          </div>
-
-          <Panel className="p-4">
-            <div className="text-[13px] font-semibold">Your rules (checked in code before checkout)</div>
-            <ul className="mt-2 space-y-1 text-[13px]">
-              {verdict.reasons.map((r) => (
-                <li key={r.code + r.text} className="flex gap-2">
-                  <span className={cn("mt-1.5 size-1.5 shrink-0 rounded-full", r.level === "ok" ? "bg-leaf" : r.level === "ask" ? "bg-amber" : "bg-tomato")} aria-hidden />
-                  {r.text}
-                </li>
-              ))}
-            </ul>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button onClick={() => send("with_me")} className="bg-magenta text-white hover:bg-magenta-deep" disabled={verdict.verdict === "deny"}>
-                <Bot className="size-4" aria-hidden /> Shop with robot
-              </Button>
-              <Button variant="outline" onClick={() => send("pickup")} disabled={verdict.verdict === "deny"}>
-                <Send className="size-4" aria-hidden /> Robot picks it up
-              </Button>
-            </div>
-            {verdict.verdict === "deny" && <p className="mt-2 text-[12.5px] text-tomato">Over your tech trip cap. Drop something or raise the cap in your rules.</p>}
-          </Panel>
-
-          <MetricsStrip m={w.metrics} />
-          <p className="text-[11.5px] text-muted-foreground">
-            Your line: {mayaDevices.phone.name}, {mayaDevices.phone.age_months} months, {mayaDevices.phone.installments_left} payments left · {mayaDevices.lines} lines · owns {mayaDevices.owns.map((o) => o.name).join(", ")}. Synthetic demo account.
-          </p>
-        </aside>
       </div>
     </div>
   );

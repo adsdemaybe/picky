@@ -1,5 +1,5 @@
 "use client";
-import { Ban, Check, ChevronDown, Clock, Hourglass, Plus, Repeat, ShieldCheck, Smartphone, TriangleAlert, X } from "lucide-react";
+import { Ban, Check, ChevronDown, Clock, Hourglass, Plus, Repeat, ShieldCheck, ShoppingBag, Smartphone, TriangleAlert, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -8,14 +8,16 @@ import { ProductTile } from "@/components/picky";
 import { Button } from "@/components/ui/button";
 import { productBySku } from "@/lib/data";
 import { fmt } from "@/lib/money";
+import { useTmoCart } from "@/lib/tmoCart";
 import { useTrip } from "@/lib/trip";
 import { cn } from "@/lib/utils";
 import type { Metrics, Suggestion } from "@/lib/whisperer";
 
 const NAV = [
   { href: "/tmobile", label: "My line", match: (p: string) => p === "/tmobile" },
-  { href: "/tmobile/shop", label: "Shop", match: (p: string) => p.startsWith("/tmobile/shop") },
-  { href: "/tmobile/trip", label: "Robot", match: (p: string) => p.startsWith("/tmobile/trip") },
+  { href: "/tmobile/shop", label: "Shop online", match: (p: string) => p.startsWith("/tmobile/shop") },
+  { href: "/tmobile/store", label: "In store", match: (p: string) => p.startsWith("/tmobile/store") },
+  { href: "/tmobile/trip", label: "Robot trip", match: (p: string) => p.startsWith("/tmobile/trip") },
   { href: "/tmobile/track", label: "How it works", match: (p: string) => p.startsWith("/tmobile/track") },
 ];
 
@@ -23,40 +25,48 @@ export function TmoHeader() {
   const path = usePathname();
   const phase = useTrip((s) => s.phase);
   const live = phase === "shopping" || phase === "checkout" || phase === "waiting_login";
+  const count = useTmoCart((s) => s.cart.reduce((n, l) => n + l.qty, 0));
   return (
-    <header className="sticky top-0 z-30 bg-magenta text-white">
-      <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-4 px-4 md:px-8">
-        <Link href="/tmobile" className="flex items-center gap-2.5" aria-label="Picky at T-Mobile home">
-          <span className="grid size-9 place-items-center rounded-xl bg-white text-magenta">
-            <Smartphone className="size-5" strokeWidth={2.2} aria-hidden />
-          </span>
-          <span className="leading-none">
-            <span className="block font-heading text-[20px] font-bold tracking-tight">Cart Whisperer</span>
-            <span className="block text-[11.5px] font-medium text-white/80">Picky at T-Mobile, University Way NE</span>
-          </span>
-        </Link>
-        <nav className="ml-auto flex items-center gap-1 overflow-x-auto" aria-label="T-Mobile">
-          {NAV.map((n) => {
-            const on = n.match(path);
-            return (
-              <Link
-                key={n.href}
-                href={n.href}
-                aria-current={on ? "page" : undefined}
-                className={cn("flex h-9 items-center gap-2 rounded-full px-3 text-[13.5px] font-semibold whitespace-nowrap transition-colors", on ? "bg-white text-magenta" : "text-white/85 hover:bg-white/15")}
-              >
-                {n.label}
-                {n.label === "Robot" && live && <span className="live-dot size-2 rounded-full bg-lime" aria-label="robot is shopping" />}
-              </Link>
-            );
-          })}
-        </nav>
-        <Link href="/" className="hidden rounded-full px-3 py-1.5 text-[12.5px] font-medium text-white/75 ring-1 ring-white/30 hover:bg-white/10 md:block">
-          Grocery app
-        </Link>
+    <header className="sticky top-0 z-30 text-white">
+      {/* full-bleed color past the page's max width, without widening the layout */}
+      <div className="bg-magenta shadow-[0_0_0_100vmax_var(--color-magenta)] [clip-path:inset(0_-100vmax)]">
+        <div className="mx-auto flex max-w-[1240px] flex-wrap items-center gap-x-4 px-4 md:h-16 md:flex-nowrap md:px-8">
+          <Link href="/tmobile" className="flex h-14 items-center gap-2.5 md:h-auto" aria-label="Picky at T-Mobile home">
+            <span className="grid size-9 place-items-center rounded-xl bg-white text-magenta">
+              <Smartphone className="size-5" strokeWidth={2.2} aria-hidden />
+            </span>
+            <span className="leading-none">
+              <span className="block font-heading text-[19px] font-bold tracking-tight md:text-[20px]">Cart Whisperer</span>
+              <span className="block text-[11.5px] font-medium text-white/80">Picky at T-Mobile, University Way NE</span>
+            </span>
+          </Link>
+          <Link href="/tmobile/shop" className="ml-auto flex h-9 items-center gap-1.5 rounded-full bg-white/15 px-3 text-[13px] font-semibold md:order-last md:ml-0" aria-label={`Basket, ${count} item${count === 1 ? "" : "s"}`}>
+            <ShoppingBag className="size-4" aria-hidden />
+            <span className="tabular">{count}</span>
+          </Link>
+          <nav className="-mx-4 flex w-[calc(100%+2rem)] items-center gap-1 overflow-x-auto px-4 pb-2.5 md:mx-0 md:ml-auto md:w-auto md:px-0 md:pb-0" aria-label="T-Mobile">
+            {NAV.map((n) => {
+              const on = n.match(path);
+              return (
+                <Link
+                  key={n.href}
+                  href={n.href}
+                  aria-current={on ? "page" : undefined}
+                  className={cn("flex h-9 shrink-0 items-center gap-2 rounded-full px-3 text-[13.5px] font-semibold whitespace-nowrap transition-colors", on ? "bg-white text-magenta" : "text-white/85 hover:bg-white/15")}
+                >
+                  {n.label}
+                  {n.href === "/tmobile/trip" && live && <span className="live-dot size-2 rounded-full bg-lime" aria-label="robot is shopping" />}
+                </Link>
+              );
+            })}
+            <Link href="/" className="ml-1 hidden shrink-0 rounded-full px-3 py-1.5 text-[12.5px] font-medium text-white/75 ring-1 ring-white/30 hover:bg-white/10 lg:block">
+              Grocery app
+            </Link>
+          </nav>
+        </div>
       </div>
-      <div className="bg-magenta-deep px-4 py-1 text-center text-[11.5px] font-medium text-white/85">
-        Demo · synthetic shopper, devices and promo calendar · product names and prices from t-mobile.com (Oct 17, 2026) · not affiliated with T-Mobile
+      <div className="bg-magenta-deep px-4 py-1 text-center text-[11px] font-medium text-white/85 shadow-[0_0_0_100vmax_var(--color-magenta-deep)] [clip-path:inset(0_-100vmax)] md:text-[11.5px]">
+        Demo · synthetic shopper, devices and promo calendar · products and prices from t-mobile.com (Oct 17, 2026) · not affiliated with T-Mobile
       </div>
     </header>
   );
