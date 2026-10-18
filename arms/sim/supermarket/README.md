@@ -48,6 +48,48 @@ Demo loop: drive to a shelf → N → jog with ↑/↓ until the gripper is at a
 | `robot/finalize_usd.py` | flattens `mujoco-usd-converter` output, adds PhysX joint drives |
 | `tools/fetch_geniesim.py` | downloads one scene + only the assets it references (0.4 GB instead of 29 GB) |
 | `setup_linux.sh` / `run_sim.sh` | one-shot install / launch |
+| `robot/solve_arm_ik.py` | MuJoCo IK tables for the demo (gripper level at any shelf height; reach into the basket) → `demo/arm_ik.json` |
+| `demo/store_map.py` | store map from the stage: products, fixtures, sections, top-down height map, occupancy grid, A* |
+| `demo/planner.py` | Gemini route planner (plan + replan), JSONL log of every request/response, no key in logs |
+| `demo/autopilot.py` | `--demo`: rovers execute the plan (drive, pick, basket, checkout), cameras, frame recorder |
+| `demo/edit_video.py` | cuts a recorded run into the demo video (captions, mini-map, gripper PiP, cards) |
+| `demo/demo_config.json` | robots + spawns, checkout counter + slots, overview camera, optional fixed shopping list |
+
+## Autopilot demo (`--demo`): Gemini plans the route, the rovers shop
+
+The rover's navigation brain is an LLM: before driving, the app builds a **store map from the scene** (every product
+prim's world box grouped into sections by the shelf it sits on, shelf/fixture boxes plus an orthographic top-down
+**depth render** as obstacles — that catches pillars and walls that are only in the building mesh — the rover
+spawns and the checkout counter) and sends Gemini the shopping list + a compact map (sections, obstacle boxes, a
+0.25 m ASCII occupancy picture). Gemini splits the list between the rovers, orders each route and gives a one-line
+reason per leg. The rovers then **execute** that plan: grid A* (0.05 m, inflated by the rover's footprint) between
+stops, driven through the same swerve command path as the keyboard (`cmd` → wheels steer and spin, kinematic base).
+A stop that fails (approach spot blocked, no path, product not at the gripper) goes back to Gemini with what
+happened and the product's alternatives (same SKU elsewhere) for a **replan**. Every LLM call is logged to
+`<out>/llm_log.jsonl` (model, latency, prompt, response; never the key).
+
+Per pick (Suraj's arm + grab, nothing learned): IK-table pre-grasp 11 cm in front of the product at its height →
+straight slide in → measure the gripper↔product error in the sim and correct it (arm x/z + a sideways base strafe)
+→ close → `grab(target, keep_offset=True)`: the product that is actually at the gripper (≤ 5 cm, checked) is
+attached **where it is** — never snapped/teleported to the gripper → lift, retract → B pose → release (gravity drops
+it into the basket). Settled basket items then ride with the base (re-posed with it every step: the kinematic base is
+teleported, which friction can't carry). Checkout: drive to the counter, take each item out of the basket (IK into
+the basket, same attach rule), put it on the counter, "paid".
+
+```bash
+# on vhagar (Isaac Sim 6.0 standalone; key in ~/.config/picky/secrets.env as GEMINI_API_KEY)
+PY=/data/advaiv2/isaacsim/python.sh; D=/data/advaiv2/picky-suraj
+$PY arms/sim/supermarket/teleop_app.py --scene $D/geniesim/background/supermarket/supermarket_06/background.usda \
+    --robot $D/build/rm2_basket.usd --demo --robots 2 --max-items 12 --record --out $D/runs/full
+# --plan-only: build the map + ask Gemini, write plan.json / topdown.jpg, exit (fast iteration on the config)
+$D/tools/bin/python arms/sim/supermarket/demo/edit_video.py $D/runs/full $D/video   # needs pillow, imageio[ffmpeg]
+```
+
+Recording: replicator render products + `rgb` annotators (chase cam per rover, wrist cam per rover, side tracking cam,
+overview, intro/outro orbit), one frame every 2 physics steps (30 fps of sim time), JPEGs written by a thread pool;
+cameras the edit doesn't need in a phase are switched off. The scene is `supermarket_06` (10 sections: snacks,
+drinks, cleaning, paper goods, personal care, …); fetch it with `tools/fetch_geniesim.py --scene supermarket_06`
+(its dome-light HDR is not referenced as a USD layer, so fetch `background/common/HDR/*.hdr` too).
 
 ## Decisions & known limitations
 

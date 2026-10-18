@@ -4,6 +4,7 @@ Targets Isaac Sim 6.x (pip `isaacsim`, `isaacsim.core.experimental` API).
 
     bash arms/sim/supermarket/run_sim.sh --livestream    # wraps: python teleop_app.py --scene ... --robot ...
     bash arms/sim/supermarket/run_sim.sh --smoke         # headless self-test with screenshots
+    bash arms/sim/supermarket/run_sim.sh --demo --record # Gemini-planned shopping run, recorded (see demo/)
 
 Controls (focus the viewport):
   Fly the camera      hold right mouse + W/A/S/D/Q/E (built-in viewport navigation)
@@ -45,8 +46,21 @@ ap.add_argument("--headless", action="store_true")
 ap.add_argument("--smoke", action="store_true", help="headless scripted self-test, saves screenshots, then exits")
 ap.add_argument("--out", default="/tmp/picky_smoke", help="screenshot dir for --smoke")
 ap.add_argument("--livestream", action="store_true", help="enable WebRTC livestream (view from a browser/client)")
+# --demo: autopilot shopping run (demo/autopilot.py): Gemini plans the route, the rovers drive + pick + check out
+ap.add_argument("--demo", action="store_true", help="LLM-planned autopilot shopping run (headless unless --livestream)")
+ap.add_argument("--demo-config", default=str(Path(__file__).parent / "demo" / "demo_config.json"))
+ap.add_argument("--ik", default=str(Path(__file__).parent / "demo" / "arm_ik.json"), help="robot/solve_arm_ik.py output")
+ap.add_argument("--robots", type=int, default=1, help="how many rovers shop at once (--demo)")
+ap.add_argument("--max-items", type=int, default=12)
+ap.add_argument("--record", action="store_true", help="--demo: save camera frames + per-frame log to --out")
+ap.add_argument("--res", type=int, nargs=2, default=[1920, 1080], help="--demo main camera resolution")
+ap.add_argument("--plan-only", action="store_true", help="--demo: build the map, ask Gemini for the plan, exit")
+ap.add_argument("--intro", type=float, default=7.0, help="--demo: seconds of intro orbit")
+ap.add_argument("--outro", type=float, default=7.0)
+ap.add_argument("--max-sim-s", type=float, default=900.0)
+ap.add_argument("--debug", action="store_true", help="--demo: log held-product poses after each grab")
 args = ap.parse_args()
-if args.smoke:
+if args.smoke or (args.demo and not args.livestream):
     args.headless = True
 
 from isaacsim import SimulationApp  # noqa: E402  (must start before any omni import)
@@ -93,27 +107,36 @@ def log(msg: str) -> None:
 
 
 def find_articulation_root(stage, under: str) -> str:
-    for prim in stage.Traverse():
-        if str(prim.GetPath()).startswith(under) and prim.HasAPI(UsdPhysics.ArticulationRootAPI):
+    for prim in Usd.PrimRange(stage.GetPrimAtPath(under)):
+        if prim.HasAPI(UsdPhysics.ArticulationRootAPI):
             return str(prim.GetPath())
     raise RuntimeError(f"no ArticulationRootAPI under {under}")
 
 
 def find_prim(stage, under: str, name: str):
-    return next((p for p in stage.Traverse() if p.GetName() == name and str(p.GetPath()).startswith(under)), None)
+    return next((p for p in Usd.PrimRange(stage.GetPrimAtPath(under)) if p.GetName() == name), None)
 
 
 def product_entities(stage) -> list:
-    """Genie Sim product instances: /World/background/benchmark_<cat>_<id>_<n>/entity (rigid body, disabled)."""
+    """Genie Sim product instances: /World/background/[Group_*/]<benchmark_|genie_><cat>_<id>_<n>/entity (rigid body,
+    disabled). Some scenes group a shelf with its stock under Group_* prims, so this looks one level into those."""
     out = []
+
+    def rec(parent, depth):
+        for prim in parent.GetChildren():
+            name = prim.GetName()
+            if any(k in name for k in ("shelf", "freezer", "cart")):
+                continue
+            if name.startswith(("benchmark_", "genie_")):
+                ent = prim.GetChild("entity")
+                if ent and ent.HasAPI(UsdPhysics.RigidBodyAPI):
+                    out.append(ent)
+            elif depth < 2:
+                rec(prim, depth + 1)
+
     bg = stage.GetPrimAtPath("/World/background")
-    for prim in bg.GetChildren() if bg else []:
-        name = prim.GetName()
-        if not name.startswith("benchmark_") or any(k in name for k in ("shelf", "freezer", "cart")):
-            continue
-        ent = prim.GetChild("entity")
-        if ent and ent.HasAPI(UsdPhysics.RigidBodyAPI):
-            out.append(ent)
+    if bg:
+        rec(bg, 0)
     return out
 
 
@@ -124,7 +147,7 @@ def make_dynamic(entity) -> None:
     entity.GetAttribute("physics:rigidBodyEnabled").Set(True)
     for prim in Usd.PrimRange(entity):
         if prim.HasAPI(UsdPhysics.MeshCollisionAPI):
-            UsdPhysics.MeshCollisionAPI(prim).GetApproximationAttr().Set(UsdPhysics.Tokens.convexHull)
+            UsdPhysics.MeshCollisionAPI(prim).CreateApproximationAttr().Set(UsdPhysics.Tokens.convexHull)
             # the Genie Sim scenes disable most product colliders (collisionEnabled = 0); without this a released
             # product falls through the basket and the floor
             UsdPhysics.CollisionAPI(prim).CreateCollisionEnabledAttr().Set(True)
@@ -140,21 +163,25 @@ def yaw_quat(yaw: float) -> list[float]:
 
 
 class Picky:
-    def __init__(self, stage):
+    def __init__(self, stage, path: str = ROBOT_PATH, spawn=None, products=None):
         self.stage = stage
-        self.root_path = find_articulation_root(stage, ROBOT_PATH)
+        self.path = path
+        self.root_path = find_articulation_root(stage, path)
         self.robot = Articulation(self.root_path)
         self.cmd = np.zeros(3)  # vx, vy, wz in base frame
-        self.x, self.y, self.yaw = args.spawn[0], args.spawn[1], math.radians(args.spawn[2])
+        spawn = args.spawn if spawn is None else spawn
+        self.x, self.y, self.yaw = spawn[0], spawn[1], math.radians(spawn[2])
         self.z = 0.0
         self.arm = list(POSES["home"])
         self.sel = 0
         self.gripper_open = True
+        self.finger_target = None  # closed-finger opening (m) for the demo's grasps; None = fully closed
         self.held = None
         self.held_rel = None
         self.held_body = None
-        self.products = product_entities(stage)
-        self.link6 = find_prim(stage, ROBOT_PATH, "arm_link6")
+        self.cargo = []  # (entity, body, pose relative to the base) - items riding in the basket (--demo)
+        self.products = product_entities(stage) if products is None else products
+        self.link6 = find_prim(stage, path, "arm_link6")
 
     def post_play(self):
         """Call once physics is running (tensor views valid)."""
@@ -200,7 +227,8 @@ class Picky:
             steer.append(ang)
             wheel_vel.append(WHEEL_SIGN[i] * speed / WHEEL_R)
 
-        fingers = [-FINGER_OPEN, FINGER_OPEN] if self.gripper_open else [-FINGER_CLOSED, FINGER_CLOSED]
+        closed = FINGER_CLOSED if self.finger_target is None else self.finger_target
+        fingers = [-FINGER_OPEN, FINGER_OPEN] if self.gripper_open else [-closed, closed]
         self.robot.set_dof_position_targets(
             [steer + self.arm + fingers], dof_indices=self.steer_idx + self.arm_idx + self.finger_idx
         )
@@ -214,6 +242,7 @@ class Picky:
             self.set_base_pose()
             self.robot.set_velocities(linear_velocities=[[0.0, 0.0, 0.0]], angular_velocities=[[0.0, 0.0, 0.0]])
         self.follow_held()
+        self.follow_cargo()
 
     # --- grasping (attach-on-contact) ----------------------------------------------------------------------------
     # Products start kinematic. On grab the product turns dynamic with gravity off and its physics body is teleported
@@ -222,16 +251,20 @@ class Picky:
     def gripper_pos(self) -> np.ndarray:
         return world_pos(self.link6)  # DISCOVERSE's "endpoint" site is the link6 origin
 
-    def grab(self, max_dist: float = 0.3) -> bool:
+    def grab(self, max_dist: float = 0.3, target=None, keep_offset: bool = False) -> bool:
+        """Attach the nearest product (or `target`) within max_dist. keep_offset=True (the --demo) keeps it exactly
+        where it is relative to the gripper instead of snapping its origin onto the gripper."""
         if self.held:
             return False
         g = self.gripper_pos()
-        best = min(self.products, key=lambda e: np.linalg.norm(world_pos(e) - g), default=None)
+        cands = self.products if target is None else [target]
+        best = min(cands, key=lambda e: np.linalg.norm(world_pos(e) - g), default=None)
         if best is None or np.linalg.norm(world_pos(best) - g) > max_dist:
             log(f"nothing within {max_dist * 100:.0f} cm of the gripper")
             return False
-        best.GetAttribute("physics:kinematicEnabled").Set(False)
-        simulation_app.update()  # let PhysX apply the kinematic -> dynamic switch before wrapping it
+        if best.GetAttribute("physics:kinematicEnabled").Get():
+            best.GetAttribute("physics:kinematicEnabled").Set(False)
+            simulation_app.update()  # let PhysX apply the kinematic -> dynamic switch before wrapping it
         body = RigidPrim(str(best.GetPath()))
         body.set_enabled_gravities([False])
         # keep the product's current orientation relative to the gripper; snap its origin onto the gripper
@@ -239,7 +272,8 @@ class Picky:
             UsdGeom.Xformable(best).ComputeLocalToWorldTransform(0)
             * UsdGeom.Xformable(self.link6).ComputeLocalToWorldTransform(0).GetInverse()
         )
-        rel.SetTranslateOnly(Gf.Vec3d(0, 0, 0))
+        if not keep_offset:
+            rel.SetTranslateOnly(Gf.Vec3d(0, 0, 0))
         self.held, self.held_rel, self.held_body = best, rel, body
         self.gripper_open = False
         log(f"grabbed {best.GetParent().GetName()}")
@@ -261,6 +295,34 @@ class Picky:
             log(f"released {self.held.GetParent().GetName()}")
         self.held = self.held_body = None
         self.gripper_open = True
+
+    # --- basket cargo (--demo) -----------------------------------------------------------------------------------
+    # Once a released product has settled in the basket it rides with the base: the kinematic base is teleported
+    # every step, which friction can't follow, so settled items are re-posed with it (gravity off) like held ones.
+    def base_matrix(self) -> Gf.Matrix4d:
+        m = Gf.Matrix4d(1.0)
+        m.SetRotateOnly(Gf.Rotation(Gf.Vec3d(0, 0, 1), math.degrees(self.yaw)))
+        m.SetTranslateOnly(Gf.Vec3d(self.x, self.y, self.z))
+        return m
+
+    def stow(self, entity) -> None:
+        body = RigidPrim(str(entity.GetPath()))
+        body.set_enabled_gravities([False])
+        rel = UsdGeom.Xformable(entity).ComputeLocalToWorldTransform(0) * self.base_matrix().GetInverse()
+        self.cargo.append((entity, body, rel))
+
+    def unstow(self, entity) -> None:
+        self.cargo = [c for c in self.cargo if c[0] != entity]
+
+    def follow_cargo(self):
+        if not self.cargo:
+            return
+        base = self.base_matrix()
+        for _, body, rel in self.cargo:
+            m = rel * base
+            t, q = m.ExtractTranslation(), m.ExtractRotationQuat()
+            body.set_world_poses(positions=[[t[0], t[1], t[2]]], orientations=[[q.GetReal(), *q.GetImaginary()]])
+            body.set_velocities(linear_velocities=[[0.0, 0.0, 0.0]], angular_velocities=[[0.0, 0.0, 0.0]])
 
 
 def setup_products(products, center: np.ndarray, radius: float) -> int:
@@ -316,7 +378,7 @@ def add_collision_groups(stage):
     arm = [
         str(p.GetPath())
         for p in stage.Traverse()
-        if p.GetName() in ARM_LINKS and str(p.GetPath()).startswith(ROBOT_PATH)
+        if p.GetName() in ARM_LINKS and str(p.GetPath()).startswith(ROBOT_PATH)  # also /World/Picky_<name> (--demo)
     ]
     g_arm = group("/World/collision_groups/arm", arm)
     group("/World/collision_groups/store", ["/World/background"])
@@ -324,8 +386,8 @@ def add_collision_groups(stage):
     log(f"collision groups: {len(arm)} arm links filtered against /World/background")
 
 
-def add_chase_camera(stage):
-    cam = UsdGeom.Camera.Define(stage, CHASE_CAM)
+def add_chase_camera(stage, robot_path: str = ROBOT_PATH):
+    cam = UsdGeom.Camera.Define(stage, f"{robot_path}/chase_cam")
     xf = UsdGeom.Xformable(cam)
     xf.ClearXformOpOrder()
     # behind and above the robot, looking forward and down (camera looks down its -Z, +Y up)
@@ -450,7 +512,28 @@ def main():
     add_chase_camera(stage)
     add_ground(stage)
 
-    picky = Picky(stage)
+    if args.demo:  # extra rovers + checkout counter + store map, all before physics starts
+        import json
+        import sys
+
+        sys.path.insert(0, str(Path(__file__).parent))
+        from demo import autopilot  # noqa: PLC0415
+        from demo.store_map import StoreMap  # noqa: PLC0415
+
+        cfg = json.loads(Path(args.demo_config).read_text())
+        rcfg = cfg["robots"][: args.robots]
+        paths = [ROBOT_PATH] + [f"{ROBOT_PATH}_{r['name']}" for r in rcfg[1:]]
+        for path in paths[1:]:
+            stage.DefinePrim(path, "Xform").GetReferences().AddReference(str(Path(args.robot).resolve()))
+            add_chase_camera(stage, path)
+        extra = autopilot.add_checkout(stage, cfg["checkout"])
+        smap = StoreMap(stage, extra_fixtures=extra)
+        log(f"store map: {len(smap.products)} products, {len(smap.fixtures)} fixtures, {len(smap.sections)} sections")
+        products = product_entities(stage)
+        pickys = [Picky(stage, path, r["spawn"], products) for path, r in zip(paths, rcfg)]
+    else:
+        pickys = [Picky(stage)]
+    picky = pickys[0]
     add_collision_groups(stage)
     n_dyn = setup_products(picky.products, np.array(args.spawn), args.dynamic_radius)
     log(f"{n_dyn} products made dynamic")
@@ -459,7 +542,23 @@ def main():
     timeline.play()
     for _ in range(5):
         simulation_app.update()
-    picky.post_play()
+    for p in pickys:
+        p.post_play()
+
+    if args.demo:
+
+        def step_all():
+            for p in pickys:
+                p.step(1 / 60)
+            simulation_app.update()
+
+        for _ in range(60):  # settle
+            step_all()
+        autopilot.run_demo(
+            simulation_app, stage, pickys, [r["name"] for r in rcfg], smap, cfg, args, step_all, world_pos
+        )
+        simulation_app.close()
+        return
 
     viewport = viewport_api()
     last = [time.perf_counter()]
