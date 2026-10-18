@@ -78,14 +78,12 @@ async def test_a_failing_bus_never_breaks_consult():
     assert len(await inj.consult(ctx("s1"), ["drop_after_lift"])) == 1
 
 
-def test_scenario_from_settings_is_optional(monkeypatch):
-    from utils.config import get_settings, reset_settings
+def test_scenario_from_settings_is_optional():
+    from utils.config import reset_settings, set_settings
 
-    reset_settings()
-    s = get_settings()
-    monkeypatch.setattr(type(s), "picky_faults", "", raising=False)
+    set_settings(picky_faults="")
     assert scenario_from_settings() is None
-    monkeypatch.setattr(type(s), "picky_faults", " slow_vla ", raising=False)
+    set_settings(picky_faults=" slow_vla ")
     assert scenario_from_settings() == "slow_vla"
     assert create_faults(Services()).scenario == "slow_vla"
     reset_settings()

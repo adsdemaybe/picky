@@ -63,6 +63,25 @@ class Settings(BaseSettings):
     """decide | shadow | gt_only; blank = per store backend (shadow on the 2D fake, decide on Isaac)."""
     picky_vision_call_timeout_s: float = 4.0
     """Cap per vision-provider call inside the verifier (also bounded by the request's deadline)."""
+    picky_exec_mode: str = ""
+    """direct | plan | tools. Blank = plan when the gateway wires the VLA + verifier, else direct. direct = the exact
+    v0.2 brain path (the loop's kill switch)."""
+    picky_faults: str = ""
+    """Demo fault scenario loaded at boot (contracts.faults.DEMO_SCENARIOS, e.g. drop_on_first_grasp); blank = none."""
+    picky_dev: bool = False
+    """True enables the presenter routes /api/dev/faults* and /api/dev/plans on the gateway."""
+    picky_plan_timeout_s: float = 20.0
+    """Bound on the LLM planner's draft call and the runner's replan call (seconds)."""
+    picky_verify_timeout_s: float = 8.0
+    """The runner's bound on each verifier call; the verifier gets this minus 1 s as its deadline."""
+    picky_vla_tiers: str = ""
+    """Extra VLA tiers to offer: t1_pretrained | t1_sim (blank = the scripted T0 tier only)."""
+    picky_vla_t1_model: str = ""
+    """T1 model id advertised by the Isaac worker, e.g. lerobot/smolvla_base (blank = the robot arm's default)."""
+    picky_vla_policy_url: str = ""
+    """Isaac worker side: the T1 policy server, e.g. ws://127.0.0.1:8000 (openpi wire)."""
+    picky_vla_policy_protocol: str = ""
+    """openpi_ws (blank = default) | perceptron_tool (T1 grasps the verifier's grounding) | lerobot_grpc (later)."""
     gateway_host: str = "0.0.0.0"
     gateway_port: int = 8000
     picky_gateway_url: str = "http://localhost:8000"

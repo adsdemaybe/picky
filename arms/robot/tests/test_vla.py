@@ -171,21 +171,21 @@ def test_t1_adapter_backends():
     assert cap.available and cap.needs_grounding and cap.step_kinds == ["grasp"] and cap.input_frames_blurred
 
 
-def test_t1_config_from_settings(monkeypatch):
-    from utils.config import get_settings, reset_settings
+def test_t1_config_from_settings():
+    from utils.config import reset_settings, set_settings
 
-    reset_settings()
-    s = get_settings()
-    monkeypatch.setattr(type(s), "picky_vla_tiers", "t0_scripted,t1_pretrained", raising=False)
+    base = {"picky_vla_policy_protocol": "", "perceptron_api_key": ""}
+    set_settings(picky_vla_tiers="t0_scripted,t1_pretrained", **base)
     assert T1Config.from_settings().backend == "openpi_ws"
-    monkeypatch.setattr(type(s), "picky_vla_policy_protocol", "perceptron_tool", raising=False)
-    monkeypatch.setattr(type(s), "perceptron_api_key", "", raising=False)
+    set_settings(
+        picky_vla_tiers="t0_scripted,t1_pretrained", picky_vla_policy_protocol="perceptron_tool", perceptron_api_key=""
+    )
     cfg = T1Config.from_settings()
     assert cfg.backend == "perceptron_tool" and not cfg.api_key_set
-    monkeypatch.setattr(type(s), "picky_vla_tiers", "t1_sim", raising=False)
+    set_settings(picky_vla_tiers="t1_sim", **base)
     assert T1Config.from_settings().backend == "simulated"
     assert create_vla_fake(Services()).t1.backend == "simulated"
-    monkeypatch.setattr(type(s), "picky_vla_tiers", "", raising=False)
+    set_settings(picky_vla_tiers="", **base)
     assert T1Config.from_settings().backend == "none" and create_vla_fake(Services()).t1.backend == "none"
     reset_settings()
 
