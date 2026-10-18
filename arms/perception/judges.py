@@ -24,6 +24,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from contracts.common import Sku
 from contracts.evidence import FrameRef
@@ -347,6 +348,26 @@ def judge_item_on_shelf(path: str, atom: ItemOnShelf, ans: CameraAnswers, method
     return _av(
         path, atom, "uncertain", f"camera: only {n} x {name} visible (back rows hidden)", 0.5, method, ev, {"count": n}
     )
+
+
+def judge_item_on_counter(path: str, atom: Any, ans: CameraAnswers, method: VerifyMethod) -> AtomVerdict | None:
+    """0.2.4 checkout unload: units of the SKU visible on the counter (front camera). Fewer -> uncertain (the arm or
+    another unit may hide it): robot state decides then (combine_verdicts)."""
+    if not usable_count(ans.items) or ans.items is None:
+        return None
+    counts = count_boxes_by_sku(ans.items.boxes, ans.names)
+    n = counts.get(atom.sku, 0)
+    ev = [
+        b.model_copy(update={"frame": ans.frame, "role": "target", "sku": atom.sku})
+        for b in ans.items.boxes
+        if (b.sku or _match(b.mention, ans.names)) == atom.sku
+    ][:6]
+    name = ans.names.get(atom.sku, atom.sku)
+    if n >= atom.min_count:
+        return _av(
+            path, atom, "pass", f"camera: {n} x {name} on the counter", COUNT_PASS_CONFIDENCE, method, ev, {"count": n}
+        )
+    return _av(path, atom, "uncertain", f"camera: {n} x {name} visible on the counter", 0.5, method, ev, {"count": n})
 
 
 def judge_slot_visible(

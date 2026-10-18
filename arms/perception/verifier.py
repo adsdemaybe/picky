@@ -67,6 +67,7 @@ from .judges import (
     judge_basket_contains,
     judge_basket_delta,
     judge_gripper,
+    judge_item_on_counter,
     judge_item_on_shelf,
     judge_label,
     judge_shelf_tag,
@@ -94,7 +95,7 @@ BREAKER_FAILURES = 3
 BREAKER_COOLDOWN_S = 30.0
 GRIPPER_OPS = frozenset({"gripper_holding", "gripper_empty"})
 BASKET_OPS = frozenset({"basket_delta", "basket_contains"})
-SHELF_OPS = frozenset({"item_on_shelf", "slot_visible"})
+SHELF_OPS = frozenset({"item_on_shelf", "slot_visible", "item_on_counter"})
 
 
 async def _bounded(aw: Awaitable[T], end: float, default: T) -> T:
@@ -416,6 +417,8 @@ class PerceptionVerifier(VerifierBase):
             return judge_basket_contains(path, atom, ca, m)  # type: ignore[arg-type]
         if atom.op == "item_on_shelf":
             return judge_item_on_shelf(path, atom, ca, m)  # type: ignore[arg-type]
+        if atom.op == "item_on_counter":
+            return judge_item_on_counter(path, atom, ca, m)
         if atom.op == "slot_visible":
             slot = geom.get(atom.slot_id)  # type: ignore[union-attr]
             return judge_slot_visible(path, atom, ca, slot.sku if slot is not None else None, m)  # type: ignore[arg-type]
