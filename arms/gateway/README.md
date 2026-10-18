@@ -14,8 +14,9 @@ arms meet.
 - [x] **P0** Trip flow: `intent → list_ready → recs_ready → route_planned → [awaiting_login →] executing ⇄
   awaiting_approval → checkout → paid → followup → done` (+ `failed`). Fleet trips (`auto_execute`) skip login; a
   pre-split `shopping_list` skips `expand_intent`; routes start at the assigned robot's pose
-- [x] **P0** EXECUTING = `fleet.execute_trip(trip_id, robot_id)`: completed → checkout batch → checkout; failed →
-  checkout if the cart has lines (+ `error`) else FAILED; cancelled → FAILED (old per-stop loop removed)
+- [x] **P0** EXECUTING = `fleet.execute_trip(trip_id, robot_id)`: completed → checkout batch (accepted in-store
+  picks: the robot goes back for them in one more `execute_trip` run) → checkout; failed → checkout if the cart has
+  lines (+ `error`) else FAILED; cancelled → FAILED (old per-stop loop removed)
 - [x] **P0** TripController for the brain: `assign_robot`, `set_stop_status` (→ `stop.updated`), `check_line`
   (full-line mandate pre-check), `ask` (fills ids / channels / expiry, flags over-budget detours, AWAITING_APPROVAL,
   transparency outcome, declined detours excluded next trip), `update_list` mid-trip (sources + appends pending
@@ -150,7 +151,12 @@ Several workers may connect at once; `GET /api/sim/status` shows which stores / 
   budget without an approved over-budget ask, no stock alert after the staff scan, a request 2 that keeps the same
   salsa / recs, or (plan mode) a shop trip without a completed step plan / a grasp fault that was not caught and
   retried successfully. For a real arm expected to degrade use `make demo ARGS=--allow-errors`.
-- Checkout-batch picks are added as in-store lines at the checkout counter (the robot does not drive back for them).
+- An in-store checkout-batch pick is billed only once a robot has picked it (the brain adds the line; the gateway
+  never bills an in-store line nobody picked). After a completed goal it becomes a mandatory `rec:<rec_id>` stop, the
+  route is re-planned from the robot's pose and one more `fleet.execute_trip` run (a shop goal over just those stops,
+  ending at checkout, with its own checkout unload) picks it before checkout; an over-threshold pick is asked again at
+  the shelf. After a failed goal, with no stocked shelf, on a mandate DENY, a failed pick, or with
+  `OrchestratorConfig(fetch_checkout_suggestions=False)`, it is not added (`error` code `suggestion_not_picked`).
 - Approvals go to the trip owner only (batched trips).
 - `assign_robot` publishes no event of its own (the fleet's `goal.assigned` carries the trip envelope).
 - The MJPEG endpoint is checked by a unit test of the part generator plus a live browser run (Starlette's

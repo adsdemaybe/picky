@@ -10,8 +10,8 @@ It is the gateway's ``TripController`` (the only thing that mutates a ``Trip``) 
       -> auto_execute (fleet / request trips): EXECUTING right away | manual trips: awaiting_login -> POST /login
     EXECUTING: goal = fleet.execute_trip(trip_id, robot_id)  (the robot brain does the in-store part through
       trips.assign_robot / set_stop_status / check_line / ask / add_line / replan / update_list)
-      completed -> checkout-batch question -> start_checkout; failed -> checkout if the cart has lines (+ error) else
-      FAILED; cancelled -> FAILED
+      completed -> checkout-batch question (accepted in-store picks: one more fleet run picks them; billed only once
+      picked) -> start_checkout; failed -> checkout if the cart has lines (+ error) else FAILED; cancelled -> FAILED
     start_checkout: trust.evaluate -> checkout approval bound to cart_hash -> trust.checkout -> checkout.completed
       -> paid -> record_purchase -> agent.compose_followup -> messaging.send -> followup.sent -> reply
       -> agent.interpret_reply -> recommender.record_feedback -> feedback.received + profile.updated -> done
@@ -82,6 +82,9 @@ class OrchestratorConfig:
     """Finish the trip (done) if no feedback arrives in time; None = wait for the reply."""
     checkout_batch: bool = True
     """Ask the batched 'want any of these?' question before checkout."""
+    fetch_checkout_suggestions: bool = True
+    """An in-store suggestion accepted in that batch sends the robot back to pick it (billed only once picked).
+    False = it is not added at all (the bill never carries an in-store line the robot did not pick either way)."""
     rec_limit: int | None = None
     """Detour recs per trip; None = PICKY_REC_MAX_STOPS."""
     robot_state_hz: float = 2.0
@@ -125,6 +128,9 @@ class TripOrchestrator:
         self._robot_trip: dict[str, str] = {}
         """robot_id -> trip it executes (robot.state envelope)."""
         self._deferred_online: dict[str, list[CartLine]] = {}
+        self._checkout_picks: dict[str, dict[str, tuple[str, int | None]]] = {}
+        """trip_id -> rec_id -> (checkout-batch approval_id, card price) of the in-store suggestions the robot goes
+        back for: their pick is billed at the price on the card the shopper chose, and that choice is its approval."""
         self._used_approvals: dict[str, set[str]] = {}
         self._sent_trip: dict[str, str] = {}
         self._routed_items: dict[str, set[str]] = {}
@@ -466,6 +472,11 @@ class TripOrchestrator:
 
     async def add_line(self, trip_id: str, line: CartLine, approval_id: str | None = None) -> AddLineResult:
         trip = self._trips[trip_id]
+        chosen = self._checkout_picks.get(trip_id, {}).get(line.rec_id or "")
+        if chosen is not None and line.source == "in_store":  # the pick of a suggestion chosen at checkout
+            approval_id = approval_id or chosen[0]
+            if chosen[1] and line.unit_price_cents != chosen[1]:
+                line = line.model_copy(update={"unit_price_cents": chosen[1]})
         decision = await self._evaluate(trip, line)
         added = False
         if decision.verdict == MandateVerdict.APPROVE:
@@ -1102,25 +1113,11 @@ class TripOrchestrator:
         self._exec_tasks[trip.trip_id] = self._spawn(self._execute(trip.trip_id), name=f"exec-{trip.trip_id}")
 
     async def _execute(self, trip_id: str) -> None:
-        """EXECUTING: ``goal = fleet.execute_trip(trip_id, robot_id)``; then completed -> (checkout batch) -> checkout;
-        failed -> checkout if the cart has active lines (+ error) else FAILED; cancelled -> FAILED with the reason."""
+        """EXECUTING: ``goal = fleet.execute_trip(trip_id, robot_id)``; then completed -> (checkout batch; the robot
+        goes back for accepted in-store picks) -> checkout; failed -> checkout if the cart has active lines (+ error)
+        else FAILED; cancelled -> FAILED with the reason."""
         trip = self._trips[trip_id]
-        goal = None
-        try:
-            fleet = self.services.fleet
-            if fleet is None:
-                await self._error(trip_id, "fleet", "no fleet wired; skipping the in-store part")
-            else:
-                goal = await fleet.execute_trip(trip_id, trip.robot_id)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            log.exception("in-store execution crashed for %s", trip_id)
-            await self._error(trip_id, "fleet", f"in-store execution failed: {exc}", recoverable=False)
-        finally:
-            trip.current_stop_id = None
-            if trip.robot_id and self._robot_trip.get(trip.robot_id) == trip_id:
-                self._robot_trip.pop(trip.robot_id, None)
+        goal = await self._run_goal(trip)
         if trip.state in TERMINAL:
             return
         status = goal.status if goal is not None else None
@@ -1140,13 +1137,38 @@ class TripOrchestrator:
                 trip_id, "fleet", f"in-store shopping ended early ({why}); checking out what is in the cart"
             )
         try:
-            await self._wrap_up_shopping(trip)
+            await self._wrap_up_shopping(trip, robot_done=status == GoalStatus.COMPLETED)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001
             await self._error(trip_id, "gateway", f"checkout suggestions failed: {exc}")
         if self.config.auto_checkout and trip.state == S.EXECUTING:
             await self.start_checkout(trip_id)
+
+    async def _run_goal(self, trip: Trip, *, fetch: bool = False) -> Any:
+        """One in-store run: ``fleet.execute_trip`` (a shop goal over the trip's still-pending route stops). Returns the
+        terminal goal, or None when no fleet is wired or the run crashed (an ``error`` event either way). ``fetch`` =
+        the extra run for suggestions accepted at checkout: a crash there is recoverable (checkout goes on without
+        them)."""
+        trip_id = trip.trip_id
+        goal = None
+        try:
+            fleet = self.services.fleet
+            if fleet is None:
+                await self._error(trip_id, "fleet", "no fleet wired; skipping the in-store part")
+            else:
+                goal = await fleet.execute_trip(trip_id, trip.robot_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            what = "picking the checkout suggestions" if fetch else "in-store execution"
+            log.exception("%s crashed for %s", what, trip_id)
+            await self._error(trip_id, "fleet", f"{what} failed: {exc}", recoverable=fetch)
+        finally:
+            trip.current_stop_id = None
+            if trip.robot_id and self._robot_trip.get(trip.robot_id) == trip_id:
+                self._robot_trip.pop(trip.robot_id, None)
+        return goal
 
     async def _reroute_online(self, trip: Trip, item: ListItem) -> None:
         if item.sku is None:
@@ -1165,7 +1187,12 @@ class TripOrchestrator:
         if not res.added and res.decision.verdict == MandateVerdict.NEEDS_APPROVAL:
             self._deferred_online.setdefault(trip.trip_id, []).append(line)
 
-    async def _wrap_up_shopping(self, trip: Trip) -> None:
+    async def _wrap_up_shopping(self, trip: Trip, robot_done: bool = True) -> None:
+        """After the in-store goal: the checkout batch (asked once), then the online lines that need an explicit OK.
+
+        An accepted ONLINE suggestion becomes a planned online line. An accepted IN-STORE suggestion is never put in the
+        cart here: only a robot pick does that (``_fetch_accepted``), so the bill never has an in-store line nobody
+        picked. ``robot_done`` = the in-store goal completed (the robot is free at checkout and can go back)."""
         trip.current_stop_id = None
         # 'want any of these?' batch (asked once)
         if self.config.checkout_batch and trip.checkout_recs:
@@ -1188,28 +1215,21 @@ class TripOrchestrator:
             )
             resp = await self._ask(trip, req)
             chosen = set(resp.chosen()) if resp.approved else set()
+            fetch: list[Recommendation] = []
             for rec in recs:
                 await self._record_rec_outcome(trip, rec, "accepted" if rec.rec_id in chosen else "declined")
                 if rec.rec_id not in chosen:
                     continue
-                source = "online" if rec.store_id == ONLINE_STORE_ID else "in_store"
-                line = CartLine(
-                    line_id=new_id("line"),
-                    sku=rec.sku,
-                    name=rec.product_name,
-                    category=await self._category(rec.sku),
-                    qty=1,
-                    unit_price_cents=rec.price_cents or await self._unit_price(trip, rec.sku, rec, None),
-                    source=source,
-                    store_id=ONLINE_STORE_ID if source == "online" else trip.store_id,
-                    slot_id=rec.slot_id,
-                    status="picked" if source == "in_store" else "planned",
-                    rec_id=rec.rec_id,
-                )
+                if rec.store_id != ONLINE_STORE_ID:
+                    fetch.append(rec)  # in store: on the bill only once a robot has picked it
+                    continue
+                line = await self._suggestion_line(trip, rec, source="online")
                 # the shopper explicitly picked it in this approval, so a soft mandate ask (e.g. over budget) is met
                 res = await self.add_line(trip.trip_id, line, approval_id=req.approval_id)
                 if not res.added:
                     await self._error(trip.trip_id, "trust", f"{rec.product_name or rec.sku} not added (mandate)")
+            if fetch:
+                await self._fetch_accepted(trip, fetch, robot_done, req.approval_id)
         # online lines that needed an explicit OK
         for line in self._deferred_online.pop(trip.trip_id, []):
             req = self._approval(
@@ -1223,6 +1243,124 @@ class TripOrchestrator:
             resp = await self._ask(trip, req)
             if resp.approved:
                 await self.add_line(trip.trip_id, line, approval_id=req.approval_id)
+
+    async def _suggestion_line(self, trip: Trip, rec: Recommendation, source: str) -> CartLine:
+        """The cart line an accepted checkout suggestion would become (status 'planned': nothing picked yet)."""
+        online = source == "online"
+        return CartLine(
+            line_id=new_id("line"),
+            sku=rec.sku,
+            name=rec.product_name,
+            category=await self._category(rec.sku),
+            qty=1,
+            unit_price_cents=rec.price_cents or await self._unit_price(trip, rec.sku, rec, None),
+            source="online" if online else "in_store",
+            store_id=ONLINE_STORE_ID if online else trip.store_id,
+            slot_id=None if online else rec.slot_id,
+            status="planned",
+            rec_id=rec.rec_id,
+        )
+
+    def _fetch_blocker(self, trip: Trip, robot_done: bool) -> str | None:
+        """Why no robot can go back for in-store suggestions accepted at checkout (None = one can)."""
+        if not self.config.fetch_checkout_suggestions:
+            return "the robot has already finished shopping"
+        if self.services.fleet is None:
+            return "no robot is available to pick it"
+        if not robot_done:
+            return "the robot could not finish shopping"
+        if trip.route is None:
+            return "there is no store route to go back on"
+        return None
+
+    async def _fetch_stop(self, trip: Trip, rec: Recommendation) -> Stop | None:
+        """A MANDATORY route stop for an accepted in-store suggestion (the shopper already said yes: no second ask),
+        at a stocked shelf location in the trip's store; None when there is none."""
+        catalog = self.services.catalog
+        if rec.store_id != trip.store_id or catalog is None:
+            return None
+        locs = []
+        with contextlib.suppress(Exception):
+            locs = await catalog.get_locations(rec.sku, trip.store_id)
+        stocked = [x for x in locs if x.qty > 0]
+        loc = next((x for x in stocked if x.slot_id == rec.slot_id), stocked[0] if stocked else None)
+        if loc is None:
+            return None
+        stop_id = f"rec:{rec.rec_id}"
+        if trip.route is not None and trip.route.stop(stop_id) is not None:
+            stop_id = f"rec:{rec.rec_id}:checkout"
+        return Stop(
+            stop_id=stop_id,
+            kind="mandatory",
+            pose=loc.approach_pose,
+            label=rec.product_name or rec.sku,
+            slot_id=loc.slot_id,
+            skus=[rec.sku],
+            qty=1,
+            rec_id=rec.rec_id,
+            user_ids=[trip.user_id],
+            service_time_s=8.0,
+        )
+
+    async def _fetch_accepted(self, trip: Trip, recs: list[Recommendation], robot_done: bool, approval_id: str) -> None:
+        """In-store suggestions accepted at checkout. The robot already left those shelves, so the gateway must not
+        bill them as picked (Trust, CLAUDE.md §8: the bill is what is in the basket). When the in-store goal completed,
+        the robot goes back for them: they become mandatory route stops, the route is re-planned from the robot's
+        pose, and one more fleet run (a shop goal over just those stops, ending at checkout) picks them; the brain
+        adds each line itself after the pick, mandate-checked like any other (``add_line`` bills it at the card's price
+        and takes the batch choice as its approval, ``_checkout_picks``). Otherwise, or when a stop has no stocked
+        shelf, the mandate denies it, or the pick fails, it stays out of the cart and an ``error`` event says so."""
+        trip_id = trip.trip_id
+
+        async def not_added(rec: Recommendation, why: str, arm: str = "gateway") -> None:
+            await self._error(
+                trip_id,
+                arm,
+                f"{rec.product_name or rec.sku} not added: {why}. It is not in your cart or on your bill.",
+                code="suggestion_not_picked",
+            )
+
+        blocker = self._fetch_blocker(trip, robot_done)
+        stops: list[tuple[Recommendation, Stop]] = []
+        for rec in recs:
+            if blocker is not None:
+                await not_added(rec, blocker)
+                continue
+            stop = await self._fetch_stop(trip, rec)
+            if stop is None:
+                await not_added(rec, "no stocked shelf for it in this store")
+                continue
+            decision = await self._evaluate(trip, await self._suggestion_line(trip, rec, source="in_store"))
+            if decision.verdict == MandateVerdict.DENY:
+                await not_added(rec, "your spending rules do not allow it (mandate)", arm="trust")
+                continue
+            stops.append((rec, stop))
+        if not stops or trip.route is None:
+            return
+        picks = self._checkout_picks.setdefault(trip_id, {})
+        for rec, _ in stops:
+            picks[rec.rec_id] = (approval_id, rec.price_cents)
+        trip.route = trip.route.model_copy(update={"stops": [*trip.route.stops, *(s for _, s in stops)]})
+        for _, stop in stops:
+            await self.set_stop_status(trip_id, stop.stop_id, "pending", "accepted at checkout: going back for it")
+        try:
+            await self.replan(trip_id, include_recommendations=False)
+        except Exception as exc:  # noqa: BLE001 - the brain still has the stop's slot; it routes itself
+            await self._error(trip_id, "routing", f"re-plan for the checkout suggestions failed: {exc}")
+        try:
+            await self._run_goal(trip, fetch=True)
+        finally:
+            for rec, _ in stops:
+                picks.pop(rec.rec_id, None)
+        for rec, stop in stops:
+            if any(ln.active and ln.source == "in_store" and ln.rec_id == rec.rec_id for ln in trip.cart.lines):
+                continue
+            status = trip.stop_status.get(stop.stop_id)
+            if status not in FINISHED_STOP:
+                await self.set_stop_status(trip_id, stop.stop_id, "failed", "not picked")
+            await not_added(
+                rec, "your spending rules kept it off the bill" if status == "done" else "the robot could not pick it"
+            )
 
     # ==================================================================================================================
     # checkout -> paid -> followup
