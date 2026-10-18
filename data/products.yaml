@@ -2479,3 +2479,299 @@ products:
     dims_m: [0.05, 0.05, 0.12]
     label_color: '#d84315'
     mass_kg: 0.15
+- sku: PX9-128
+  name: 'Pixel 9 128 GB'
+  brand: Google
+  category: wireless
+  subcategory: phones
+  description: 'Unlocked Pixel 9, 128 GB, boxed.'
+  tags: [phone, android, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 79999
+  unit: each
+  size: '128 GB'
+  barcode: '2000000200002'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.05, 0.17]
+    label_color: '#2b2f33'
+    mass_kg: 0.45
+- sku: IP16-128
+  name: 'iPhone 16 128 GB'
+  brand: Apple
+  category: wireless
+  subcategory: phones
+  description: 'iPhone 16, 128 GB, boxed.'
+  tags: [phone, ios, iphone]
+  dietary: []
+  allergens: []
+  price_cents: 82999
+  unit: each
+  size: '128 GB'
+  barcode: '2000000200071'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.05, 0.17]
+    label_color: '#d8d8d8'
+    mass_kg: 0.45
+- sku: GS25-128
+  name: 'Galaxy S25 128 GB'
+  brand: Samsung
+  category: wireless
+  subcategory: phones
+  description: 'Galaxy S25, 128 GB, boxed.'
+  tags: [phone, android, galaxy]
+  dietary: []
+  allergens: []
+  price_cents: 79999
+  unit: each
+  size: '128 GB'
+  barcode: '2000000200149'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.05, 0.17]
+    label_color: '#4a5a7a'
+    mass_kg: 0.45
+- sku: CASE-PX9-CLR
+  name: 'Pixel 9 Clear Case'
+  brand: Shellcraft
+  category: wireless
+  subcategory: cases
+  description: 'Slim clear case for Pixel 9.'
+  tags: [case, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  barcode: '2000000200217'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.02, 0.19]
+    label_color: '#cfe3ea'
+    mass_kg: 0.08
+- sku: CASE-PX9-RUG
+  name: 'Pixel 9 Rugged Case'
+  brand: Armorline
+  category: wireless
+  subcategory: cases
+  description: 'Drop-rated rugged case for Pixel 9.'
+  tags: [case, pixel, rugged]
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000200286'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.03, 0.19]
+    label_color: '#3c3f3a'
+    mass_kg: 0.12
+- sku: CASE-PX7-BLK
+  name: 'Pixel 7 Slim Case'
+  brand: Shellcraft
+  category: wireless
+  subcategory: cases
+  description: 'Black slim case for Pixel 7 (last generation).'
+  tags: [case, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 1999
+  unit: each
+  barcode: '2000000200354'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.02, 0.19]
+    label_color: '#1f2326'
+    mass_kg: 0.08
+- sku: CASE-IP16-MAG
+  name: 'iPhone 16 MagSafe Case'
+  brand: Shellcraft
+  category: wireless
+  subcategory: cases
+  description: 'MagSafe-compatible case for iPhone 16.'
+  tags: [case, ios, magsafe]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000200422'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.02, 0.19]
+    label_color: '#9cb8d6'
+    mass_kg: 0.09
+- sku: GLASS-PX9
+  name: 'Pixel 9 Glass Screen Protector 2-pk'
+  brand: ClearShield
+  category: wireless
+  subcategory: screen_protectors
+  description: 'Tempered glass, two pack.'
+  tags: [screen, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  size: '2 pk'
+  barcode: '2000000200491'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.015, 0.19]
+    label_color: '#e7f0f4'
+    mass_kg: 0.06
+- sku: CHG-20W
+  name: '20W USB-C Wall Charger'
+  brand: Voltix
+  category: wireless
+  subcategory: chargers
+  description: '20 W USB-C PD wall charger.'
+  tags: [charger, usb-c]
+  dietary: []
+  allergens: []
+  price_cents: 2499
+  unit: each
+  size: '20 W'
+  barcode: '2000000200569'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.08, 0.05, 0.12]
+    label_color: '#f4f4f2'
+    mass_kg: 0.12
+- sku: CHG-45W
+  name: '45W USB-C Fast Charger'
+  brand: Voltix
+  category: wireless
+  subcategory: chargers
+  description: '45 W USB-C PD fast charger.'
+  tags: [charger, usb-c, fast]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  size: '45 W'
+  barcode: '2000000200637'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.08, 0.05, 0.12]
+    label_color: '#202020'
+    mass_kg: 0.15
+- sku: CBL-USBC-2M
+  name: 'USB-C Braided Cable 2 m'
+  brand: Voltix
+  category: wireless
+  subcategory: chargers
+  description: 'Braided USB-C to USB-C cable, 2 m.'
+  tags: [cable, usb-c]
+  dietary: []
+  allergens: []
+  price_cents: 1999
+  unit: each
+  size: '2 m'
+  barcode: '2000000200705'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.04, 0.15]
+    label_color: '#c4472b'
+    mass_kg: 0.1
+- sku: BUDS-PRO
+  name: 'Pixel Buds Pro 2'
+  brand: Google
+  category: wireless
+  subcategory: audio
+  description: 'Noise-cancelling wireless earbuds.'
+  tags: [earbuds, anc]
+  dietary: []
+  allergens: []
+  price_cents: 22999
+  unit: each
+  barcode: '2000000200774'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.05, 0.12]
+    label_color: '#e9dfcf'
+    mass_kg: 0.2
+- sku: BUDS-RUN
+  name: 'SportFit Wireless Earbuds'
+  brand: Pulse
+  category: wireless
+  subcategory: audio
+  description: 'Sweat-resistant earbuds with ear hooks.'
+  tags: [earbuds, running, sport]
+  dietary: []
+  allergens: []
+  price_cents: 7999
+  unit: each
+  barcode: '2000000200842'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.05, 0.12]
+    label_color: '#2f6b45'
+    mass_kg: 0.18
+- sku: WATCH-PX3
+  name: 'Pixel Watch 3 (LTE)'
+  brand: Google
+  category: wireless
+  subcategory: wearables
+  description: 'LTE smartwatch; needs a watch line.'
+  tags: [watch, lte]
+  dietary: []
+  allergens: []
+  price_cents: 39999
+  unit: each
+  barcode: '2000000200910'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.1, 0.12]
+    label_color: '#3a3d40'
+    mass_kg: 0.3
+- sku: GW-5G
+  name: '5G Home Internet Gateway'
+  brand: Carrier
+  category: wireless
+  subcategory: home_internet
+  description: '5G home internet gateway (no charge with service).'
+  tags: [home, internet]
+  dietary: []
+  allergens: []
+  price_cents: 0
+  unit: each
+  barcode: '2000000200989'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.16, 0.16, 0.25]
+    label_color: '#e20074'
+    mass_kg: 1.2
+- sku: PB-10K
+  name: '10,000 mAh Power Bank'
+  brand: Voltix
+  category: wireless
+  subcategory: chargers
+  description: 'USB-C power bank, 10,000 mAh.'
+  tags: [battery, travel]
+  dietary: []
+  allergens: []
+  price_cents: 3499
+  unit: each
+  size: '10,000 mAh'
+  barcode: '2000000201054'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.08, 0.03, 0.16]
+    label_color: '#5a6470'
+    mass_kg: 0.22
