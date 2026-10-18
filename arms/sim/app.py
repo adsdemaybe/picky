@@ -112,6 +112,8 @@ WRIST_NEAR_CLIP_PUPPET_M = 0.01
 """Near clip of a USD-puppet rover's wrist camera: the SO-101 jaw tips sit ~5 cm ahead of / 3 cm below the eye, and
 NEAR_CLIP_M (0.05) sliced them into two black cross-sections in every wrist frame. The primitive rig keeps NEAR_CLIP_M
 (its wrist-camera housing prim must stay clipped)."""
+EXTERNAL_LIGHT_SCALE_ENV = "PICKY_EXTERNAL_LIGHT_SCALE"
+"""Multiplier on the lights of an external scene USD (``arms.sim.external``; the Genie Sim market is bright)."""
 DEFAULT_LABEL_DIR = "/tmp/picky-sim-labels"
 TAG_SIZE_M = (0.08, 0.06)
 """Shelf-edge price tag in front of SKUs whose model carries no label (loose produce)."""
@@ -354,6 +356,10 @@ class IsaacBackend:
         self._materials: dict[str, Any] = {}
         self._model_bounds: dict[str, tuple[Any, Any] | None] = {}
         self._specs: dict[str, SceneSpec] = {}
+        self._ext: dict[tuple[str, str], dict[str, Any]] = {}
+        """External-scene units (arms.sim.external): (store, instance) -> {path, yaw, op}."""
+        self._ext_base: dict[str, tuple[Any, Any, Any, float]] = {}
+        """External prim path -> (store-local matrix at build, inverse parent store-local matrix, box center, yaw)."""
         self._scene_dirty = True
         self._last_update = 0.0
         self._stats_n = 0
@@ -523,7 +529,12 @@ class IsaacBackend:
 
     def _define_unit(self, spec: SceneSpec | None, prim: PrimSpec) -> str:
         """Product unit: the SKU's per-item model when it resolves (``prim.render``), else today's primitive."""
-        ua = self.assets.resolve(prim.sku) if prim.render != "primitive" else None
+        if prim.render == "external":
+            path = self._external_unit(spec, prim)
+            if path is not None:
+                return path
+            prim = prim.model_copy(update={"render": "primitive", "external_path": None})
+        ua = self.assets.resolve(prim.sku) if prim.render not in ("primitive", "external") else None
         if ua is not None and spec is not None:
             try:
                 return self._define_model_unit(spec, prim, ua)
@@ -865,9 +876,15 @@ class IsaacBackend:
             del self._inst_paths[key]
         for key in [k for k in self._units if k[0] == spec.store_id]:
             del self._units[key]
+        for key in [k for k in self._ext if k[0] == spec.store_id]:
+            del self._ext[key]
+        for path in [p for p in self._ext_base if p.startswith(root + "/")]:
+            del self._ext_base[path]
         xform = UsdGeom.Xform.Define(self.stage, root)
         UsdGeom.XformCommonAPI(xform).SetTranslate(Gf.Vec3d(*offset))
         self._store_roots[spec.store_id] = root
+        if spec.external_usd:
+            self._build_external(spec)
         # (no Sdf.ChangeBlock: the Usd/UsdShade APIs used here read the stage while authoring)
         self._specs[spec.store_id] = spec
         for p in spec.prims:
@@ -887,12 +904,116 @@ class IsaacBackend:
                     log.warning("tag for %s failed: %s", layout.slot_id, exc)
         if modeled:
             log.info("store %s: %d units on per-item models, %d shelf tags", spec.store_id, modeled, tags)
+        external = sum(1 for k in self._ext if k[0] == spec.store_id)
+        if spec.external_usd:
+            log.info("store %s: %d units are product prims of %s", spec.store_id, external, spec.external_usd)
         for _ in range(5):
             self._update()
         self._changed()
         log.info(
             "store %s built at %s: %d prims, %d units", spec.store_id, offset, len(spec.prims), len(spec.instances)
         )
+
+    # -- external scenes (arms.sim.external): the store's own USD draws shelves + products ---------------------------
+    def _build_external(self, spec: SceneSpec) -> None:
+        """Reference the store's USD under ``spec.external_root`` (translated USD -> store frame), freeze its rigid
+        bodies (posed kinematically like every unit) and hide the mapped prims that have no unit."""
+        from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics  # type: ignore[import-not-found]
+
+        assert spec.external_root and spec.external_usd
+        scene = UsdGeom.Xform.Define(self.stage, spec.external_root)
+        UsdGeom.XformCommonAPI(scene).SetTranslate(Gf.Vec3d(*spec.external_translate))
+        scene.GetPrim().GetReferences().AddReference(spec.external_usd, Sdf.Path(spec.external_default_prim))
+        self.stage.Load(spec.external_root)
+        try:
+            light_scale = float(os.environ.get(EXTERNAL_LIGHT_SCALE_ENV, "1.0"))
+        except ValueError:
+            light_scale = 1.0
+        bodies = lights = 0
+        physics_scenes = []
+        for p in Usd.PrimRange(scene.GetPrim()):
+            if p.HasAPI(UsdPhysics.RigidBodyAPI):
+                UsdPhysics.RigidBodyAPI(p).CreateRigidBodyEnabledAttr(False)
+                bodies += 1
+            if p.IsA(UsdPhysics.Scene):
+                physics_scenes.append(p)
+            if light_scale != 1.0 and (p.HasAPI(UsdLux.LightAPI) or p.GetTypeName().endswith("Light")):
+                a = p.GetAttribute("inputs:intensity")
+                if a and a.Get() is not None:
+                    a.Set(float(a.Get()) * light_scale)
+                    lights += 1
+        for p in physics_scenes:  # after the traversal: deactivating changes the stage under the iterator
+            p.SetActive(False)  # one physics scene per stage; nothing here is simulated anyway
+        for rel in spec.external_hidden:
+            self._set_visible(f"{spec.external_root}/{rel}", False)
+        log.info(
+            "store %s: referenced %s (%d rigid bodies frozen, %d lights x%.2f, %d spare prims hidden)",
+            spec.store_id,
+            spec.external_usd,
+            bodies,
+            lights,
+            light_scale,
+            len(spec.external_hidden),
+        )
+
+    def _set_visible(self, path: str, visible: bool) -> None:
+        from pxr import UsdGeom  # type: ignore[import-not-found]
+
+        prim = self.stage.GetPrimAtPath(path)
+        if prim and prim.IsValid():
+            im = UsdGeom.Imageable(prim)
+            im.MakeVisible() if visible else im.MakeInvisible()
+
+    def _store_matrix(self, prim: Any, root_inv: Any) -> Any:
+        from pxr import Usd, UsdGeom  # type: ignore[import-not-found]
+
+        return UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default()) * root_inv
+
+    def _external_unit(self, spec: SceneSpec | None, prim: PrimSpec) -> str | None:
+        """Bind a unit to its USD product prim (no new geometry). None when the prim is missing (primitive then)."""
+        from pxr import Gf, Usd, UsdGeom  # type: ignore[import-not-found]
+
+        if spec is None or not spec.external_root or not prim.external_path:
+            return None
+        path = f"{spec.external_root}/{prim.external_path}"
+        p = self.stage.GetPrimAtPath(path)
+        if not p or not p.IsValid() or not p.IsA(UsdGeom.Xformable):
+            log.warning("unit %s: external prim %s not found; drawing the primitive", prim.instance_id, path)
+            return None
+        if path not in self._ext_base:  # the prim's pose as authored by the scene (cached: a restock reuses it)
+            root = self.stage.GetPrimAtPath(spec.root_path)
+            root_inv = UsdGeom.Xformable(root).ComputeLocalToWorldTransform(Usd.TimeCode.Default()).GetInverse()
+            w0 = self._store_matrix(p, root_inv)
+            wp = self._store_matrix(p.GetParent(), root_inv)
+            self._ext_base[path] = (w0, wp.GetInverse(), Gf.Vec3d(*prim.center), prim.yaw)
+        self._set_visible(path, True)
+        key = (prim.store_id or "", prim.instance_id or "")
+        self._ext[key] = {"path": path, "yaw": prim.yaw, "op": None}
+        self._inst_paths[key] = path
+        base_center = self._ext_base[path][2]
+        if any(abs(a - b) > 1e-4 for a, b in zip(base_center, prim.center, strict=True)):
+            self._pose_external(key[0], key[1], Point3(x=prim.center[0], y=prim.center[1], z=prim.center[2]), prim.yaw)
+        return path
+
+    def _pose_external(self, store_id: str, instance_id: str, position: Point3, yaw: float | None) -> None:
+        """Move an external prim so its box center is at ``position`` (store frame), turned by ``yaw`` - its
+        build-time yaw about +z: local = W0 . T(-c0) . Rz(dyaw) . T(p) . Wparent^-1 (Gf row vectors)."""
+        from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
+
+        e = self._ext[(store_id, instance_id)]
+        w0, wp_inv, c0, yaw0 = self._ext_base[e["path"]]
+        if yaw is not None:
+            e["yaw"] = yaw
+        rot = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(0, 0, 1), math.degrees(e["yaw"] - yaw0)))
+        m = (
+            w0
+            * Gf.Matrix4d().SetTranslate(-c0)
+            * rot
+            * Gf.Matrix4d().SetTranslate(Gf.Vec3d(position.x, position.y, position.z))
+        )
+        if e["op"] is None:
+            e["op"] = UsdGeom.Xformable(self.stage.GetPrimAtPath(e["path"])).MakeMatrixXform()
+        e["op"].Set(m * wp_inv)
 
     def set_store_offset(self, store_id: str, offset: Vec3) -> None:
         from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
@@ -1230,6 +1351,13 @@ class IsaacBackend:
     def remove_instance(self, store_id: str, instance_id: str) -> None:
         path = self._inst_paths.pop((store_id, instance_id), None)
         self._units.pop((store_id, instance_id), None)
+        if self._ext.pop((store_id, instance_id), None) is not None:
+            # a prim of the external USD cannot be removed (it lives in a referenced layer): hide it; a restock of
+            # the same unit shows it again (add_instance)
+            if path:
+                self._set_visible(path, False)
+            self._changed()
+            return
         if path and self.stage.GetPrimAtPath(path):
             self.stage.RemovePrim(path)
         self._changed()
@@ -1239,6 +1367,10 @@ class IsaacBackend:
 
         path = self._inst_paths.get((store_id, instance_id))
         if not path:
+            return
+        if (store_id, instance_id) in self._ext:
+            self._pose_external(store_id, instance_id, position, yaw)
+            self._changed()
             return
         unit = self._units.get((store_id, instance_id))
         if unit is not None:  # model unit: origin at the bottom center + per-SKU yaw offset
