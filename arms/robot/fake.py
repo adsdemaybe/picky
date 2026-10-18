@@ -102,6 +102,12 @@ FRAME_ID_PREFIX = "fakeframe"
 perception (``is_synthetic_frame``) certifies stream frames that carry no ground-truth instances."""
 
 DURATIONS_S = {"reset": 0.5, "scan": 0.8, "pick": 2.2, "place_in_basket": 1.5, "unload_basket": 1.0}
+BASKET_REACH_LIFT_M = 0.32
+"""0.2.4 checkout unload: lift height at which the SO-101 reaches back into the basket (matches the Isaac worker)."""
+COUNTER_REACH_M = 0.6
+"""place_on_counter: the spot must be within this horizontal distance of the robot base (else grasp_failed)."""
+COUNTER_CLEAR_M = 0.05
+"""A unit already lying within this of a new counter spot (left from an earlier trip) is cleared first."""
 """Base simulated durations (lift travel is added to pick / place; see arms.robot.rover)."""
 
 
@@ -114,6 +120,8 @@ class _Rover:
     lift: float = LIFT_STOW_M
     holding: ItemInstance | None = None
     basket: list[ItemInstance] = field(default_factory=list)
+    counter: list[ItemInstance] = field(default_factory=list)
+    """0.2.4: units this robot unloaded onto the checkout counter (cleared by unload_basket / reset)."""
     motion: str | None = None
     cmd_id: str | None = None
     cancel: asyncio.Event = field(default_factory=asyncio.Event)
@@ -456,12 +464,96 @@ class FakeRobot:
         out = [i.model_copy(update={"bbox": None}) for units in world.shelves.values() for i in units]
         if rv.holding is not None:
             out.append(self._held_instance(rv))
-        return out + self._basket_instances(rv)
+        return out + self._basket_instances(rv) + [i.model_copy(update={"bbox": None}) for i in rv.counter]
 
     async def pick(
         self, robot_id: RobotId, slot_id: SlotId, sku: Sku, instance_id: InstanceId | None = None
     ) -> ItemInstance:
         return await self._pick(robot_id, slot_id, sku, instance_id, strict_reach=self.strict_reach)
+
+    # ---- 0.2.4 checkout unload by the arm (optional RobotService extension; arms/robot/vla.py) -----------------------
+    def can_unload_to_counter(self, robot_id: RobotId) -> bool:
+        """The 2D fake always has the basket -> counter primitives."""
+        self._rover(robot_id)
+        return True
+
+    async def pick_from_basket(
+        self, robot_id: RobotId, sku: Sku | None = None, instance_id: InstanceId | None = None
+    ) -> ItemInstance:
+        """Lower the lift, reach back into the basket and lift one unit out (``instance_id``, else the first unit of
+        ``sku``). ``no_instance`` when it is not in the basket; ``grasp_failed`` when the gripper is busy."""
+        rv = self._rover(robot_id)
+        if rv.holding is not None:
+            raise RobotError("grasp_failed", f"gripper already holds {rv.holding.instance_id}")
+        unit = next(
+            (
+                u
+                for u in rv.basket
+                if (instance_id is not None and u.instance_id == instance_id)
+                or (instance_id is None and sku is not None and u.sku == sku)
+            ),
+            None,
+        )
+        if unit is None:
+            raise RobotError("no_instance", f"no {instance_id or sku} in the basket of {robot_id}")
+        self._settle(rv)
+        rv.battery.check_motion(robot_id)
+        with self._motion(rv, "pick_from_basket", RobotStatus.PICKING):
+            rv.auto_task = f"taking {unit.sku} out of the basket"
+            dur = motion_duration("pick_from_basket", rv.lift, BASKET_REACH_LIFT_M)
+            await self._emit(rv, force=True)
+            await self._wait(rv, dur * 0.5)
+            rv.lift = BASKET_REACH_LIFT_M
+            await self._emit(rv, force=True)
+            await self._wait(rv, dur * 0.5)
+            rv.basket = [u for u in rv.basket if u.instance_id != unit.instance_id]
+            rv.holding = unit.model_copy(update={"in_basket": False, "on_counter": False, "store_id": rv.store_id})
+        await self._emit(rv, force=True)
+        return self._held_instance(rv)
+
+    async def place_on_counter(
+        self, robot_id: RobotId, position: Point3, yaw: float = 0.0, spot: int | None = None
+    ) -> RobotState:
+        """Carry the held unit to ``position`` on the checkout counter and release it there (``on_counter``)."""
+        rv = self._rover(robot_id)
+        if rv.holding is None:
+            raise RobotError("no_instance", "gripper is empty")
+        dist = math.hypot(position.x - rv.pose.x, position.y - rv.pose.y)
+        if self.strict_reach and dist > COUNTER_REACH_M:
+            raise RobotError("grasp_failed", f"counter spot {spot} out of reach ({dist:.2f} m from the robot)")
+        with self._motion(rv, "place_on_counter", RobotStatus.PLACING):
+            rv.auto_task = f"putting {rv.holding.sku} on the counter"
+            lift_to = lift_for(position.z)
+            dur = motion_duration("place_on_counter", rv.lift, lift_to)
+            await self._emit(rv, force=True)
+            await self._wait(rv, dur * 0.6)
+            rv.lift = lift_to
+            await self._emit(rv, force=True)
+            await self._wait(rv, dur * 0.4)
+            held, rv.holding = rv.holding, None
+            rv.counter = [
+                u
+                for u in rv.counter
+                if math.hypot(u.position.x - position.x, u.position.y - position.y) > COUNTER_CLEAR_M
+            ]
+            dims_z = 0.12
+            rv.counter.append(
+                held.model_copy(
+                    update={
+                        "position": Point3(x=position.x, y=position.y, z=round(position.z + dims_z / 2, 4)),
+                        "in_basket": False,
+                        "on_counter": True,
+                        "store_id": rv.store_id,
+                        "bbox": None,
+                    }
+                )
+            )
+        await self._emit(rv, force=True)
+        return self._snapshot(rv)
+
+    def counter_units(self, robot_id: RobotId) -> list[ItemInstance]:
+        """Units this robot left on the checkout counter (ground truth for the verifier)."""
+        return [u.model_copy() for u in self._rover(robot_id).counter]
 
     # ---- extras for the VLA layer (arms/robot/vla.py; not in the RobotService Protocol) ------------------------------
     def can_put_back(self, robot_id: RobotId) -> bool:
@@ -567,8 +659,9 @@ class FakeRobot:
             rv.auto_task = f"unloading {len(rv.basket)} items at checkout"
             await self._emit(rv, force=True)
             await self._wait(rv, motion_duration("unload_basket", units=len(rv.basket)))
-            out = self._basket_instances(rv)
+            out = self._basket_instances(rv) + [u.model_copy() for u in rv.counter]
             rv.basket = []
+            rv.counter = []  # 0.2.4: the handoff = staff bag what the arm put on the counter + any basket leftovers
         await self._emit(rv, force=True)
         return out
 
@@ -662,6 +755,7 @@ class FakeRobot:
     def _respawn(self, rv: _Rover) -> None:
         rv.pose = rv.spec.dock.model_copy()
         rv.holding, rv.basket, rv.route = None, [], []
+        rv.counter = []
         rv.battery = Battery(pct=rv.spec.battery_pct, last_t=self._now())
         rv.lift, rv.error, rv.focus_slot = LIFT_STOW_M, None, None
 

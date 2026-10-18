@@ -105,7 +105,11 @@ class RobotTruth:
                 sku=g.sku,
                 approach_pose=g.approach_pose,
                 item_position=g.item_position,
-                instances=[u for u in units if u.slot_id == sid and not u.in_basket and u.instance_id not in taken],
+                instances=[
+                    u
+                    for u in units
+                    if u.slot_id == sid and not u.in_basket and not u.on_counter and u.instance_id not in taken
+                ],
                 shelf_tag_cents=shelf_tag_cents(g, products.get(g.sku)),
             )
 
@@ -124,6 +128,7 @@ class RobotTruth:
             battery_pct=st.battery_pct,
             holding=holding,
             basket=basket,
+            counter=[u for u in units if u.on_counter],
             slots=slots,
             visible_slots={robot_camera_id(robot_id, "front"): facing},
             labels=labels,
