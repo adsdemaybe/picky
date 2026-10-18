@@ -62,18 +62,41 @@ export default function WatchPage() {
   );
 
   if (t.source !== "gateway" && (t.phase === "idle" || !t.draft)) {
+    // No trip running: the store floors still stream — flip Picky Market ↔ T-Mobile without sending a robot
+    const idleRobot = STORE_ROVER[camStore];
+    const idleOpts = { robotId: idleRobot, storeId: camStore, base: gwBase, simOf, perceptron, waiting: !gwLive };
+    const idleRungs: Rung[] =
+      camStore === "store_tmobile" ? (gwLive ? [...directorRungs(idleOpts), isaacReplay!] : [isaacReplay!]) : directorRungs(idleOpts);
     return (
-      <div className="mx-auto flex max-w-[560px] animate-rise flex-col items-center py-16 text-center">
+      <div className="relative left-1/2 flex w-[min(1280px,calc(100vw-2rem))] -translate-x-1/2 flex-col gap-4">
         {bind}
-        <LottieSlot slot="robotIdle" className="aspect-[8/7] w-[300px]" fallback={<RobotArt sleeping />} />
-        <h1 className="mt-6 text-[34px] leading-tight font-bold">Nothing to watch yet</h1>
-        <p className="mt-2 text-[16px] text-muted-foreground">
-          Pick what&apos;s running low on Home and the robot&apos;s cameras show up here while it shops: the live picture, what it detects, every pick and every
-          question.
-        </p>
-        <Button asChild size="lg" className="mt-6">
-          <Link href="/">Pick what&apos;s running low</Link>
-        </Button>
+        <section>
+          <h1 className="text-[30px] leading-tight font-bold">Live store floors</h1>
+          <p className="mt-1 text-[15px] text-muted-foreground">
+            No robot trip is running right now — the Isaac Sim floors below are still live. Start one from Robot order and the chase cam, picks and basket follow here.
+          </p>
+        </section>
+        <div role="group" aria-label="Store cameras" className="flex flex-wrap items-center gap-1.5">
+          <Eye className="mr-0.5 size-3.5 text-muted-foreground" aria-hidden />
+          {([["store_ave", "Picky Market"], ["store_tmobile", "T-Mobile"]] as [StoreId, string][]).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={camStore === id}
+              onClick={() => setStorePick(id)}
+              className={cn("min-h-9 cursor-pointer rounded-full px-4 py-1.5 text-[13.5px] font-semibold transition-colors", camStore === id ? "bg-sky text-white" : "bg-muted text-muted-foreground hover:text-foreground")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <CameraPanel rungs={idleRungs} alt={`Isaac Sim cameras over ${STORES[camStore].short}`} className="aspect-video" />
+        <div className="flex flex-wrap items-center gap-3">
+          <Button asChild size="lg">
+            <Link href="/order">Send the robot shopping</Link>
+          </Button>
+          <span className="text-[13px] text-muted-foreground">{gwLive ? "Gateway connected · Isaac Sim on vhagar" : "Gateway offline — showing the recorded Isaac run"}</span>
+        </div>
       </div>
     );
   }
