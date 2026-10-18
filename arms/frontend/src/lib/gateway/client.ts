@@ -89,6 +89,19 @@ export const gw = {
   /** "Running low" restock suggestions from purchase cadence (most due first). */
   // the LLM re-rank takes 5-8 s when the gateway's cache is cold (it bounds it at 8 s, then rule order)
   suggestions: (userId: string) => req<Suggestion[]>(`/api/users/${enc(userId)}/suggestions`, undefined, 15_000),
+  // ── store staff + fleet views (contracts/api.md: stores, stock, merchant, fleet, goals, trust) ──
+  stores: () => req<S["StoreInfo"][]>("/api/stores", undefined, 5000),
+  robots: (q: { store_id?: string } = {}) => req<RobotInfo[]>(`/api/fleet/robots${qs(q)}`, undefined, 5000),
+  goals: (q: { store_id?: string; robot_id?: string; active?: boolean; limit?: number } = {}) =>
+    req<S["Goal-Output"][]>(`/api/goals${qs({ store_id: q.store_id, robot_id: q.robot_id, active: q.active === undefined ? undefined : String(q.active), limit: q.limit ?? 30 })}`, undefined, 5000),
+  stock: (storeId: string) => req<S["StockLevel"][]>(`/api/stores/${enc(storeId)}/stock`, undefined, 5000),
+  stockAlerts: (storeId: string) => req<S["StockAlert"][]>(`/api/stores/${enc(storeId)}/stock/alerts`, undefined, 5000),
+  stockHistory: (storeId: string, limit = 30) => req<S["StockMovement"][]>(`/api/stores/${enc(storeId)}/stock/history${qs({ limit })}`, undefined, 5000),
+  restock: (storeId: string, b: S["RestockRequest"]) => req<S["StockChangeResult"]>(`/api/stores/${enc(storeId)}/stock/restock`, { method: "POST", body: b }),
+  adjust: (storeId: string, b: S["StockAdjustment"]) => req<S["StockChangeResult"]>(`/api/stores/${enc(storeId)}/stock/adjust`, { method: "POST", body: b }),
+  merchant: (storeId: string) => req<S["MerchantDashboard"]>(`/api/merchant/${enc(storeId)}/dashboard`, undefined, 5000),
+  ledger: (q: { user_id?: string; trip_id?: string } = {}) => req<S["TrustLedger"]>(`/api/trust/ledger${qs(q)}`, undefined, 5000),
+  search: (q: string, limit = 12) => req<S["SearchHit"][]>(`/api/products/search${qs({ q, limit })}`, undefined, 5000),
 };
 
 /** GET /api/users/{id}/suggestions row. Hand-typed until the endpoint lands in schemas/openapi.json (pnpm gen-types). */
