@@ -28,10 +28,25 @@ grasp_miss (honest grasp_missed), wrong_item (2D fake: really grabs the neighbou
 (claims a place, still holding), nav_blocked, vla_hang (silence until stalled / deadline), policy_unavailable (T1
 refuses at accept -> T0 in the same exec), disconnect, mislabel (the held unit's label reads ``params.text``).
 
-T1: ``arms.robot.t1.T1Adapter`` (stub; unavailable unless configured, then T0 takes over).
+Pictures while moving (every tier, every backend): while ``navigate_to`` / ``align`` drive, ``_nav_camera`` takes a
+front-camera picture every 1 / PICKY_VLA_NAV_CAPTURE_HZ s (default 2 Hz) through ``services.evidence`` (face-blurred
++ retained: each one is a ``FrameRef`` at /api/evidence/{id}.jpg; ``ex.nav_frames``) and reports it in a running
+status ('driving', ``message`` names the frame). On the approach (<= PICKY_VLA_NAV_LOOK_M of path left, at most
+NAV_LOOKS_PER_EXEC per drive, Isaac stores by default: PICKY_VLA_NAV_LOOK = isaac | always | off) one blurred
+picture goes to Perceptron Mk1.5 ("is <product> visible?", ``arms.robot.vla_mk15.look``, per-trip budget
+PICKY_PERCEPTRON_CALL_BUDGET) and the answer is a running status with stage 'observing' (the runner shows it; a
+brain.step mirror of 'observing' statuses belongs to the agent arm's runner).
+
+T1: ``arms.robot.t1.T1Adapter`` (unavailable unless configured, then T0 takes over). With a learned policy
+(PICKY_VLA_T1=perceptron|smolvla|scripted) a grasp resolved to T1 runs ``arms.robot.vla_t1.run_policy_grasp``: the
+policy drives the SO-101 joint by joint on the Isaac worker (contracts 0.2.2 ``ArmJointsCmd``) until the sticky grasp
+attaches a unit, ``PICKY_VLA_T1_TIMEOUT_S`` / ``_MAX_CHUNKS`` run out (``policy_timeout`` / ``grasp_missed``) or the
+policy fails (``policy_unavailable`` / ``policy_diverged``). One running status per action chunk (``chunk_no``). No
+fallback mid-run: the runner's RetryPolicy downgrades to T0 (``policy`` category -> downgrade_tier).
 """
 
 import asyncio
+import base64
 import math
 import time
 from collections.abc import AsyncIterator
@@ -83,6 +98,24 @@ ROUTED_ALIGN_M = 0.5
 NOT_AT_POSE_M = 0.5
 """grasp: further than this from the slot's approach pose = not_at_pose (else out_of_reach)."""
 DEFAULT_SPEED_MPS = 0.8
+DEFAULT_NAV_CAPTURE_HZ = 2.0
+"""Front-camera pictures per second while driving (PICKY_VLA_NAV_CAPTURE_HZ; 0 = off)."""
+NAV_LOOKS_PER_EXEC = 2
+"""Perceptron look-outs per drive (on the approach)."""
+NAV_LOOK_SPACING_S = 1.5
+DEFAULT_NAV_LOOK_M = 2.5
+NAV_FRAMES_KEPT = 240
+CAPTURE_TIMEOUT_S = 3.0
+
+
+def _setting(name: str, default: Any) -> Any:
+    try:
+        from utils.config import get_settings
+
+        value = getattr(get_settings(), name, None)
+    except Exception:  # noqa: BLE001 - config errors must not take the robot down
+        return default
+    return default if value is None or value == "" else value
 
 
 class _Fail(Exception):
@@ -110,6 +143,17 @@ class _Exec:
         self.path: list[Pose2D] = []
         self.path_len = 0.0
         self.fault_ids: list[str] = []
+        self.accepted_mono = 0.0
+        self.self_report: Any = "success"
+        self.nav_frames: list[FrameRef] = []
+        """Front-camera pictures taken while driving (blurred, retained evidence)."""
+        self.observations: list[str] = []
+        """Perceptron look-out answers while driving."""
+
+
+def _swallow(task: "asyncio.Task[Any]") -> None:
+    if not task.cancelled() and task.exception() is not None:
+        log.debug("background task %s ended: %s", task.get_name(), task.exception())
 
 
 def path_progress(path: list[Pose2D], pose: Pose2D) -> tuple[float, float]:
@@ -160,7 +204,7 @@ class T0Vla:
                 place_back=self._can_put_back(robot, robot_id, st),
                 cancel_latency_ms=200.0 if st.backend == "isaac" else 50.0,
             ),
-            self.t1.capability(robot_id, st.backend),
+            self.t1.capability(robot_id, st.backend, robot=robot),
             VlaCapabilities(
                 robot_id=robot_id,
                 tier="t2_finetuned",
@@ -375,6 +419,7 @@ class T0Vla:
                     raise _Fail("policy_unavailable", "policy server refused the skill (injected)")
                 fell_back, tier = tier, T0
             ex.tier = tier
+            ex.accepted_mono = time.monotonic()
             await self._emit(
                 ex,
                 phase="accepted",
@@ -395,7 +440,7 @@ class T0Vla:
             overlay = self._overlay()
             virtual = overlay.virtual_holding.get(req.robot_id) if overlay is not None else None
             outcome = VlaOutcome(
-                self_report="success",
+                self_report=ex.self_report,
                 self_confidence=0.9 if tier != T0 else None,
                 final_state=final,
                 holding_instance_id=virtual.instance_id if virtual else final.holding,
@@ -551,9 +596,118 @@ class T0Vla:
         ex.path = [st.pose, *waypoints]
         ex.path_len = sum(a.distance_to(b) for a, b in zip(ex.path, ex.path[1:], strict=False))
         await self._stage(ex, "driving", 0.1, eta_s=ex.path_len / DEFAULT_SPEED_MPS)
-        final = await robot.navigate(ex.request.robot_id, waypoints)
+        cam = asyncio.create_task(self._nav_camera(ex, robot, st), name=f"vla-cam:{ex.request.exec_id}")
+        try:
+            final = await robot.navigate(ex.request.robot_id, waypoints)
+        finally:
+            cam.cancel()  # never awaited here: a cancel of this exec must reach the caller untouched
+            cam.add_done_callback(_swallow)
         ex.ended_at = utcnow()
         return final
+
+    async def _nav_camera(self, ex: _Exec, robot: Any, st: RobotState) -> None:
+        """Pictures while driving: front camera every 1/hz s -> blurred, retained evidence (FrameRef) + a running
+        status; on the approach a rate-limited Perceptron look-out ('is <product> visible?') -> stage 'observing'."""
+        try:
+            hz = float(_setting("picky_vla_nav_capture_hz", DEFAULT_NAV_CAPTURE_HZ))
+        except (TypeError, ValueError):
+            hz = DEFAULT_NAV_CAPTURE_HZ
+        evidence = self.services.evidence
+        if hz <= 0 or evidence is None:
+            return
+        period = 1.0 / hz
+        req = ex.request
+        look_mode = str(_setting("picky_vla_nav_look", "isaac")).lower()
+        try:
+            look_m = float(_setting("picky_vla_nav_look_m", DEFAULT_NAV_LOOK_M))
+        except (TypeError, ValueError):
+            look_m = DEFAULT_NAV_LOOK_M
+        want_look = look_mode == "always" or (look_mode == "isaac" and st.backend == "isaac")
+        target = await self._nav_target_name(ex, st) if want_look else None
+        context = {
+            "plan_id": req.context.plan_id,
+            "goal_id": req.context.goal_id,
+            "step_id": req.context.step_id,
+            "step_kind": req.step.kind,
+            "attempt": req.context.attempt,
+            "exec_id": req.exec_id,
+            "purpose": "nav_picture",
+        }
+        looks, last_look = 0, -1e9
+        while True:
+            t0 = time.monotonic()
+            try:
+                refs = await asyncio.wait_for(
+                    evidence.capture_refs(req.robot_id, ["front"], context=context), CAPTURE_TIMEOUT_S
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - a missed picture never fails the drive
+                log.debug("nav picture for %s failed: %s", req.exec_id, exc)
+                refs = []
+            if refs:
+                ref = refs[0]
+                ex.nav_frames.append(ref)
+                del ex.nav_frames[:-NAV_FRAMES_KEPT]
+                await self._emit(
+                    ex,
+                    phase="running",
+                    stage=ex.stage,
+                    progress=ex.progress,
+                    pose=ref.pose,
+                    message=f"front camera picture {len(ex.nav_frames)} while driving ({ref.frame_id})",
+                )
+                remaining = path_progress(ex.path, ref.pose)[1] if ref.pose is not None and len(ex.path) > 1 else 0.0
+                if (
+                    target
+                    and looks < NAV_LOOKS_PER_EXEC
+                    and remaining <= look_m
+                    and time.monotonic() - last_look >= NAV_LOOK_SPACING_S
+                ):
+                    looks, last_look = looks + 1, time.monotonic()
+                    await self._look(ex, evidence, ref, target)
+            await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
+
+    async def _look(self, ex: _Exec, evidence: Any, ref: FrameRef, target: str) -> None:
+        """One Perceptron Mk1.5 look-out on a retained (blurred) picture -> a running 'observing' status."""
+        from arms.robot.vla_mk15 import look
+
+        try:
+            frame = await evidence.get_frame(ref.frame_id)
+            if not frame.blurred:
+                return  # section 8: only blurred frames leave for a vision model
+            ctx = ex.request.context
+            answer = await look(
+                base64.b64decode(frame.jpeg_b64),
+                target,
+                budget_key=ctx.trip_id or ctx.goal_id or ex.request.robot_id,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - the look-out is advisory
+            log.debug("look-out on %s failed: %s", ref.frame_id, exc)
+            return
+        if not answer:
+            return
+        ex.observations.append(answer)
+        await self._emit(
+            ex,
+            phase="running",
+            stage="observing",
+            progress=ex.progress,
+            pose=ref.pose,
+            message=f"Perceptron Mk1.5 on {ref.frame_id}: is {target} visible? {answer}",
+        )
+
+    async def _nav_target_name(self, ex: _Exec, st: RobotState) -> str | None:
+        slot_id = getattr(ex.request.step, "slot_id", None)
+        if not slot_id:
+            return None
+        try:
+            slot = await self._slot(st.store_id or "", slot_id)
+        except Exception:  # noqa: BLE001
+            return None
+        return (await self._product_name(slot.sku)).lower()
 
     @staticmethod
     def _at(pose: Pose2D, goal: Pose2D, tol_m: float, tol_rad: float) -> bool:
@@ -629,6 +783,8 @@ class T0Vla:
             dist = st.pose.distance_to(slot.approach_pose)
             code: VlaErrorCode = "not_at_pose" if dist > NOT_AT_POSE_M else "out_of_reach"
             raise _Fail(code, f"{target.slot_id} not reachable from here ({dist:.2f} m from its approach pose)")
+        if ex.tier != T0 and self.t1.backend == "policy":
+            return await self._grasp_policy(ex, robot, slot, target.sku, inst)
         if "grasp_miss" in effects:
             await self._stage(ex, "closing", 0.5)
             raise RobotError("grasp_failed", "gripper closed on air (injected)")
@@ -646,6 +802,68 @@ class T0Vla:
             self._mislabel(held, effects["mislabel"])
         await self._stage(ex, "lifting", 0.85)
         return f"grasped {target.sku} ({held.instance_id})"
+
+    async def _grasp_policy(self, ex: _Exec, robot: Any, slot: Slot, sku: str, inst: str | None) -> str:
+        """T1 learned grasp (arms.robot.vla_t1): the policy drives the joints on Isaac; a CLAIM like every tier."""
+        from arms.robot.vla_t1 import STEP_RESERVE_S, run_policy_grasp
+
+        req = ex.request
+        cfg = self.t1.grasp_config
+        backend = await self.t1.policy_backend(req.robot_id)
+        name = await self._product_name(sku)
+        budget = max(1.0, req.deadline_s - (time.monotonic() - ex.accepted_mono) - STEP_RESERVE_S)
+
+        async def on_stage(stage: str, progress: float) -> None:
+            await self._policy_status(ex, stage, progress)
+
+        async def on_chunk(n: int, res: Any, chunk: Any) -> None:
+            arm = res.arm
+            ex.chunk = n
+            note = f"chunk {n}: {arm.steps_applied if arm else '?'} rows"
+            if arm is not None and arm.events:
+                note += f" ({', '.join(arm.events)})"
+            await self._policy_status(ex, "policy", min(0.85, 0.2 + 0.65 * n / max(1, cfg.max_chunks)), note)
+
+        result = await run_policy_grasp(
+            robot,
+            req.robot_id,
+            backend=backend,
+            slot=slot,
+            sku=sku,
+            product_name=name,
+            instance_id=inst,
+            cfg=cfg,
+            perception=self.services.perception,
+            on_stage=on_stage,
+            on_chunk=on_chunk,
+            budget_s=budget,
+            exec_id=req.exec_id,
+            budget_key=req.context.trip_id or req.context.goal_id or req.robot_id,
+        )
+        ex.ended_at = result.ended_at or utcnow()
+        if not result.ok:
+            raise _Fail(result.code or "internal", result.message)
+        if result.on_target is False:
+            ex.self_report = "unsure"
+        await self._policy_status(ex, "lifting", 0.9, result.message)
+        return result.message
+
+    async def _policy_status(self, ex: _Exec, stage: str, progress: float, message: str = "") -> None:
+        """A running status of a learned grasp: ``chunk_no`` = action chunks executed so far (liveness)."""
+        ex.stage, ex.progress = stage, progress
+        await self._emit(ex, phase="running", stage=stage, progress=progress, chunk_no=ex.chunk, message=message)
+        await asyncio.sleep(0)
+
+    async def _product_name(self, sku: str) -> str:
+        catalog = self.services.catalog
+        if catalog is not None:
+            try:
+                product = await catalog.get_product(sku)
+                if product is not None and product.name:
+                    return product.name
+            except Exception as exc:  # noqa: BLE001 - the sku reads fine in an instruction too
+                log.warning("product lookup for %s failed: %s", sku, exc)
+        return sku.replace("_", " ").replace("-", " ")
 
     async def _grab_wrong(self, ex: _Exec, robot: Any, st: RobotState, slot: Slot, sku: str) -> bool:
         """'wrong_item': grab a unit of the nearest other-SKU slot on the same shelf level (2D fake: for real)."""
