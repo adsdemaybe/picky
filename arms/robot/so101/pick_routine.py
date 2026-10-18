@@ -416,9 +416,13 @@ def main() -> None:
         policy.save()
         ep = DATA_DIR / time.strftime("%Y%m%d-%H%M%S")
         ep.mkdir(parents=True, exist_ok=True)
-        cv2.imwrite(str(ep / "scene.jpg"), scene)
-        if after is not None:
-            cv2.imwrite(str(ep / "after.jpg"), after)
+        if success:  # failures keep only episode.json: no video or frames
+            cv2.imwrite(str(ep / "scene.jpg"), scene)
+            if after is not None:
+                cv2.imwrite(str(ep / "after.jpg"), after)
+        elif args.record:
+            vid.unlink(missing_ok=True)
+            print("failure: video not kept")
         record = {
             "command": args.command,
             "success": success,

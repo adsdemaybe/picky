@@ -259,6 +259,9 @@ def main() -> None:
             (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
             if success:  # every success becomes a replayable recipe
                 save_recipe(f"success_{ep.name}", p, traj, rest)
+            else:  # failures keep only episode.json (the label the Q-learning used): no video or frames
+                for f in ("video.mp4", "scene.jpg", "after.jpg"):
+                    (ep / f).unlink(missing_ok=True)
             rate = policy.successes / max(1, policy.episodes)
             print(
                 f"saved {ep.name}: {'SUCCESS' if success else 'failure'} | {policy.successes}/{policy.episodes} "
