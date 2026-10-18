@@ -70,9 +70,9 @@ stores:
     - {kind: sign, name: sign_north, center: [5.0, 7.96, 2.45], size: [2.4, 0.03, 0.6], text: T-Mobile, color: '#e20074', text_color: '#ffffff'}
     - {kind: panel, name: accent_south, center: [8.4, 0.015, 1.5], size: [3.2, 0.02, 3.0], color: '#e20074'}
     - {kind: sign, name: sign_south, center: [8.4, 0.04, 2.3], size: [1.8, 0.03, 0.45], yaw: 3.1416, text: T-Mobile, color: '#e20074', text_color: '#ffffff'}
-    # counter: magenta front band facing the sales floor, plus two stools at the ends (clear of the checkout pose)
+    # counter: magenta front band facing the sales floor, plus two stools at the wall end (out of the robot's counter approach)
     - {kind: panel, name: counter_band, center: [8.4, 1.212, 0.5], size: [2.4, 0.02, 0.5], color: '#e20074'}
-    - {kind: asset, name: stool_west, asset: bar_stool, center: [7.45, 1.55, 0.0], size: [0.42, 0.42, 0.75]}
+    - {kind: asset, name: stool_west, asset: bar_stool, center: [9.35, 2.05, 0.0], size: [0.42, 0.42, 0.75]}
     - {kind: asset, name: stool_east, asset: bar_stool, center: [9.35, 1.55, 0.0], size: [0.42, 0.42, 0.75]}
     # wall signage over the two walls
     - {kind: sign, name: sign_accessories, center: [0.04, 4.9, 2.35], size: [2.2, 0.03, 0.32], yaw: 1.5708, text: Accessories, color: '#ffffff', text_color: '#e20074'}
