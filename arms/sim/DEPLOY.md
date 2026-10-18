@@ -233,3 +233,12 @@ tmux -L picky-pvla ls        # picky-pvla-db (Postgres :5433), picky-pvla-gw (:8
 - **Shared GPU:** when other jobs load vhagar (a SmolVLA fine-tune at ~90 % GPU and load ~28 on 16 cores during this
   test) the worker's replicator steps go from ~15-30 ms to 150-560 ms. Keep live streams off (`record.py` does not ask
   for `/ws/frames` unless `--live-frames`): every streamed camera is one more render product in every step.
+
+Measured (2026-10-18 02:00-02:30, taco request, Gemini plans, Mk1.5 T1 + verifier, catalog on Postgres; the GPU shared
+with a SmolVLA fine-tune): T1 Mk1.5 grasps 10 of 11 ok in run 3 (one `policy_timeout` after 9 chunks -> T0 scripted
+grasp, ok); 0.6-1.2 s per Mk1.5 call; 1.3-1.8 side + wrist pairs/s while the arm moved; navigation 30-90 s per leg
+(one 90 s `navigate_to` deadline hit, retried). What broke and is fixed on this branch: the basket audit failed on
+occlusion (top-down camera sees 2 of 11 units) and a passing re-verify did not close the provisional lines (checkout
+stayed `basket_audit_pending`); Perceptron called a held cheese bag / meat tray "gripper empty" and overrode the sim's
+grasp state (redo loops, one item skipped); a silent evidence capture tripped the stall detector; Mk1.5 re-closed the
+gripper where it had just missed.
