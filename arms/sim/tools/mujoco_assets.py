@@ -15,7 +15,7 @@ Output, one folder per asset id under ``--out`` (default ``~/picky-assets-mj``; 
 
 Run (the USD step needs usd-core, which is not a project dependency)::
 
-    uv run --extra mujoco --with usd-core --with pymeshlab python arms/sim/tools/mujoco_assets.py [--only ...] [--jobs 8]
+    uv run --extra mujoco --with usd-core --with pymeshlab python arms/sim/tools/mujoco_assets.py [--jobs 8]
 
 Nothing here is imported by the worker; it is a one-off asset build, like the other tools in this folder.
 """

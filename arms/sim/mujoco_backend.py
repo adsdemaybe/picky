@@ -188,7 +188,7 @@ class MujocoBackend(SketchBackend):
             for p in self._static_prims(spec):
                 c = p.center
                 mat = dressing.material_for_role(p.role)
-                static.append(_geom_xml(p, (c[0] + ox, c[1] + oy, c[2] + oz), _quat(p.yaw, p.pitch), mat))
+                static.append(self._static_geom(p, (c[0] + ox, c[1] + oy, c[2] + oz), mat))
             try:
                 from arms.sim.scene_spec import fixture_style
                 from utils.data import load_planogram
@@ -206,11 +206,10 @@ class MujocoBackend(SketchBackend):
                 inner = "".join(mujoco_models.geom_xml(g, _quat) for g in plan)
             else:
                 inner = _geom_xml(prim)
-            bodies.append(f'<body name={quoteattr("i/" + "/".join(key))} mocap="true">{inner}</body>')
+            bodies.append(self._instance_body(key, prim, inner))
         for rid, rover in self.rovers.items():
             rover_parts[rid] = len(rover.prims)
-            for k, p in enumerate(rover.prims):
-                bodies.append(f'<body name={quoteattr(f"r/{rid}/{k}")} mocap="true">{_geom_xml(p)}</body>')
+            bodies.append(self._rover_bodies(rid, rover))
         model_assets = self.models.asset_xml() if self.models else ""
         xml = f"""<mujoco model="picky_stores">
   <compiler angle="radian"/>
@@ -231,7 +230,7 @@ class MujocoBackend(SketchBackend):
     <body name="{_CAM_BODY}" mocap="true"><camera name="{_CAM_BODY}" fovy="45"/></body>
   </worldbody>
 </mujoco>"""
-        model = mj.MjModel.from_xml_string(xml)
+        model = self._compile(xml)
         # map z clip planes are fractions of the model extent; set them absolutely
         model.vis.map.znear = NEAR_CLIP_M / max(model.stat.extent, 1e-6)
         model.vis.map.zfar = ZFAR_M / max(model.stat.extent, 1e-6)
@@ -240,8 +239,7 @@ class MujocoBackend(SketchBackend):
         def mocap_of(name: str) -> int:
             return int(model.body_mocapid[mj.mj_name2id(model, mj.mjtObj.mjOBJ_BODY, name)])
 
-        self._instance_mocap = {key: mocap_of("i/" + "/".join(key)) for key in instance_keys}
-        self._rover_mocap = {rid: [mocap_of(f"r/{rid}/{k}") for k in range(n)] for rid, n in rover_parts.items()}
+        self._index(model, instance_keys, rover_parts, mocap_of)
         self._cam_mocap = mocap_of(_CAM_BODY)
         self._cam_id = mj.mj_name2id(model, mj.mjtObj.mjOBJ_CAMERA, _CAM_BODY)
         for r in self._renderers.values():
@@ -252,6 +250,26 @@ class MujocoBackend(SketchBackend):
         self.builds += 1
         if self._want_viewer:
             self._open_viewer()
+
+    # ---- build hooks (MujocoPhysicsBackend overrides these)
+    def _static_geom(self, prim: PrimSpec, pos: Vec3, material: str) -> str:
+        return _geom_xml(prim, pos, _quat(prim.yaw, prim.pitch), material)
+
+    def _instance_body(self, key: tuple[str, str], prim: PrimSpec, inner: str) -> str:
+        return f'<body name={quoteattr("i/" + "/".join(key))} mocap="true">{inner}</body>'
+
+    def _rover_bodies(self, rid: str, rover: RoverSpec) -> str:
+        return "".join(
+            f'<body name={quoteattr(f"r/{rid}/{k}")} mocap="true">{_geom_xml(p)}</body>'
+            for k, p in enumerate(rover.prims)
+        )
+
+    def _compile(self, xml: str) -> Any:
+        return self._mj.MjModel.from_xml_string(xml)
+
+    def _index(self, model: Any, instance_keys: list, rover_parts: dict[str, int], mocap_of: Any) -> None:
+        self._instance_mocap = {key: mocap_of("i/" + "/".join(key)) for key in instance_keys}
+        self._rover_mocap = {rid: [mocap_of(f"r/{rid}/{k}") for k in range(n)] for rid, n in rover_parts.items()}
 
     # ---- optional interactive window (dev / demo): ``--viewer``; on macOS run the worker under ``mjpython``
     def _open_viewer(self) -> None:
@@ -309,6 +327,13 @@ class MujocoBackend(SketchBackend):
                 d.mocap_pos[mid] = (wx + ox, wy + oy, wz + oz)
                 d.mocap_quat[mid] = _quat(yaw, prim.pitch)
 
+    def _forward_for_render(self) -> None:
+        self._mj.mj_kinematics(self._model, self._data)
+        self._mj.mj_camlight(self._model, self._data)
+
+    def _camera_override(self, camera_id: str, store_id: str, cam: CameraPose) -> CameraPose:
+        return cam
+
     def _renderer(self, w: int, h: int) -> Any:
         r = self._renderers.get((w, h))
         if r is None:
@@ -325,14 +350,14 @@ class MujocoBackend(SketchBackend):
             if self._dirty or self._model is None:
                 self._build()
             self._sync()
+            cam = self._camera_override(camera_id, store_id, cam)
             ox, oy, oz = self._offset(store_id)
             right, up, fwd = cam.basis()
             d = self._data
             d.mocap_pos[self._cam_mocap] = (cam.x + ox, cam.y + oy, cam.z + oz)
             d.mocap_quat[self._cam_mocap] = _quat_from_axes(right, up, (-fwd[0], -fwd[1], -fwd[2]))
             self._model.cam_fovy[self._cam_id] = math.degrees(2 * math.atan(math.tan(cam.hfov / 2) * h / w))
-            self._mj.mj_kinematics(self._model, d)
-            self._mj.mj_camlight(self._model, d)
+            self._forward_for_render()
             renderer = self._renderer(w, h)
             renderer.update_scene(d, camera=self._cam_id, scene_option=self._scene_option)
             pixels = renderer.render()
