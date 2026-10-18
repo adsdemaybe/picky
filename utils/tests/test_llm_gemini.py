@@ -421,6 +421,11 @@ async def test_quota_error_falls_back_to_a_sibling_model():
     resp = await llm.GeminiMessages(raw).messages.create(model="gemini-3.8-flash", messages=[])
     assert [c["model"] for c in raw.calls] == ["gemini-3.8-flash", llm.GEMINI_FALLBACK_MODELS[0]]
     assert resp.content
+    assert llm.served_model("gemini-3.8-flash") == llm.GEMINI_FALLBACK_MODELS[0]  # the planner labels it honestly
+    ok = FakeGenai([g_resp(g_text("ok"))])
+    await llm.GeminiMessages(ok).messages.create(model="gemini-3.8-flash", messages=[])
+    assert llm.served_model("gemini-3.8-flash") == "gemini-3.8-flash"
+    assert llm.served_model("never-called") == "never-called"
 
 
 async def test_fallback_gives_up_after_the_last_model():

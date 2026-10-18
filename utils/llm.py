@@ -720,6 +720,16 @@ def _is_bad_request(exc: Exception) -> bool:
 # planner's first call hit 429 RESOURCE_EXHAUSTED on gemini-3.8-flash while the request interpreter had just used it).
 GEMINI_FALLBACK_MODELS: tuple[str, ...] = ("gemini-3.5-flash", "gemini-3.7-flash", "gemini-flash-latest")
 _GEMINI_FALLBACK_CODES = frozenset({404, 429, 500, 503})
+_SERVED_BY: dict[str, str] = {}
+"""Requested Gemini model id -> the model id that answered its latest call (differs after a 429 / 503 fallback)."""
+
+
+def served_model(requested: str | None) -> str | None:
+    """The model that really answered the latest call made for ``requested`` (``requested`` itself when no
+    fallback happened or nothing was recorded). Display only: callers label "planned by <model>" honestly."""
+    if not requested:
+        return requested
+    return _SERVED_BY.get(requested, requested)
 
 
 def _status_code(exc: Exception) -> int | None:
@@ -758,6 +768,7 @@ class GeminiMessages:
                     log.warning("gemini %s unavailable (%s); retrying on %s", model_id, _status_code(e), models[i + 1])
                     continue
                 raise
+            _SERVED_BY[request["model"]] = model_id
             return from_gemini_response(raw, model=model_id)
         raise AssertionError("unreachable")  # the last model either returns or raises
 
