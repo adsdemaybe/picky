@@ -33,12 +33,19 @@ from arms.robot.fake import FakeRobot
 from arms.robot.rover import Battery, heading_to_dock, on_dock
 from arms.robot.world import live_planogram, load_scene
 from contracts.cameras import parse_camera_id
-from contracts.common import CameraId, InstanceId, Pose2D, RobotId, Sku, SlotId, StoreId, TripId
+from contracts.common import CameraId, InstanceId, Point3, Pose2D, RobotId, Sku, SlotId, StoreId, TripId
 from contracts.events import make_event
 from contracts.planogram import Planogram, RobotSpec
 from contracts.services import Services
 from contracts.sim import (
+    ARM_IK_CAPABILITY,
+    ARM_JOINTS_CAPABILITY,
+    ARM_JOINTS_HZ,
+    BASKET_UNLOAD_CAPABILITY,
     MOTION_COMMANDS,
+    POLICY_CAMERAS,
+    ArmIkCmd,
+    ArmJointsCmd,
     CameraFrame,
     CaptureCmd,
     CommandResult,
@@ -47,7 +54,9 @@ from contracts.sim import (
     ListInstancesCmd,
     NavigateCmd,
     PickCmd,
+    PickFromBasketCmd,
     PlaceInBasketCmd,
+    PlaceOnCounterCmd,
     ResetCmd,
     RobotError,
     RobotState,
@@ -99,6 +108,9 @@ class SimRobot:
         self._unsubscribe: Callable[[], None] | None = None
         self._hello_stores: dict[StoreId, SimStoreInfo] = {}
         self._hello_robots: dict[RobotId, SimRobotInfo] = {}
+        self._hello_caps: set[str] = set()
+        self._policy_feed: dict[RobotId, float] = {}
+        """robot -> monotonic time until which its live front / wrist view shows the T1 policy cameras."""
         self._reset_hash: dict[StoreId, str] = {}
         self._isaac_stores: set[StoreId] = set()
         self._isaac_states: dict[RobotId, RobotState] = {}
@@ -262,6 +274,10 @@ class SimRobot:
             owner, kind = parse_camera_id(camera_id)
         except ValueError as exc:
             raise RobotError("unknown_robot", str(exc)) from exc
+        if kind == "director":
+            return await self._capture_director(owner, camera_id)
+        if kind == "perceived":
+            raise RobotError("unknown_robot", f"{camera_id!r} is produced by the cameras service, not the robot")
         if kind != "ceiling":
             return await self.capture(owner, kind)
         store_id = owner
@@ -278,6 +294,17 @@ class SimRobot:
         frame = res.frame.model_copy(update={"camera_id": camera_id, "store_id": store_id, "camera": "ceiling"})
         self._frame_cache[camera_id] = frame
         return frame
+
+    async def _capture_director(self, robot_id: RobotId, camera_id: CameraId) -> CameraFrame:
+        """``<robot>.director`` (0.2.3): the Isaac worker's chase camera (worker run with PICKY_SIM_DIRECTOR), else the
+        2D fake's follow view."""
+        spec = self._spec(robot_id)
+        if not await self._use_isaac(spec.store_id, robot_id):
+            return await self.fake.capture_camera(camera_id)
+        res = await self._isaac(spec, CaptureCmd(cmd_id=new_id("cmd"), robot_id=robot_id, camera_id=camera_id))
+        if res.frame is None:
+            raise RobotError("internal", f"capture({camera_id}) returned no frame")
+        return self._frame_from(res.frame.model_copy(update={"camera": "director"}), spec, camera="director")
 
     async def list_instances(self, robot_id: RobotId, slot_id: SlotId | None = None) -> list[ItemInstance]:
         spec = self._spec(robot_id)
@@ -320,6 +347,191 @@ class SimRobot:
             return await self.fake.unload_basket(robot_id)
         res = await self._isaac(spec, UnloadBasketCmd(cmd_id=new_id("cmd"), robot_id=robot_id))
         return [i.model_copy(update={"store_id": i.store_id or spec.store_id}) for i in res.instances]
+
+    # ---- 0.2.4 checkout unload by the arm (optional extension; arms/robot/vla.py) -----------------------------------
+    def can_unload_to_counter(self, robot_id: RobotId) -> bool:
+        """True on the 2D fake and on an Isaac worker advertising ``basket_unload`` (older workers: False, so the
+        runner skips the per-unit unload and the handoff unloads the basket at once)."""
+        if self._on_isaac(robot_id):
+            return BASKET_UNLOAD_CAPABILITY in self._hello_caps
+        return True
+
+    async def pick_from_basket(
+        self, robot_id: RobotId, sku: Sku | None = None, instance_id: InstanceId | None = None
+    ) -> ItemInstance:
+        spec = self._spec(robot_id)
+        if not await self._use_isaac(spec.store_id, robot_id):
+            return await self.fake.pick_from_basket(robot_id, sku, instance_id)
+        if BASKET_UNLOAD_CAPABILITY not in self._hello_caps:
+            raise RobotError("not_ready", "this Isaac worker predates contracts 0.2.4 (no basket_unload)")
+        self._bat(robot_id).check_motion(robot_id)
+        cmd = PickFromBasketCmd(cmd_id=new_id("cmd"), robot_id=robot_id, sku=sku, instance_id=instance_id)
+        res = await self._isaac(spec, cmd)
+        picked_id = res.instance_id or instance_id
+        inst = next((i for i in res.instances if i.instance_id == picked_id), None) or (
+            res.instances[0] if res.instances else self._instances.get(picked_id or "")
+        )
+        if inst is None:
+            raise RobotError("internal", "pick_from_basket succeeded but returned no instance")
+        return inst.model_copy(update={"store_id": inst.store_id or spec.store_id})
+
+    async def place_on_counter(
+        self, robot_id: RobotId, position: Point3, yaw: float = 0.0, spot: int | None = None
+    ) -> RobotState:
+        spec = self._spec(robot_id)
+        if not await self._use_isaac(spec.store_id, robot_id):
+            return await self.fake.place_on_counter(robot_id, position, yaw, spot)
+        if BASKET_UNLOAD_CAPABILITY not in self._hello_caps:
+            raise RobotError("not_ready", "this Isaac worker predates contracts 0.2.4 (no basket_unload)")
+        cmd = PlaceOnCounterCmd(cmd_id=new_id("cmd"), robot_id=robot_id, position=position, yaw=yaw, spot=spot)
+        return self._state_from(spec, await self._isaac(spec, cmd))
+
+    async def counter_units(self, robot_id: RobotId) -> list[ItemInstance]:
+        """Units this robot put on the checkout counter (ground truth: Isaac instances with on_counter, or the fake)."""
+        units = await self.list_instances(robot_id)
+        return [u for u in units if u.on_counter]
+
+    # ---- extras for the VLA layer (arms/robot/vla.py; not in the RobotService Protocol) ------------------------------
+    def _on_isaac(self, robot_id: RobotId) -> bool:
+        return self._spec(robot_id).store_id in self._isaac_stores and self.is_connected()
+
+    def can_put_back(self, robot_id: RobotId) -> bool:
+        """Put-back exists only on the 2D fake (the 0.2 sim wire has no detach-on-shelf command)."""
+        return not self._on_isaac(robot_id)
+
+    async def put_back(self, robot_id: RobotId, slot_id: SlotId | None = None) -> RobotState:
+        if self._on_isaac(robot_id):
+            raise RobotError("internal", "no put-back primitive on Isaac (contracts 0.2 sim wire)")
+        return await self.fake.put_back(robot_id, slot_id)
+
+    async def grab_unit(
+        self, robot_id: RobotId, slot_id: SlotId, instance_id: InstanceId | None = None
+    ) -> ItemInstance:
+        if self._on_isaac(robot_id):
+            raise RobotError("internal", "grab_unit (wrong_item fault) exists only on the 2D fake")
+        return await self.fake.grab_unit(robot_id, slot_id, instance_id)
+
+    def supports_arm_joints(self, robot_id: RobotId) -> bool:
+        """Joint-level arm control (contracts 0.2.2 ``ArmJointsCmd``): the robot's store runs on an Isaac worker that
+        advertises the ``arm_joints`` capability (the 2D fake and older workers cannot drive single joints)."""
+        try:
+            return self._on_isaac(robot_id) and ARM_JOINTS_CAPABILITY in self._hello_caps
+        except RobotError:
+            return False
+
+    async def arm_joints(
+        self,
+        robot_id: RobotId,
+        targets: list[list[float]],
+        *,
+        hz: float = ARM_JOINTS_HZ,
+        lift_height_m: float | None = None,
+        capture: tuple[str, ...] | list[str] = POLICY_CAMERAS,
+        capture_each_step: bool = False,
+        capture_every: int = 0,
+        end: bool = False,
+        exec_id: str | None = None,
+        timeout_s: float | None = None,
+    ) -> CommandResult:
+        """One ``ArmJointsCmd`` (a motion: per-robot busy): rows of 6 USD joint degrees at ``hz``; returns the
+        CommandResult (``arm`` joint state + grasp events, RAW ``policy_frames``, ``state``). Isaac only: raises
+        RobotError('not_ready') on the 2D fake / a worker without the capability."""
+        spec = self._spec(robot_id)
+        if not self.supports_arm_joints(robot_id):
+            raise RobotError("not_ready", f"{robot_id}: joint-level arm control needs an Isaac worker with arm_joints")
+        if targets:
+            self._bat(robot_id).check_motion(robot_id)
+        cmd = ArmJointsCmd(
+            cmd_id=new_id("cmd"),
+            robot_id=robot_id,
+            targets=[list(map(float, row)) for row in targets],
+            hz=hz,
+            lift_height_m=lift_height_m,
+            capture=list(capture),  # type: ignore[arg-type]
+            capture_each_step=capture_each_step,
+            capture_every=capture_every,
+            end=end,
+            exec_id=exec_id,
+        )
+        return await self._isaac(spec, cmd, timeout_s=timeout_s)
+
+    def supports_arm_ik(self, robot_id: RobotId) -> bool:
+        """Worker-side inverse kinematics (contracts 0.2.2 ``ArmIkCmd``) for Cartesian policies."""
+        try:
+            return self._on_isaac(robot_id) and ARM_IK_CAPABILITY in self._hello_caps
+        except RobotError:
+            return False
+
+    async def arm_ik(
+        self,
+        robot_id: RobotId,
+        targets: list[Any],
+        *,
+        lift_height_m: float | None = None,
+        seed_deg: list[float] | None = None,
+        timeout_s: float | None = None,
+    ) -> CommandResult:
+        """``ArmIkCmd`` (NOT a motion: allowed while a chunk plays): TCP targets (``IkTarget`` or dicts, store frame)
+        -> ``CommandResult.ik`` joint solutions on the worker's SO-101 model. Isaac only (RobotError('not_ready'))."""
+        spec = self._spec(robot_id)
+        if not self.supports_arm_ik(robot_id):
+            raise RobotError("not_ready", f"{robot_id}: inverse kinematics needs an Isaac worker with arm_ik")
+        cmd = ArmIkCmd(
+            cmd_id=new_id("cmd"),
+            robot_id=robot_id,
+            targets=targets,
+            lift_height_m=lift_height_m,
+            seed_deg=None if seed_deg is None else [float(v) for v in seed_deg],
+        )
+        return await self._isaac(spec, cmd, timeout_s=timeout_s)
+
+    def feed_policy_frames(self, robot_id: RobotId, frames: list[Any], *, hold_s: float = 3.0) -> int:
+        """Live picture feed of a learned grasp: the policy cameras' RAW frames go out as the robot's ``front`` (policy
+        'side' view, its real ``camera_pose`` attached) and ``wrist`` camera frames to every live subscriber
+        (CameraService blurs them like any frame), and the worker's own streamed front / wrist frames of that robot
+        are held back for ``hold_s`` so the view does not flicker between the two. Returns frames pushed."""
+        try:
+            spec = self._spec(robot_id)
+        except RobotError:
+            return 0
+        from contracts.cameras import robot_camera_id
+
+        pushed = 0
+        for f in frames:
+            kind = "wrist" if f.camera == "wrist" else "front"  # PolicyFrame 'side' / a streamed policy CameraFrame
+            cid = robot_camera_id(robot_id, kind)
+            frame = CameraFrame(
+                frame_id=f"{robot_id}-policy-{'wrist' if kind == 'wrist' else 'side'}-{time.monotonic_ns()}",
+                camera=kind,  # type: ignore[arg-type]
+                camera_id=cid,
+                robot_id=robot_id,
+                store_id=spec.store_id,
+                jpeg_b64=f.jpeg_b64,
+                w=f.w,
+                h=f.h,
+                blurred=False,  # only perception may mark a frame blurred (section 8)
+                camera_pose=f.camera_pose,
+            )
+            self._frame_cache[cid] = frame
+            self._frame_fanout.push(frame)
+            pushed += 1
+        if pushed:
+            self._policy_feed[robot_id] = time.monotonic() + hold_s
+        return pushed
+
+    def end_policy_feed(self, robot_id: RobotId) -> None:
+        self._policy_feed.pop(robot_id, None)
+
+    def _feed_holds(self, frame: CameraFrame) -> bool:
+        """True when a worker-streamed frame must not reach the live view (a policy feed shows that camera now)."""
+        rid = frame.robot_id
+        until = self._policy_feed.get(rid or "")
+        if until is None or frame.camera not in ("front", "wrist"):
+            return False
+        if time.monotonic() > until:
+            self._policy_feed.pop(rid or "", None)
+            return False
+        return True
 
     async def sync_stock(self, store_id: StoreId, slot_ids: list[SlotId] | None = None) -> None:
         # the fake shelves always follow the catalog (they are the fallback world)
@@ -514,7 +726,7 @@ class SimRobot:
     # =================================================================================================================
     # internals: commands
     # =================================================================================================================
-    async def _isaac(self, spec: RobotSpec, cmd: Any) -> CommandResult:
+    async def _isaac(self, spec: RobotSpec, cmd: Any, *, timeout_s: float | None = None) -> CommandResult:
         """Send a robot command to Isaac (per-robot busy for motions); results update the caches."""
         rid = spec.robot_id
         motion = cmd.type in MOTION_COMMANDS
@@ -523,13 +735,19 @@ class SimRobot:
                 raise RobotError("busy", f"{rid}: {self._busy[rid]} in progress")
             self._busy[rid] = cmd.type
         try:
-            return await self._send(cmd, store_id=spec.store_id, robot_id=rid)
+            return await self._send(cmd, store_id=spec.store_id, robot_id=rid, timeout_s=timeout_s)
         finally:
             if motion:
                 self._busy.pop(rid, None)
 
     async def _send(
-        self, cmd: Any, *, store_id: StoreId, robot_id: RobotId | None = None, report_disconnect: bool = True
+        self,
+        cmd: Any,
+        *,
+        store_id: StoreId,
+        robot_id: RobotId | None = None,
+        report_disconnect: bool = True,
+        timeout_s: float | None = None,
     ) -> CommandResult:
         link = self._current_link()
         if link is None or not self._link_up(link):
@@ -537,7 +755,7 @@ class SimRobot:
                 await self._fall_back(store_id, "worker not connected")
             raise RobotError("disconnected", "sim worker not connected")
         try:
-            res = await link.send(cmd)
+            res = await (link.send(cmd) if timeout_s is None else link.send(cmd, timeout_s=timeout_s))
         except TimeoutError as exc:
             await self._report("timeout", f"{cmd.type} ({cmd.cmd_id}) timed out", store_id, robot_id)
             raise RobotError("timeout", f"{cmd.type} timed out") from exc
@@ -647,6 +865,8 @@ class SimRobot:
                 stores = list(msg.stores)
             self._hello_stores = {s.store_id: s for s in stores}
             self._hello_robots = {r.robot_id: r for r in msg.robots}
+            if isinstance(msg, SimHello):  # SimHosted carries no capabilities: keep the hello's
+                self._hello_caps = set(msg.capabilities)
             self._streams_sent = None  # a new worker streams its defaults: resend our set
             self._schedule(self.refresh_backends())
         elif isinstance(msg, RobotState):
@@ -659,8 +879,13 @@ class SimRobot:
                 cid = robot_camera_id(msg.robot_id, msg.camera)
             if cid is None:
                 return
+            if msg.robot_id and cid.startswith(f"{msg.robot_id}.policy_"):  # a T1 picture taken while the arm moves
+                self.feed_policy_frames(msg.robot_id, [msg])
+                return
             # never trust a worker's blurred flag: only perception may set it, so every frame gets face-blurred (§8)
             frame = msg.model_copy(update={"camera_id": cid, "instances": [], "blurred": False})
+            if self._feed_holds(frame):
+                return
             self._frame_cache[cid] = frame
             store = frame.store_id or self.fake.camera_store(cid)
             if store in self._isaac_stores:

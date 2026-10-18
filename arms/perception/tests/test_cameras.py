@@ -29,7 +29,9 @@ from contracts.common import BBox, Point3, Pose2D, Rect2D
 from contracts.planogram import Fixture, Planogram, Slot
 from contracts.services import CameraService, Services
 from contracts.sim import CameraFrame, ItemInstance, SimStatus, SimWorkerStatus
+from utils import llm
 
+LIVESTREAM_KINDS = ("director", "perceived")
 STORE = "store_ave"
 
 
@@ -211,19 +213,36 @@ def test_factories_conform_and_are_lazy(monkeypatch):
     assert calls == []
 
 
+def test_real_cameras_name_the_missing_key_of_the_configured_provider() -> None:
+    """/health shows this note: it must name GEMINI_API_KEY (the default provider), not a stale Anthropic key."""
+    from utils.config import reset_settings, set_settings
+
+    set_settings(picky_llm_provider="gemini", gemini_api_key="")
+    try:
+        with pytest.raises(llm.LLMNotConfigured, match="GEMINI_API_KEY"):
+            create_cameras(Services())
+    finally:
+        reset_settings()
+
+
 # ------------------------------------------------------------------------------------------------------------------
 # Registry
 # ------------------------------------------------------------------------------------------------------------------
 async def test_registry_defaults_and_filters(no_data):
     c = _cams(no_data, robot=StubRobot())
-    every = await c.list_cameras()
+    listed = await c.list_cameras()
+    every = [x for x in listed if x.kind not in LIVESTREAM_KINDS]
     ids = [x.camera_id for x in every]
     assert len(ids) == 12 and ids == [x.camera_id for x in default_cameras()]
     assert {"rover-ave-1.front", "rover-ave-2.basket", "rover-hill-1.wrist", "store_ave.ceiling-2"} <= set(ids)
-    ave = await c.list_cameras(store_id="store_ave")
+    live = {x.camera_id: x for x in listed if x.kind in LIVESTREAM_KINDS}  # 0.2.3: director + perceived per robot
+    assert len(live) == 9 and live["rover-ave-1.front.perceived"].derived_from == "rover-ave-1.front"
+    assert live["rover-hill-1.director"].kind == "director" and live["rover-hill-1.director"].name == "Hazel · director"
+    ave = [x for x in await c.list_cameras(store_id="store_ave") if x.kind not in LIVESTREAM_KINDS]
     assert len(ave) == 8 and all(x.store_id == "store_ave" for x in ave)
     pico = await c.list_cameras(robot_id="rover-ave-1")
-    assert [x.kind for x in pico] == ["front", "wrist", "basket"]
+    assert [x.kind for x in pico] == ["front", "wrist", "basket", "director", "perceived", "perceived"]
+    pico = pico[:3]
     assert all(x.source == "fake" and x.online for x in pico)
     ceiling = await c.get_camera("store_ave.ceiling-1")
     assert ceiling.robot_id is None and ceiling.kind == "ceiling"
@@ -245,7 +264,12 @@ store_cameras:
     )
     c = FakeCameras(Services(), data_root=tmp_path)
     cams = await c.list_cameras()
-    assert [x.camera_id for x in cams] == ["rover-x-1.front", "rover-x-1.basket", "store_x.ceiling-1"]
+    assert [x.camera_id for x in cams] == [
+        "rover-x-1.front",
+        "rover-x-1.basket",
+        "store_x.ceiling-1",
+        "rover-x-1.front.perceived",  # no robot service: no 2D director camera
+    ]
     assert cams[0].name == "Zed · front"
     assert all(x.source == "none" and not x.online for x in cams)  # no robot service wired
 
@@ -264,7 +288,7 @@ async def test_registry_overlays_sim_hello(no_data):
     assert by_id["rover-ave-1.wrist"].source == "fake"
     assert by_id["store_hill.ceiling-1"].source == "isaac"  # store hosted by Isaac
     assert by_id["store_ave.ceiling-3"].source == "isaac"  # camera only the worker knows about
-    assert len(by_id) == 13
+    assert len([x for x in by_id.values() if x.kind not in LIVESTREAM_KINDS]) == 13
 
 
 # ------------------------------------------------------------------------------------------------------------------
@@ -459,14 +483,14 @@ async def test_real_observe_uses_vision_with_ground_truth_counts(no_data):
     services = Services(catalog=StubCatalog(), robot=StubRobot(SALSA, "S_SALSA"))
     c = RealCameras(services, client=client, data_root=no_data)
     obs = await c.observe("rover-ave-1.front", "Is the mild salsa in stock?")
-    assert obs.method == "vlm" and obs.model == "claude-haiku-5-5" and obs.people == 1
+    assert obs.method == "vlm" and obs.model == llm.model("fast") and obs.people == 1
     assert obs.answer.startswith("Yes, the mild salsa")
     salsa, mystery = obs.items
     assert (salsa.sku, salsa.count, salsa.shelf_tag_cents, salsa.slot_id) == ("salsa_mild", 4, 399, "S_SALSA")
     assert mystery.sku is None and mystery.confidence == 1.0
 
     [call] = messages.calls
-    assert call["model"] == "claude-haiku-5-5"
+    assert call["model"] == llm.model("fast")  # gemini-3.8-flash by default (PICKY_LLM_PROVIDER)
     content = call["messages"][0]["content"]
     assert content[0]["type"] == "image" and content[1]["type"] == "text"  # image before text
     assert "sku=salsa_mild" in content[1]["text"] and "Is the mild salsa in stock?" in content[1]["text"]

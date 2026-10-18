@@ -52,6 +52,8 @@ class RoverView:
     holding: ItemInstance | None = None
     basket: list[ItemInstance] = field(default_factory=list)
     capacity: int = 12
+    counter: list[ItemInstance] = field(default_factory=list)
+    """0.2.4: units this rover unloaded onto the checkout counter (drawn on the top-down views)."""
 
 
 @dataclass
@@ -558,6 +560,32 @@ def ceiling_window(plan: Planogram, cam: StoreCameraSpec | None) -> Rect2D:
     return Rect2D(x=x0, y=y0, w=x1 - x0, h=y1 - y0)
 
 
+DIRECTOR_VIEW_W_M = 6.4
+"""Floor width the 2D director view shows around its rover (height follows the image aspect)."""
+DIRECTOR_LEAD_M = 0.6
+"""The 2D director view is centered this far ahead of the rover (it looks where the rover is going)."""
+
+
+def director_window(plan: Planogram, pose: Pose2D, w: int = 640, h: int = 480) -> Rect2D:
+    """Floor window of the 2D director (chase) view: DIRECTOR_VIEW_W_M wide around the rover, clamped to the store."""
+    b = plan.bounds
+    vw = min(DIRECTOR_VIEW_W_M, b.w)
+    vh = min(vw * (h - HUD_H) / max(1, w), b.h)
+    cx = pose.x + DIRECTOR_LEAD_M * math.cos(pose.theta)
+    cy = pose.y + DIRECTOR_LEAD_M * math.sin(pose.theta)
+    x0 = min(max(b.x, cx - vw / 2), b.x_max - vw)
+    y0 = min(max(b.y, cy - vh / 2), b.y_max - vh)
+    return Rect2D(x=x0, y=y0, w=vw, h=vh)
+
+
+def render_director(
+    plan: Planogram, rovers: list[RoverView], focus: RoverView, *, w: int = 640, h: int = 480
+) -> Rendered:
+    """``<robot>.director`` on the 2D fake: a close top-down follow view of ``focus`` (route, shelves, other robots)
+    with the rover's HUD; the Isaac worker renders the real third-person chase camera instead."""
+    return render_ceiling(plan, rovers, None, w=w, h=h, window=director_window(plan, focus.pose, w, h), focus=focus)
+
+
 def render_ceiling(
     plan: Planogram,
     rovers: list[RoverView],
@@ -566,9 +594,11 @@ def render_ceiling(
     w: int = 640,
     h: int = 480,
     title: str | None = None,
+    window: Rect2D | None = None,
+    focus: RoverView | None = None,
 ) -> Rendered:
     img, draw = new_canvas(w, h, (248, 250, 252))
-    win = ceiling_window(plan, cam)
+    win = window or ceiling_window(plan, cam)
     top = HUD_H + 6
     margin = 12
     s = min((w - 2 * margin) / win.w, (h - top - margin) / win.h)
@@ -617,6 +647,12 @@ def render_ceiling(
         x, y = P(pose.x, pose.y)
         draw.rectangle((x - 5, y - 5, x + 5, y + 5), fill=col)
         draw.text((x + 7, y - 6), label, fill=col, font=small)
+    # 0.2.4: units the arm put on the checkout counter
+    for rv in rovers:
+        for unit in rv.counter:
+            x, y = P(unit.position.x, unit.position.y)
+            half = max(2.5, 0.045 * s)
+            draw.rectangle((x - half, y - half, x + half, y + half), fill=(234, 88, 12), outline=(67, 20, 7))
     # docks + routes + robots
     for rv in rovers:
         c = rgb(rv.color, (37, 99, 235))
@@ -653,6 +689,22 @@ def render_ceiling(
         placed.append(box)
         draw.rectangle(box, fill=(255, 255, 255), outline=c)
         draw.text((box[0] + 3, box[1] + 1), tag, fill=(15, 23, 42), font=label_f)
+    if focus is not None:  # director view: ring around the followed rover + its HUD and task
+        x, y = P(focus.pose.x, focus.pose.y)
+        r = max(9.0, ROBOT_RADIUS_M * s * 1.5)
+        draw.ellipse((x - r, y - r, x + r, y + r), outline=(34, 197, 94), width=3)
+        hud(draw, w, focus, "director · 2D sim")
+        holding = f"holding {focus.holding.sku} · " if focus.holding is not None else ""
+        task_line(
+            draw,
+            w,
+            h,
+            f"{holding}basket {len(focus.basket)}/{focus.capacity}"
+            + (f" · counter {len(focus.counter)}" if focus.counter else "")
+            + (f" · {focus.task}" if focus.task else ""),
+        )
+        watermark(draw, w, h)
+        return Rendered(encode(img), w, h, [], None)
     # header
     draw.rectangle((0, 0, w, HUD_H), fill=(15, 23, 42))
     hf = font(12)
@@ -684,7 +736,9 @@ __all__ = [
     "facing_slots",
     "nearest_facing_slot",
     "render_basket",
+    "director_window",
     "render_ceiling",
+    "render_director",
     "render_front",
     "render_wrist",
 ]

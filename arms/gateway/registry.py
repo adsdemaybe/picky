@@ -4,6 +4,11 @@
   services + perception's ``cameras`` + agent's ``brain``): ``arms.<arm>.<real factory>(services)`` when the field OR
   its arm is in ``PICKY_REAL_ARMS``, else ``arms.<arm>.<fake factory>(services)``. A real factory that fails falls back
   to the fake (logged + noted in ``/health``); a missing fake leaves the field None ("missing").
+- The planner -> VLA -> verifier loop (contracts 0.2.1, ``LOOP_SERVICE_FACTORIES``): ``planner`` / ``runner`` (agent),
+  ``vla`` / ``truth`` / ``faults`` (robot), ``verifier`` / ``evidence`` (perception), same real / fake rules (field or
+  arm name in ``PICKY_REAL_ARMS``). An arm that does not export a loop factory leaves that field None ("not wired",
+  never an error); ``loop=False`` skips them all (the v0.2 path). Whether goals then run through the loop is
+  ``exec_mode`` (``PICKY_EXEC_MODE``; blank = plan when the VLA and the verifier are wired).
 - Gateway-provided services: ``GatewayPublisher`` (EventPublisher over ``utils.events.EventBus``; live-only ``frame`` /
   ``camera.frame`` events go to the ``FrameHub``), ``GatewayApprovalBroker`` (asyncio Futures, resolvable from REST,
   websocket or messaging inbound; timeouts; filters; cancel), ``SimLinkHub`` (every connected ``/ws/sim`` worker as
@@ -21,10 +26,20 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from arms.gateway.judges import JudgesIndex
+from arms.gateway.loop_api import EvidenceAnnotations
 from contracts.cameras import CameraInfo, parse_camera_id
 from contracts.common import utcnow
 from contracts.events import LIVE_ONLY_EVENT_TYPES, ApprovalRequested, ApprovalResolved, ErrorEvent, Event, parse_event
-from contracts.services import EXTRA_SERVICE_PROTOCOLS, SERVICE_FACTORIES, SERVICE_PROTOCOLS, Services
+from contracts.services import (
+    EXTRA_SERVICE_PROTOCOLS,
+    LOOP_SERVICE_FACTORIES,
+    LOOP_SERVICE_PROTOCOLS,
+    SERVICE_FACTORIES,
+    SERVICE_PROTOCOLS,
+    Services,
+    exec_mode,
+)
 from contracts.sim import (
     CommandResult,
     SetStreamsCmd,
@@ -54,7 +69,27 @@ ApprovalListener = Callable[[str, ApprovalRequest, ApprovalResponse | None], Awa
 EnvelopeHook = Callable[[ApprovalRequest], Awaitable[dict[str, Any]] | dict[str, Any]]
 """Returns the event envelope (trip_id, store_id, robot_id, user_id, request_id) for an approval's events."""
 
-ALL_SERVICE_PROTOCOLS: dict[str, type] = {**SERVICE_PROTOCOLS, **EXTRA_SERVICE_PROTOCOLS}
+ALL_SERVICE_PROTOCOLS: dict[str, type] = {**SERVICE_PROTOCOLS, **EXTRA_SERVICE_PROTOCOLS, **LOOP_SERVICE_PROTOCOLS}
+ANNOTATED_EVENT_TYPES = frozenset({"step.verified", "target.grounded", "camera.overlay"})
+NOT_WIRED = "not wired"
+"""Registry mode of a loop field whose arm exports no factory (or ``loop=False``): None in Services, not an error."""
+
+
+def configured_exec_mode(services: Services, settings: Settings | None = None) -> str:
+    """``PICKY_EXEC_MODE`` as the agent's brain reads it: 'direct' | 'plan' | 'tools'; blank / 'auto' = 'plan' when
+    ``Services.vla`` and ``Services.verifier`` are wired, else 'direct' (mirror of arms.agent.loop.configured_exec_mode,
+    which the gateway may not import)."""
+    s = settings or get_settings()
+    raw = str(getattr(s, "picky_exec_mode", "") or "").strip().lower()
+    if raw in ("", "auto"):
+        return "plan" if services.vla is not None and services.verifier is not None else "direct"
+    return raw
+
+
+def current_exec_mode(services: Services, settings: Settings | None = None) -> str:
+    """The mode goals run in right now: ``contracts.services.exec_mode`` (plan / tools only when planner, runner, vla
+    and verifier are all wired; otherwise the v0.2 'direct' path)."""
+    return exec_mode(services, configured_exec_mode(services, settings))
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -113,15 +148,23 @@ class FrameHub:
 # EventPublisher
 # ----------------------------------------------------------------------------------------------------------------------
 class GatewayPublisher:
-    """``contracts.services.EventPublisher``: stamps bus-wide ``seq`` (utils.events) and fans out to websockets."""
+    """``contracts.services.EventPublisher``: stamps bus-wide ``seq`` (utils.events) and fans out to websockets.
+    Loop evidence (``step.verified`` / ``target.grounded`` / ``camera.overlay``) also feeds the annotation index."""
 
-    def __init__(self, bus: EventBus, frames: FrameHub) -> None:
+    def __init__(self, bus: EventBus, frames: FrameHub, annotations: EvidenceAnnotations | None = None) -> None:
         self.bus = bus
         self.frames = frames
+        self.annotations = annotations
+        self.judges = JudgesIndex()
+        """0.2.4: verification cards + payment agent timelines (REST views of the event stream)."""
 
     async def publish(self, event: Event) -> Event:
         if isinstance(event, dict):
             event = parse_event(event)
+        if getattr(event, "type", None) in ("item.verification", "payment.agent_step"):
+            self.judges.observe(event)
+        if self.annotations is not None and getattr(event, "type", None) in ANNOTATED_EVENT_TYPES:
+            self.annotations.observe(event)
         if getattr(event, "type", None) in LIVE_ONLY_EVENT_TYPES:
             self.frames.publish(event)
             return event
@@ -634,14 +677,20 @@ class Registry:
     approvals: GatewayApprovalBroker
     sim_link: SimLinkHub
     frames: FrameHub
+    annotations: EvidenceAnnotations = field(default_factory=EvidenceAnnotations)
     orchestrator: Any = None
     modes: dict[str, str] = field(default_factory=dict)
-    """service field -> 'real' | 'fake' | 'fake (real failed)' | 'missing'."""
+    """service field -> 'real' | 'fake' | 'fake (real failed)' | 'missing' | 'override' | 'not wired' (loop fields)."""
     notes: dict[str, str] = field(default_factory=dict)
     fake_opts: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def event_dicts(self, after_seq: int = 0) -> list[dict[str, Any]]:
         return [event_to_dict(e) for e in self.bus.recent(after_seq=after_seq)]
+
+    @property
+    def exec_mode(self) -> str:
+        """direct | plan | tools (see ``current_exec_mode``)."""
+        return current_exec_mode(self.services)
 
 
 def _call_factory(arm: str, factory: str, services: Services, opts: dict[str, Any] | None) -> Any:
@@ -669,10 +718,12 @@ def build_registry(
     real_opts: dict[str, dict[str, Any]] | None = None,
     orchestrator_config: Any = None,
     overrides: dict[str, Any] | None = None,
+    loop: bool = True,
 ) -> Registry:
-    """Wire everything. ``real_arms`` overrides ``PICKY_REAL_ARMS`` (arm names or service fields, e.g. ``brain``);
-    ``fake_opts[field]`` are kwargs for that fake (applied as attributes when its factory takes only ``services``);
-    ``overrides[field]`` = ``factory(services)`` (or a ready object) that replaces that service outright (tests)."""
+    """Wire everything. ``real_arms`` overrides ``PICKY_REAL_ARMS`` (arm names or service fields, e.g. ``brain``,
+    ``planner``, ``vla``, ``verifier``); ``fake_opts[field]`` are kwargs for that fake (applied as attributes when its
+    factory takes only ``services``); ``overrides[field]`` = ``factory(services)`` (or a ready object) that replaces
+    that service outright (tests; ``None`` leaves a loop field unwired). ``loop=False`` leaves every loop field None."""
     from arms.gateway.orchestrator import TripOrchestrator  # local import: orchestrator imports nothing from here
 
     settings = settings or get_settings()
@@ -688,7 +739,8 @@ def build_registry(
     services = Services()
     bus = EventBus()
     frames = FrameHub()
-    publisher = GatewayPublisher(bus, frames)
+    annotations = EvidenceAnnotations()
+    publisher = GatewayPublisher(bus, frames, annotations)
     approvals = GatewayApprovalBroker(services)
     sim_link = SimLinkHub()
     reg = Registry(
@@ -698,17 +750,23 @@ def build_registry(
         approvals=approvals,
         sim_link=sim_link,
         frames=frames,
+        annotations=annotations,
         fake_opts=fake_opts,
     )
     services.events = publisher
     services.approvals = approvals
     services.sim_link = sim_link
 
-    for name, (arm, real_factory, fake_factory) in SERVICE_FACTORIES.items():
+    factories = {**SERVICE_FACTORIES, **LOOP_SERVICE_FACTORIES}
+    for name, (arm, real_factory, fake_factory) in factories.items():
+        is_loop = name in LOOP_SERVICE_FACTORIES
         if name in overrides:
             factory = overrides[name]
             setattr(services, name, factory(services) if callable(factory) else factory)
-            reg.modes[name] = "override"
+            reg.modes[name] = "override" if getattr(services, name) is not None else NOT_WIRED
+            continue
+        if is_loop and (not loop or not _exports(arm, real_factory, fake_factory)):
+            reg.modes[name] = NOT_WIRED  # the arm doesn't implement it yet: the v0.2 path, never an error
             continue
         obj, mode = None, "missing"
         if is_real(name) or is_real(arm):
@@ -735,12 +793,24 @@ def build_registry(
     orchestrator = TripOrchestrator(services, config=orchestrator_config)
     services.trips = orchestrator
     reg.orchestrator = orchestrator
+    orchestrator.photo_lookup = publisher.judges.photos
     approvals.envelope_hook = orchestrator.approval_envelope
-    log.info("gateway wired: %s", ", ".join(f"{a}={m}" for a, m in reg.modes.items()))
+    log.info("gateway wired: %s | exec_mode=%s", ", ".join(f"{a}={m}" for a, m in reg.modes.items()), reg.exec_mode)
     return reg
 
 
+def _exports(arm: str, *factories: str) -> bool:
+    """Does ``arms.<arm>`` export at least one of ``factories``? (False if the arm can't be imported.)"""
+    try:
+        module = importlib.import_module(f"arms.{arm}")
+    except Exception as exc:  # noqa: BLE001 - the primary service build reports import errors
+        log.warning("arms.%s not importable: %s", arm, exc)
+        return False
+    return any(callable(getattr(module, f, None)) for f in factories)
+
+
 __all__ = [
+    "NOT_WIRED",
     "FrameHub",
     "GatewayApprovalBroker",
     "GatewayPublisher",
@@ -748,4 +818,6 @@ __all__ = [
     "SimLinkHub",
     "SimWorker",
     "build_registry",
+    "configured_exec_mode",
+    "current_exec_mode",
 ]

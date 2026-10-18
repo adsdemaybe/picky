@@ -46,6 +46,9 @@ class CameraPose:
     hfov: float = math.radians(70.0)
     w: int = DEFAULT_FRAME_W
     h: int = DEFAULT_FRAME_H
+    roll: float = 0.0
+    """Rotation about the viewing axis (rad; > 0 turns the image's right edge up). Only the joint-mode wrist camera
+    rolls (it rides the SO-101 wrist roll); every other camera keeps 0."""
 
     def basis(self) -> tuple[Vec3, Vec3, Vec3]:
         """(right, up, forward) unit vectors in the store frame."""
@@ -53,7 +56,31 @@ class CameraPose:
         f = (cy * cp, sy * cp, sp)
         r = (sy, -cy, 0.0)
         u = (r[1] * f[2] - r[2] * f[1], r[2] * f[0] - r[0] * f[2], r[0] * f[1] - r[1] * f[0])
+        if self.roll:
+            cr, sr = math.cos(self.roll), math.sin(self.roll)
+            r, u = (
+                (r[0] * cr + u[0] * sr, r[1] * cr + u[1] * sr, r[2] * cr + u[2] * sr),
+                (u[0] * cr - r[0] * sr, u[1] * cr - r[1] * sr, u[2] * cr - r[2] * sr),
+            )
         return r, u, f
+
+    @classmethod
+    def from_axes(cls, eye: Vec3, forward: Vec3, right: Vec3, **kw: Any) -> "CameraPose":
+        """Camera at ``eye`` looking along ``forward`` with the image's +x along ``right`` (store frame; e.g. a ROS
+        camera frame's z and x axes): yaw / pitch from ``forward``, roll from ``right``."""
+        fn = math.sqrt(sum(c * c for c in forward)) or 1.0
+        f = (forward[0] / fn, forward[1] / fn, forward[2] / fn)
+        horiz = math.hypot(f[0], f[1])
+        pitch = math.atan2(f[2], horiz)
+        if horiz < 1e-9:  # straight up / down: yaw from the right vector, no roll
+            return cls(eye[0], eye[1], eye[2], math.atan2(right[0], -right[1]), pitch, **kw)
+        yaw = math.atan2(f[1], f[0])
+        probe = cls(eye[0], eye[1], eye[2], yaw, pitch, **kw)
+        r0, u0, _ = probe.basis()
+        roll = math.atan2(
+            sum(a * b for a, b in zip(right, u0, strict=True)), sum(a * b for a, b in zip(right, r0, strict=True))
+        )
+        return replace(probe, roll=roll)
 
     @property
     def focal_px(self) -> float:
@@ -130,6 +157,24 @@ def gripper_local(lift_height_m: float, arm_ext_m: float) -> Vec3:
 
 def gripper_position(pose: Pose2D, lift_height_m: float = LIFT_REST_M, arm_ext_m: float = ARM_STOW_EXT_M) -> Point3:
     return to_store(pose, gripper_local(lift_height_m, arm_ext_m))
+
+
+HELD_CLEARANCE_M = NEAR_CLIP_M + 0.01
+"""Gap between the wrist camera eye (at the gripper TCP) and the near face of the held item."""
+
+
+def held_position(
+    pose: Pose2D,
+    lift_height_m: float = LIFT_REST_M,
+    arm_ext_m: float = ARM_STOW_EXT_M,
+    item_dims: Vec3 = (0.08, 0.08, 0.15),
+) -> Point3:
+    """Center of the unit held by the magic grasp: just ahead of the jaws (its near face HELD_CLEARANCE_M in front of
+    the TCP; a held unit is yawed pose.theta - pi/2, label toward the robot, so its depth item_dims[1] lies along the
+    robot's x). Centered ON the TCP the wrist camera sat inside the unit and Isaac showed the aisle through a wash of
+    the unit's color."""
+    x, y, z = gripper_local(lift_height_m, arm_ext_m)
+    return to_store(pose, (x + item_dims[1] / 2 + HELD_CLEARANCE_M, y, z))
 
 
 def mount_camera(

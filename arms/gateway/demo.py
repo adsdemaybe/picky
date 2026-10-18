@@ -12,17 +12,24 @@ fakes) and prints a compact timeline (requests, goals, brain steps, trip flow, s
 (b2) staff at the second store: "Hazel, scan the dairy aisle at the Hill store" -> a shelf_scan goal on rover-hill-1
     (Hazel) at store_hill, at the same time: three robots in two stores work in parallel.
 (c) maya sends the same request again: trip 2 must pick a different salsa and different recommendations.
+(d) planner -> VLA -> verifier loop (contracts 0.2.1; on unless ``--exec-mode direct``): shop goals run as typed step
+    plans (navigate / align / ground / grasp / place / verify / handoff), each step checked by the verifier. The demo
+    injects ONE bad grasp (``--faults drop_on_first_grasp``: the first grasp "succeeds" but nothing is held): the
+    verifier must catch it and the retry must succeed. The summary prints that moment.
 
 Exits non-zero unless every goal completed, every maya trip passed every pipeline state to ``done`` with no failed
 stops and within budget (unless an over-budget ask was approved), stock alerts exist for store_ave, trip 2 changed,
-and (without ``--allow-errors``) no ``error`` event was published. With fakes it finishes in well under 30 s.
+in plan mode every shop trip ran a step plan to completion and the injected bad grasp was caught by the verifier and
+retried successfully, and (without ``--allow-errors``) no ``error`` event was published. With fakes it finishes in
+well under 30 s.
 
 Approvals are answered by the scripted shopper in the messaging fake (Photon path); a web-shopper fallback answers
 anything still pending after ``WEB_FALLBACK_S`` (approve / first option / echoes the checkout cart_hash; says no to
 asks flagged over budget), so it also runs with real messaging and no phone.
 
-Options: ``--quiet``, ``--text``, ``--user``, ``--staff-text``, ``--no-staff``, ``--timeout 30``, ``--allow-errors``.
-``--no-staff`` also skips the store_hill scan.
+Options: ``--quiet``, ``--text``, ``--user``, ``--staff-text``, ``--no-staff``, ``--timeout 30``, ``--allow-errors``,
+``--exec-mode auto|plan|direct|tools`` (default PICKY_EXEC_MODE; blank = plan), ``--faults <scenario>|none``
+(default PICKY_FAULTS, else drop_on_first_grasp). ``--no-staff`` also skips the store_hill scan.
 """
 
 import argparse
@@ -37,11 +44,12 @@ from typing import Any
 from arms.gateway.orchestrator import OrchestratorConfig
 from arms.gateway.registry import Registry, build_registry
 from contracts.common import STAFF_USER_ID, money
+from contracts.faults import DEMO_SCENARIOS
 from contracts.fleet import FleetRequest, Goal, GoalStatus, RequestPlan
 from contracts.shopping import TripState
 from contracts.trip import Trip
 from contracts.trust import ApprovalKind, ApprovalRequest, ApprovalResponse
-from utils.config import get_settings
+from utils.config import get_settings, set_settings
 from utils.ids import seed_ids
 
 DEMO_TEXT = "tacos for 6, under $40, one vegetarian"
@@ -54,6 +62,9 @@ HILL_STORE = "store_hill"
 HILL_ROBOT = "rover-hill-1"
 WEB_FALLBACK_S = 1.5
 DEFAULT_TIMEOUT_S = 30.0
+DEFAULT_FAULTS = "drop_on_first_grasp"
+"""THE demo moment: the first grasp claims success with nothing held; the verifier catches it; the retry succeeds."""
+NO_FAULTS = ("", "none", "clean", "off")
 
 FAKE_OPTS: dict[str, dict[str, Any]] = {
     "robot": {"realtime_factor": 120.0},
@@ -87,6 +98,128 @@ class DemoFailure(AssertionError):
 
 
 @dataclass
+class VerifierCatch:
+    """One 'the VLA said success, the verifier said no' moment and what happened next."""
+
+    plan_id: str
+    step_id: str
+    robot_id: str | None
+    title: str
+    attempt: int
+    code: str
+    decision: str
+    verdict_reason: str = ""
+    verified_by: str = ""
+    fault_ids: list[str] = field(default_factory=list)
+    retry_status: str | None = None
+    retry_attempts: int | None = None
+    retry_verified_by: str = ""
+
+    @property
+    def retried_ok(self) -> bool:
+        return self.retry_status == "succeeded" and (self.retry_attempts or 0) > self.attempt
+
+
+@dataclass
+class LoopStats:
+    """What the planner -> VLA -> verifier loop did (filled from the event stream)."""
+
+    plans: dict[str, str] = field(default_factory=dict)
+    """plan_id -> robot_id of every plan.created / plan.revised."""
+    revised_from: dict[str, str] = field(default_factory=dict)
+    titles: dict[tuple[str, str], str] = field(default_factory=dict)
+    completed: list[Any] = field(default_factory=list)
+    """plan.completed events."""
+    firings: list[Any] = field(default_factory=list)
+    catches: list[VerifierCatch] = field(default_factory=list)
+    verdicts: int = 0
+    failed_verdicts: int = 0
+    dropoffs: int = 0
+    """Mid-trip basket drop-offs at the checkout (a full basket before a grasp)."""
+    unload: dict[str, dict[str, int]] = field(default_factory=dict)
+    """0.2.4 checkout unload by the arm: plan_id -> {'total', 'verified', 'skipped', 'done'} (checkout.unload)."""
+    unload_lines: list[str] = field(default_factory=list)
+    _pending_verdict: dict[tuple[str, str, int], Any] = field(default_factory=dict)
+
+    def observe(self, ev: Any) -> None:
+        t = ev.type
+        if t in ("plan.created", "plan.revised"):
+            self.plans[ev.plan.plan_id] = ev.plan.robot_id
+            for st in ev.plan.steps:
+                self.titles[(ev.plan.plan_id, st.step_id)] = st.title
+            if t == "plan.revised":
+                self.revised_from[ev.plan.plan_id] = ev.previous_plan_id
+        elif t == "step.started":
+            self.titles[(ev.plan_id, ev.step.step_id)] = ev.step.title
+            if ev.step.kind == "handoff" and ev.step.group_id == "dropoff" and ev.attempt == 1:
+                self.dropoffs += 1
+        elif t == "step.verified":
+            self.verdicts += 1
+            if ev.verdict.outcome != "pass":
+                self.failed_verdicts += 1
+            if ev.caught_vla_false_success:
+                self._pending_verdict[(ev.plan_id, ev.step_id, ev.attempt)] = ev.verdict
+            for c in self.catches:
+                if self._same_step(c, ev.plan_id, ev.step_id) and ev.attempt > c.attempt and ev.verdict.passed:
+                    c.retry_verified_by = verified_by(ev.verdict)
+        elif t == "step.failed":
+            f = ev.failure
+            if not f.caught_by_verifier:
+                return
+            verdict = f.verdict or self._pending_verdict.get((ev.plan_id, ev.step_id, f.attempt))
+            self.catches.append(
+                VerifierCatch(
+                    plan_id=ev.plan_id,
+                    step_id=ev.step_id,
+                    robot_id=ev.robot_id,
+                    title=self.titles.get((ev.plan_id, ev.step_id), ev.step_id),
+                    attempt=f.attempt,
+                    code=f.code,
+                    decision=ev.decision.reason,
+                    verdict_reason=verdict.reason if verdict is not None else f.message,
+                    verified_by=verified_by(verdict) if verdict is not None else "",
+                    fault_ids=[x.fault_id for x in self.firings if x.context.step_id == ev.step_id],
+                )
+            )
+        elif t == "step.completed":
+            for c in self.catches:
+                if self._same_step(c, ev.plan_id, ev.step_id) and c.retry_status != "succeeded":
+                    c.retry_status, c.retry_attempts = str(ev.status), ev.attempts
+        elif t == "demo.fault":
+            self.firings.append(ev.firing)
+        elif t == "checkout.unload":
+            u = self.unload.setdefault(ev.plan_id, {"total": 0, "verified": 0, "skipped": 0, "done": 0})
+            u["total"] = max(u["total"], ev.total)
+            if ev.status in ("verified", "skipped", "done"):
+                u[ev.status] += 1
+            if ev.status in ("verified", "done", "skipped"):
+                self.unload_lines.append(ev.text)
+        elif t == "plan.completed":
+            self.completed.append(ev)
+
+    def _same_step(self, c: VerifierCatch, plan_id: str, step_id: str) -> bool:
+        if step_id != c.step_id:
+            return False
+        pid: str | None = plan_id
+        while pid is not None:  # a re-plan keeps closed steps' ids: follow the revision chain back
+            if pid == c.plan_id:
+                return True
+            pid = self.revised_from.get(pid)
+        return False
+
+
+def verified_by(verdict: Any) -> str:
+    """'Perceptron perceptron-mk1.5' / 'Sim ground truth' / 'Robot state' (the UI's attribution badge)."""
+    if verdict is None:
+        return ""
+    if verdict.provider is not None and verdict.decided_by == "provider":
+        return verdict.provider.attribution
+    return {"ground_truth": "Sim ground truth", "state": "Robot state", "human": "a person"}.get(
+        verdict.decided_by, verdict.provider.attribution if verdict.provider is not None else verdict.decided_by
+    ) + (" (degraded)" if verdict.degraded else "")
+
+
+@dataclass
 class DemoResult:
     plan1: RequestPlan
     plan2: RequestPlan
@@ -99,6 +232,9 @@ class DemoResult:
     stock_alerts: int = 0
     brain_steps: int = 0
     elapsed_s: float = 0.0
+    exec_mode: str = "direct"
+    faults: str | None = None
+    loop: LoopStats = field(default_factory=LoopStats)
 
     @property
     def trip1(self) -> Trip:
@@ -117,6 +253,12 @@ def describe(ev: Any) -> str | None:
     t = ev.type
     if t in ("robot.state", "fleet.robot_updated", "stock.updated"):
         return None
+    if t == "payment.agent_step":
+        st = ev.step
+        return f"{st.n}. {st.title} [{st.status}] {st.detail} | {st.narration} ({st.label})"
+    if t == "item.verification":
+        v = ev.verification
+        return f"{v.question} [{v.status}{', ' + v.decided_by if v.decided_by else ''}] {v.photo_url or 'no photo'}"
     if t == "request.received":
         return f'"{ev.request.text}" from {ev.request.user_id} ({ev.request.role})'
     if t == "request.planned":
@@ -221,6 +363,58 @@ def describe(ev: Any) -> str | None:
         return f"{ev.role}/{ev.channel or '-'}: {ev.text[:90]}"
     if t == "error":
         return f"{ev.arm}: {ev.message}" + (f" [{ev.code}]" if ev.code else "")
+    return describe_loop(ev)
+
+
+def describe_loop(ev: Any) -> str | None:
+    """Planner -> VLA -> verifier loop events: the plan, failures, catches and summaries (routine progress is told by
+    the mirrored brain.step lines, so step.started / passing checks / vla progress are not printed)."""
+    t = ev.type
+    if t in ("plan.created", "plan.revised"):
+        p = ev.plan
+        pl = p.planner
+        how = (
+            pl.origin
+            + (f" {pl.model}" if pl.model else "")
+            + (f", fallback: {pl.fallback_reason}" if pl.fallback_reason else "")
+        )
+        head = f"rev {p.revision} ({ev.reason}): " if t == "plan.revised" else ""
+        return f"{head}{p.title or p.plan_id} | {len(p.steps)} steps for {len(p.items)} items, planner {how}"
+    if t == "step.failed":
+        f, d = ev.failure, ev.decision
+        caught = " CAUGHT BY THE VERIFIER" if f.caught_by_verifier else ""
+        return f"{ev.step_id} attempt {f.attempt} {f.code}{caught} -> {d.action}: {d.reason}"
+    if t == "step.verified":
+        v = ev.verdict
+        if v.outcome == "pass" and not v.degraded and not ev.caught_vla_false_success:
+            return None
+        flag = " VLA said success" if ev.caught_vla_false_success else ""
+        return f"{ev.step_id} {ev.phase} {v.outcome.upper()}{flag}: {v.reason} [{verified_by(v)}]"
+    if t == "step.completed":
+        if str(ev.status) in ("succeeded", "provisional"):
+            return None
+        return f"{ev.step_id} {ev.status} after {ev.attempts} attempt(s)" + (f": {ev.note}" if ev.note else "")
+    if t == "vla.status":
+        st = ev.status
+        if st.phase != "failed":
+            return None
+        return f"{ev.step_id} {st.tier or ''} failed: {st.error.code if st.error else st.message}"
+    if t == "vla.tier_changed":
+        return f"{ev.from_tier or '-'} -> {ev.to_tier}: {ev.reason}"
+    if t == "plan.completed":
+        m = ev.stats
+        return (
+            f"{ev.status}: {ev.summary} | {m.steps_total} steps, {m.verifier_catches} verifier catch(es), "
+            f"{m.retries} retr{'y' if m.retries == 1 else 'ies'}, {m.replans} replan(s), {m.duration_s:.1f}s"
+        )
+    if t == "demo.fault":
+        c = ev.firing.context
+        what = " ".join(x for x in (c.step_kind or "", c.sku or "", f"attempt {c.attempt}") if x)
+        return f"INJECTED {ev.firing.effect} ({ev.firing.fault_id}, scenario {ev.scenario or '-'}) on {what}"
+    if t == "checkout.unload":
+        return ev.text if ev.status in ("verified", "skipped", "done") else None
+    if t in ("step.started", "target.grounded"):
+        return None
     return ""
 
 
@@ -238,6 +432,7 @@ async def _printer(sub: Any, t0: float, quiet: bool, names: dict[str, str], stat
     async with sub:
         async for ev in sub:
             stats["types"][ev.type] = stats["types"].get(ev.type, 0) + 1
+            stats["loop"].observe(ev)
             if ev.type == "error":
                 stats["errors"].append(f"{_label(ev, names)}: {ev.arm}: {ev.message}")
             if quiet and ev.type != "error":
@@ -393,22 +588,61 @@ async def run_demo(
     timeout_s: float = DEFAULT_TIMEOUT_S,
     quiet: bool = False,
     allow_errors: bool = False,
+    exec_mode: str | None = None,
+    faults: str | None = None,
 ) -> DemoResult:
+    """``exec_mode`` overrides PICKY_EXEC_MODE for this run ('auto' = blank); ``faults`` = a DEMO_SCENARIOS name
+    (None = PICKY_FAULTS, else ``DEFAULT_FAULTS``; 'none' = no faults), injected only in plan / tools mode."""
     seed_ids(int(os.environ.get("PICKY_ID_SEED", "42")))
+    previous_settings = get_settings()
+    if exec_mode is not None:
+        set_settings(previous_settings, picky_exec_mode="" if exec_mode == "auto" else exec_mode)
+    try:
+        return await _run_demo(
+            user=user,
+            text=text,
+            staff_text=staff_text,
+            timeout_s=timeout_s,
+            quiet=quiet,
+            allow_errors=allow_errors,
+            faults=faults,
+        )
+    finally:
+        set_settings(previous_settings)
+
+
+async def _run_demo(
+    *,
+    user: str,
+    text: str,
+    staff_text: str | None,
+    timeout_s: float,
+    quiet: bool,
+    allow_errors: bool,
+    faults: str | None,
+) -> DemoResult:
     reg = build_registry(
         fake_opts=FAKE_OPTS,
         real_opts=REAL_OPTS,
         orchestrator_config=OrchestratorConfig(
-            approval_timeout_s=10.0, checkout_timeout_s=10.0, followup_timeout_s=None
+            approval_timeout_s=10.0, checkout_timeout_s=10.0, followup_timeout_s=None, payment_step_pause_s=0.1
         ),
     )
     real = sorted(a for a, m in reg.modes.items() if m == "real")
+    mode = reg.exec_mode
+    scenario = await _load_faults(reg, faults, mode)
     print(f"picky demo | services: {', '.join(f'{a}={m}' for a, m in reg.modes.items())}")
     if reg.notes:
         print("notes: " + "; ".join(f"{a}: {n}" for a, n in reg.notes.items()))
     print(
         f'real: {real or "none (all fakes)"} | {user}: "{text}"' + (f' | staff: "{staff_text}"' if staff_text else "")
     )
+    loop_line = f"exec_mode: {mode}"
+    if mode != "direct":
+        loop_line += f" (planner -> VLA -> verifier loop) | faults: {scenario or 'none'}"
+        if scenario in DEMO_SCENARIOS:
+            loop_line += f" ({DEMO_SCENARIOS[scenario].description})"
+    print(loop_line)
     print()
     fleet = reg.services.fleet
     if fleet is None:
@@ -421,7 +655,7 @@ async def run_demo(
         names.update({rid: spec.name for rid, spec in load_robots().items()})
     except Exception:  # noqa: BLE001 - labels only
         pass
-    stats: dict[str, Any] = {"types": {}, "errors": []}
+    stats: dict[str, Any] = {"types": {}, "errors": [], "loop": LoopStats()}
     helpers = [
         asyncio.create_task(_printer(reg.bus.subscribe(None, name="demo-printer"), t0, quiet, names, stats)),
         asyncio.create_task(_web_fallback(reg, reg.bus.subscribe("approval.requested", name="demo-web-shopper"))),
@@ -486,6 +720,9 @@ async def run_demo(
         stock_alerts=max(len(alerts), stats["types"].get("stock.alert", 0)),
         brain_steps=stats["types"].get("brain.step", 0),
         elapsed_s=time.monotonic() - t0,
+        exec_mode=mode,
+        faults=scenario,
+        loop=stats["loop"],
     )
     _summary(result, names)
     problems = check_result(result, staff=staff_text is not None)
@@ -499,8 +736,71 @@ async def run_demo(
     return result
 
 
-def check_result(res: DemoResult, staff: bool = True) -> list[str]:
+async def _load_faults(reg: Registry, faults: str | None, mode: str) -> str | None:
+    """Load the demo fault scenario into ``services.faults`` (plan / tools mode only). Returns its name or None."""
+    injector = reg.services.faults
+    if mode == "direct" or injector is None:
+        return None
+    name = faults if faults is not None else (get_settings().picky_faults or DEFAULT_FAULTS)
+    name = name.strip()
+    if name.lower() in NO_FAULTS:
+        await injector.clear_faults()
+        return None
+    try:
+        loaded = await injector.load_scenario(name)
+    except KeyError:
+        raise DemoFailure(f"unknown fault scenario {name!r}; pick one of {sorted(DEMO_SCENARIOS)}") from None
+    return loaded.name
+
+
+GRASP_FAULT_EFFECTS = frozenset({"drop_after_lift", "wrong_item"})
+"""Faults whose catch-and-retry the demo asserts (the verifier must catch them; the retry must succeed)."""
+
+
+def _expects_catch(scenario: str | None) -> bool:
+    sc = DEMO_SCENARIOS.get(scenario or "")
+    return sc is not None and any(r.effect in GRASP_FAULT_EFFECTS for r in sc.rules)
+
+
+def check_loop(res: DemoResult) -> list[str]:
+    """Plan-mode assertions: every shop trip ran a step plan to completion; an injected bad grasp was caught by the
+    verifier and the retry succeeded."""
+    if res.exec_mode == "direct":
+        return []
     problems: list[str] = []
+    lp = res.loop
+    trip_robots = {t.robot_id for t in (*res.trips1, *res.trips2)}
+    planned = set(lp.plans.values())
+    if not trip_robots <= planned:
+        problems.append(f"plan mode, but no step plan ran on {sorted(r or '-' for r in trip_robots - planned)}")
+    bad = [f"{e.plan_id} {e.status}: {e.summary}" for e in lp.completed if e.status != "completed"]
+    if bad:
+        problems.append("plans not completed: " + "; ".join(bad))
+    if get_settings().picky_unload_by_arm:
+        for pid in {e.plan_id for e in lp.completed if e.status == "completed"}:
+            u = lp.unload.get(pid)
+            if u is None or not u["total"]:
+                problems.append(f"{pid}: the arm unloaded nothing at the checkout counter (checkout.unload)")
+            elif u["verified"] + u["skipped"] < u["total"] or not u["done"]:
+                problems.append(f"{pid}: checkout unload incomplete ({u})")
+    if len(lp.completed) < len(res.trips1) + len(res.trips2):
+        problems.append(f"only {len(lp.completed)} plan.completed for {len(res.trips1) + len(res.trips2)} shop trips")
+    if _expects_catch(res.faults):
+        if not lp.firings:
+            problems.append(f"fault scenario {res.faults} loaded but no fault fired")
+        if not lp.catches:
+            problems.append(f"the injected bad grasp ({res.faults}) was not caught by the verifier")
+        elif not any(c.retried_ok for c in lp.catches):
+            c = lp.catches[0]
+            problems.append(
+                f"the verifier caught {c.title!r} but the retry did not succeed "
+                f"(status {c.retry_status}, attempts {c.retry_attempts})"
+            )
+    return problems
+
+
+def check_result(res: DemoResult, staff: bool = True) -> list[str]:
+    problems: list[str] = check_loop(res)
     for label, trips in (("trip 1", res.trips1), ("trip 2", res.trips2)):
         for trip in trips:
             problems += check_trip(f"{label} ({trip.store_id})", trip)
@@ -559,7 +859,50 @@ def _summary(res: DemoResult, names: dict[str, str]) -> None:
         )
     print(f"stock alerts at {STAFF_STORE}: {res.stock_alerts} | brain steps: {res.brain_steps}")
     print(f"salsa: trip 1 {_request_salsa(res.trips1)} -> trip 2 {_request_salsa(res.trips2)}")
+    _loop_summary(res, names)
     print(f"elapsed {res.elapsed_s:.1f}s")
+
+
+def _loop_summary(res: DemoResult, names: dict[str, str]) -> None:
+    lp = res.loop
+    if res.exec_mode == "direct":
+        print("loop: exec_mode=direct (v0.2 brain path; no step plans)")
+        return
+    for e in lp.completed:
+        m = e.stats
+        robot = names.get(e.robot_id or "", e.robot_id)
+        label = names.get(e.trip_id or "", e.trip_id or e.plan_id)
+        print(
+            f"plan {label} on {robot}: {e.status}, {m.steps_total} steps, {m.verifier_catches} verifier catch(es), "
+            f"{m.retries} retr{'y' if m.retries == 1 else 'ies'}, {m.replans} replan(s), {m.duration_s:.1f}s"
+        )
+    print(
+        f"verifier: {lp.verdicts} checks, {lp.failed_verdicts} not passed | basket drop-offs: {lp.dropoffs} | "
+        f"faults: {res.faults or 'none'}"
+    )
+    for pid, u in lp.unload.items():
+        print(
+            f"checkout unload {pid}: {u['verified']}/{u['total']} units placed on the counter by the arm and verified"
+            + (f", {u['skipped']} left for the handoff" if u["skipped"] else "")
+        )
+    fired: dict[tuple[str, str], list[Any]] = {}
+    for f in lp.firings:
+        fired.setdefault((f.fault_id, f.effect), []).append(f)
+    for (fault_id, effect), group in fired.items():
+        if len(group) > 1:
+            print(f"  INJECTED {effect} ({fault_id}) x{len(group)}")
+            continue
+        c = group[0].context
+        print(f"  INJECTED {effect} ({fault_id}) on {c.step_kind} {c.sku or ''} attempt {c.attempt}".rstrip())
+    for c in lp.catches:
+        robot = names.get(c.robot_id or "", c.robot_id)
+        print(f"  CAUGHT {robot}: '{c.title}' attempt {c.attempt} claimed success; verifier: {c.verdict_reason}")
+        print(f"     verified by {c.verified_by or '?'} -> {c.decision}")
+        if c.retried_ok:
+            by = f", verified by {c.retry_verified_by}" if c.retry_verified_by else ""
+            print(f"     RETRY OK: attempt {c.retry_attempts} succeeded{by}")
+        else:
+            print(f"     retry: {c.retry_status or 'none'} (attempts {c.retry_attempts})")
 
 
 def _quiet_logs() -> None:
@@ -592,11 +935,23 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="report error events as warnings (e.g. a real arm degrading to its fallback) instead of failing",
     )
+    parser.add_argument(
+        "--exec-mode",
+        choices=["auto", "plan", "direct", "tools"],
+        default=None,
+        help="override PICKY_EXEC_MODE (auto = plan when the VLA + verifier are wired; direct = the v0.2 brain path)",
+    )
+    parser.add_argument(
+        "--faults",
+        default=None,
+        help=f"demo fault scenario ({', '.join(sorted(DEMO_SCENARIOS))}, or none); default PICKY_FAULTS, else "
+        f"{DEFAULT_FAULTS}",
+    )
     args = parser.parse_args(argv)
     get_settings()  # fail early on a broken .env
     _quiet_logs()
     try:
-        asyncio.run(
+        result = asyncio.run(
             run_demo(
                 user=args.user,
                 text=args.text,
@@ -604,6 +959,8 @@ def main(argv: list[str] | None = None) -> int:
                 timeout_s=args.timeout,
                 quiet=args.quiet,
                 allow_errors=args.allow_errors,
+                exec_mode=args.exec_mode,
+                faults=args.faults,
             )
         )
     except DemoFailure as exc:
@@ -616,6 +973,12 @@ def main(argv: list[str] | None = None) -> int:
         "DEMO OK: fleet -> robot brains -> checkout -> follow-up for both requests, staff shelf scans in two stores "
         "(Rhea @store_ave raised stock alerts, Hazel @store_hill), and trip 2 changed its salsa and recommendations."
     )
+    if result.exec_mode != "direct":
+        caught = any(c.retried_ok for c in result.loop.catches)
+        print(
+            f"LOOP OK: {len(result.loop.completed)} step plans completed ({result.exec_mode} mode)"
+            + ("; the verifier caught the injected bad grasp and the retry succeeded." if caught else ".")
+        )
     return 0
 
 

@@ -1,0 +1,187 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Picky design tokens (see DESIGN.md).
+   Tailwind's default palette is removed so only these named colors exist. shadcn components read the semantic
+   variables in :root; brand colors carry product meaning (in store, online, good price, wait, over budget). */
+@theme {
+  --color-*: initial;
+  --color-white: #ffffff;
+  --color-black: #000000;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+
+  /* brand */
+  --color-leaf: #0f7a4a;
+  --color-leaf-deep: #0a5c37;
+  --color-leaf-wash: #e3f3e9;
+  --color-lime: #d9f26b;
+  --color-lime-ink: #2e3a00;
+  --color-sky: #2f5bea;
+  --color-sky-wash: #e8eeff;
+  --color-tomato: #d93a30;
+  --color-tomato-wash: #fde8e6;
+  --color-amber: #f2a516;
+  --color-amber-ink: #7a4b00;
+  --color-amber-wash: #fff3d6;
+  --color-grape: #7c4dcc;
+  --color-grape-wash: #f1ebfb;
+
+  /* chart categories: validated with the dataviz palette checker on #FFFFFF (all checks pass) */
+  --color-cat-1: #1f8a52;
+  --color-cat-2: #2f6fdf;
+  --color-cat-3: #d9761c;
+  --color-cat-4: #c2367a;
+  --color-cat-5: #6e7a12;
+
+  --font-display: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+
+  --shadow-*: initial;
+  --shadow-xs: 0 1px 2px rgb(17 17 17 / 0.05);
+  --shadow-sm: 0 1px 3px rgb(17 17 17 / 0.06), 0 1px 2px rgb(17 17 17 / 0.04);
+  --shadow-md: 0 8px 24px -6px rgb(17 17 17 / 0.12), 0 2px 6px rgb(17 17 17 / 0.05);
+  --shadow-lg: 0 24px 48px -12px rgb(17 17 17 / 0.18);
+
+  --animate-rise: rise 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-pop: pop 260ms cubic-bezier(0.3, 1.4, 0.5, 1) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@theme inline {
+  --font-heading: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --color-foreground: var(--foreground);
+  --color-background: var(--background);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-full: 9999px;
+}
+
+:root {
+  --radius: 0.75rem;
+  --background: #f3f5f2;
+  --foreground: #111111;
+  --card: #ffffff;
+  --card-foreground: #111111;
+  --popover: #ffffff;
+  --popover-foreground: #111111;
+  --primary: #0f7a4a;
+  --primary-foreground: #ffffff;
+  --secondary: #e9efea;
+  --secondary-foreground: #111111;
+  --muted: #eef1ed;
+  --muted-foreground: #586160;
+  --accent: #eef3ee;
+  --accent-foreground: #111111;
+  --destructive: #d93a30;
+  --border: #e0e5df;
+  --input: #d5dbd4;
+  --ring: #0f7a4a;
+}
+
+html,
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.55;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-heading);
+  text-wrap: balance;
+  letter-spacing: -0.02em;
+}
+
+/* Phones: a grid with no column class gets one implicit column sized to its widest content, which pushes long
+   text off-screen. Default every grid to one shrinkable column; responsive grid-cols-* utilities (a later layer) win. */
+@layer base {
+  main .grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  main .grid > * {
+    min-width: 0;
+  }
+}
+
+/* numbers line up in tables and totals without switching to a monospace face */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+::selection {
+  background: var(--color-lime);
+  color: var(--color-lime-ink);
+}
+
+.live-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot,
+  .animate-rise,
+  .animate-pop {
+    animation: none !important;
+  }
+  * {
+    scroll-behavior: auto !important;
+  }
+}

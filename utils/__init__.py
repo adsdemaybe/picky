@@ -4,4 +4,4 @@ Import submodules directly (``from utils.config import settings``); this package
 importing ``utils`` stays cheap and never touches the network, env, or heavy deps.
 """
 
-__all__ = ["config", "events", "fsm", "geometry", "ids", "llm", "log", "money", "signing"]
+__all__ = ["config", "events", "fsm", "geometry", "ids", "llm", "log", "money", "secrets", "signing"]

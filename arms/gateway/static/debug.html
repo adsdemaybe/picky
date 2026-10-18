@@ -47,6 +47,26 @@
   .cam .lbl { position:absolute; left:0; right:0; bottom:0; padding:2px 6px; font-size:11px; color:#fff; background:rgba(0,0,0,.55); display:flex; justify-content:space-between; }
   .cam.live { outline:2px solid var(--bad); }
   #reply { margin-left:4px; }
+  /* planner -> VLA -> verifier loop */
+  .steps { position:relative; max-height:340px; overflow:auto; font-size:12px; }
+  .steps .grp { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.04em; margin:6px 0 1px; }
+  .step { padding:1px 4px; border-left:3px solid transparent; }
+  .step.st-running { border-left-color:var(--accent); background:color-mix(in srgb, var(--accent) 10%, transparent); }
+  .step.st-succeeded { color:var(--ink); } .step.st-pending { color:var(--muted); }
+  .step.st-failed, .step.st-cancelled { border-left-color:var(--bad); } .step.st-provisional { border-left-color:var(--warn); }
+  .step.st-skipped { color:var(--muted); text-decoration:line-through; }
+  .step .note { color:var(--muted); font-size:11px; margin-left:16px; } .step .caught { color:var(--bad); font-size:11px; margin-left:16px; }
+  .chip { font-size:10px; padding:0 5px; border:1px solid var(--line); border-radius:8px; color:var(--muted); }
+  .vla { display:flex; gap:8px; align-items:center; margin:2px 0 6px; font-size:12px; }
+  .vla .bar { flex:0 0 120px; height:8px; background:var(--bg); border:1px solid var(--line); border-radius:4px; overflow:hidden; }
+  .vla .bar div { height:100%; width:0; background:var(--accent); transition:width .2s; }
+  .verdicts { max-height:360px; overflow:auto; }
+  .vd { display:grid; grid-template-columns: 96px minmax(0,1fr); gap:8px; padding:4px 0; border-bottom:1px solid var(--line); font-size:12px; }
+  .vd img, .vd .noimg { width:96px; height:72px; object-fit:cover; border-radius:4px; background:#000; display:block; }
+  .vd .noimg { color:#aaa; font-size:10px; display:flex; align-items:center; justify-content:center; }
+  .moment { border:2px solid var(--bad); border-radius:8px; padding:6px; margin:4px 0 8px; }
+  .moment.done { border-color:var(--ok); }
+  .moment .vd { border-bottom:0; }
 </style>
 </head>
 <body>
@@ -69,6 +89,13 @@
       <h2>Goals <button id="goalsRefresh">refresh</button></h2>
       <table id="goals"></table>
     </section>
+    <section id="planSection">
+      <h2>Plan <select id="planRobot" aria-label="plan robot"><option value="">latest</option></select>
+        <span id="execMode" class="pill">exec ?</span> <button id="planCancel">cancel plan</button></h2>
+      <div id="planInfo" class="muted"></div>
+      <div class="vla"><div class="bar"><div id="vlaFill"></div></div><span id="vlaText" class="muted">VLA idle</span></div>
+      <div id="planSteps" class="steps muted">no plan yet</div>
+    </section>
     <section>
       <h2>Brain log <select id="brainRobot" aria-label="robot"><option value="">all robots</option></select>
         <form id="robotChat" style="display:flex;gap:4px;margin-left:auto"><input id="robotMsg" size="16" placeholder="talk to robot"><button>Send</button></form></h2>
@@ -90,6 +117,17 @@
     </section>
   </div>
   <div>
+    <section id="verifierSection">
+      <h2>Verifier <span id="verifierBadge" class="pill">?</span>
+        <select id="verifierMode" aria-label="verifier mode"><option value="decide">decide</option><option value="shadow">shadow</option><option value="gt_only">gt_only</option></select>
+        <button id="checkBasket">check basket</button></h2>
+      <div id="moment" class="moment" hidden></div>
+      <div id="verdicts" class="verdicts muted">no checks yet</div>
+      <details id="presenter" hidden><summary class="muted">Presenter: demo faults</summary>
+        <div style="display:flex;gap:4px;margin-top:4px;flex-wrap:wrap"><select id="faultScenario" aria-label="fault scenario"></select>
+          <button id="faultLoad">load</button><button id="faultClear">clear</button></div>
+        <div id="faultInfo" class="muted"></div></details>
+    </section>
     <section>
       <h2>Cameras <select id="camStore" aria-label="camera store"></select> <span class="muted">click = live MJPEG (max 3)</span></h2>
       <div id="cams" class="cams"></div>
@@ -149,6 +187,11 @@ function summary(ev) {
     case "item.picked": return ev.sku;
     case "stock.alert": return `${ev.alert.active ? "ALERT" : "cleared"} ${ev.alert.status} ${ev.alert.sku}`;
     case "route.planned": return `${ev.route.order.length} stops ${ev.route.total_distance_m.toFixed(1)} m${ev.replan ? " (replan)" : ""}`;
+    case "plan.created": case "plan.revised": return `${ev.plan.title || ev.plan.plan_id}: ${ev.plan.steps.length} steps (planner ${ev.plan.planner.origin})`;
+    case "step.failed": return `${ev.step_id} ${ev.failure.code}${ev.failure.caught_by_verifier ? " CAUGHT BY VERIFIER" : ""} -> ${ev.decision.reason}`;
+    case "plan.completed": return `${ev.status}: ${ev.summary}`;
+    case "vla.tier_changed": return `${ev.from_tier || "-"} -> ${ev.to_tier}: ${ev.reason}`;
+    case "demo.fault": return `INJECTED ${ev.firing.effect} (${ev.firing.fault_id}) on ${ev.firing.context.step_kind || "?"} ${ev.firing.context.sku || ""}`;
     default: return "";
   }
 }
@@ -237,7 +280,7 @@ function onTripEvent(ev) {
   if (!tripId && (ev.type === "trip.created" || ev.type === "trip.snapshot")) { tripId = ev.trip.trip_id; $("tripId").value = tripId; }
   if (ev.seq && ev.seq <= lastSeq && ev.type !== "trip.snapshot") return;
   lastSeq = Math.max(lastSeq, ev.seq || 0);
-  if (ev.type !== "robot.state" && ev.type !== "brain.step") log(ev);
+  if (!QUIET_TRIP_LOG.has(ev.type)) log(ev);
   switch (ev.type) {
     case "trip.snapshot": case "trip.created":
       if (ev.trip.trip_id !== tripId) break;
@@ -251,6 +294,7 @@ function onTripEvent(ev) {
     case "recs.ready": if (ev.trip_id === tripId) renderRecs(ev.recs); break;
   }
 }
+const QUIET_TRIP_LOG = new Set(["robot.state", "brain.step", "vla.status", "step.started", "step.completed", "step.verified", "target.grounded"]);
 function connectTrip(query, id) {
   if (tripWs) tripWs.close();
   tripId = id || null; lastSeq = 0; $("tripId").value = id || ""; $("log").innerHTML = ""; route = null; stopStatus = {};
@@ -364,6 +408,7 @@ function onFleetEvent(ev) {
     case "stock.alert": if (ev.store_id === $("stockStore").value) loadAlerts(); break;
     case "approval.requested": approvals.set(ev.request.approval_id, ev.request); renderApprovals(); break;
     case "approval.resolved": approvals.delete(ev.response.approval_id); renderApprovals(); break;
+    default: onLoopEvent(ev);
   }
 }
 async function initFleet() {
@@ -436,6 +481,170 @@ async function loadAlerts() {
 }
 $("stockStore").onchange = loadAlerts;
 
+// ---------------------------------------------------------------------------------------------------- planner -> VLA -> verifier
+const plans = new Map(), robotPlan = new Map(), vlaByPlan = new Map();
+let latestPlanId = null, verdicts = [], momentStep = null, renderQueued = false;
+const ICON = { pending: "○", running: "▶", succeeded: "✓", provisional: "≈", skipped: "–", failed: "✗", cancelled: "■" };
+const TIER = { t0_scripted: "T0 scripted", t1_pretrained: "T1 VLA", t2_finetuned: "T2 VLA" };
+const SCENARIOS = ["drop_on_first_grasp", "wrong_salsa", "slow_vla", "verifier_down", "foggy_basket", "flaky_t1", "isaac_drop", "clean"];
+async function quiet(method, path, body) {  // optional loop endpoints: 404 / 503 = not wired, not an error
+  try {
+    const r = await fetch(path, { method, headers: { "Content-Type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+    return r.ok ? (r.status === 204 ? {} : await r.json()) : null;
+  } catch (e) { return null; }
+}
+function attribution(v) {
+  if (!v) return "";
+  if (v.decided_by === "provider" && v.provider) return v.provider.attribution;
+  return ({ ground_truth: "sim ground truth", state: "robot state", human: "a person" })[v.decided_by] || (v.provider ? v.provider.attribution : v.decided_by);
+}
+const outcomeClass = (o) => o === "pass" ? "ok" : o === "fail" ? "bad" : "warn";
+const stepOf = (pid, sid) => plans.get(pid)?.steps.find(s => s.step_id === sid);
+const stepTitle = (pid, sid) => stepOf(pid, sid)?.title || sid || "";
+function currentPlan() {
+  const rid = $("planRobot").value;
+  const pid = rid ? robotPlan.get(rid) : latestPlanId;
+  return pid ? plans.get(pid) : null;
+}
+function setPlan(p) {
+  plans.set(p.plan_id, p); robotPlan.set(p.robot_id, p.plan_id); latestPlanId = p.plan_id;
+  const sel = $("planRobot");
+  if (![...sel.options].some(o => o.value === p.robot_id)) sel.insertAdjacentHTML("beforeend", `<option value="${esc(p.robot_id)}">${esc(robots.get(p.robot_id)?.name || p.robot_id)}</option>`);
+}
+function upsertStep(pid, step) {
+  const p = plans.get(pid); if (!p) return;
+  const i = p.steps.findIndex(s => s.step_id === step.step_id);
+  if (i >= 0) { Object.assign(p.steps[i], step); return; }
+  const j = step.inserted_by ? p.steps.findIndex(s => s.step_id === step.inserted_by) : -1;  // recovery / drop-off steps go before the step they serve
+  if (j >= 0) p.steps.splice(j, 0, step); else p.steps.push(step);
+}
+function patchStep(pid, sid, patch) { const s = stepOf(pid, sid); if (s) Object.assign(s, patch); }
+function scheduleRender() { if (renderQueued) return; renderQueued = true; requestAnimationFrame(() => { renderQueued = false; renderPlan(); renderVla(); renderVerdicts(); }); }
+function renderPlan() {
+  const p = currentPlan(), box = $("planSteps");
+  if (!p) { box.className = "steps muted"; box.textContent = $("execMode").textContent.includes("direct") ? "exec_mode=direct: goals run on the v0.2 brain (no step plans)" : "no plan yet"; $("planInfo").textContent = ""; return; }
+  const pl = p.planner || {};
+  const done = p.steps.filter(s => ["succeeded", "provisional", "skipped"].includes(s.status)).length;
+  $("planInfo").textContent = `${robots.get(p.robot_id)?.name || p.robot_id}: ${p.title || p.plan_id} · rev ${p.revision} · planner ${pl.origin || "?"}${pl.model ? " " + pl.model : ""}${pl.fallback_reason ? " (fallback: " + pl.fallback_reason + ")" : ""} · ${p.status} · ${done}/${p.steps.length} steps${p._summary ? " · " + p._summary : ""}`;
+  let html = "", group = null;
+  for (const s of p.steps) {
+    const g = s.group_label || s.group_id || "";
+    if (g !== group) { html += `<div class="grp">${esc(g || "plan")}</div>`; group = g; }
+    const v = s._verdict;
+    html += `<div class="step st-${esc(s.status)}" title="${esc(s.step_id)} · ${esc(s.kind)}">${ICON[s.status] || "○"} ${esc(s.title)}`
+      + (s.attempts > 1 ? ` <span class="chip">try ${s.attempts}</span>` : "")
+      + (s._tier ? ` <span class="chip">${esc(TIER[s._tier] || s._tier)}</span>` : "")
+      + (v ? ` <span class="${outcomeClass(v.outcome)}" title="${esc(v.reason)} · ${esc(attribution(v))}">${v.outcome === "pass" ? "✓" : v.outcome === "fail" ? "✗" : "?"} check</span>` : "")
+      + (s._caught ? `<div class="caught">✗ ${esc(s._caught)}</div>` : "")
+      + (s._note ? `<div class="note">${esc(s._note)}</div>` : "") + `</div>`;
+  }
+  box.className = "steps"; box.innerHTML = html;
+  const cur = box.querySelector(".st-running");
+  if (cur) box.scrollTop = Math.max(0, cur.offsetTop - 80);
+}
+function renderVla() {
+  const p = currentPlan(), ev = p ? vlaByPlan.get(p.plan_id) : null;
+  if (!ev) { $("vlaFill").style.width = "0"; $("vlaText").textContent = "VLA idle"; return; }
+  const st = ev.status;
+  $("vlaFill").style.width = `${Math.round((st.terminal || ["succeeded", "failed", "cancelled"].includes(st.phase) ? 1 : (st.progress || 0)) * 100)}%`;
+  $("vlaText").textContent = `${stepTitle(ev.plan_id, ev.step_id)} · ${st.phase}${st.stage ? " · " + st.stage : ""} · ${TIER[st.tier] || st.tier || ""}${st.backend ? " on " + st.backend : ""}${st.chunk_no != null ? " · chunk " + st.chunk_no : ""}${st.error ? " · " + st.error.code : ""}`;
+}
+function verdictRow(item) {
+  const v = item.verdict, f = (v.frames || [])[0];
+  const img = f ? `<a href="${esc(f.url)}" target="_blank"><img src="${esc(f.url)}?w=192" alt="evidence ${esc(f.camera_id)}" loading="lazy"></a>` : `<div class="noimg">state only</div>`;
+  return `<div class="vd">${img}<div><b class="${outcomeClass(v.outcome)}">${esc(v.outcome.toUpperCase())}</b> <span class="muted">${esc(item.phase)}</span> ${esc(item.title)}`
+    + (item.caught ? ` <span class="pill bad">VLA said success</span>` : "")
+    + `<div>${esc(v.reason)}</div><div class="muted">verified by <b>${esc(attribution(v))}</b>${v.degraded ? ` · <span class="warn">degraded</span>` : ""} · ${Math.round((v.confidence || 0) * 100)}%${f ? " · " + esc(f.camera_id) : ""}</div></div></div>`;
+}
+function renderVerdicts() {
+  const box = $("verdicts");
+  if (!verdicts.length) { box.className = "verdicts muted"; box.textContent = "no checks yet"; return; }
+  box.className = "verdicts"; box.innerHTML = verdicts.map(verdictRow).join("");
+  if (momentStep) {
+    const m = $("moment"), ok = momentStep.retry === "succeeded";
+    m.hidden = false; m.className = "moment" + (ok ? " done" : "");
+    m.innerHTML = `<b class="bad">Verifier caught it</b> · ${esc(robots.get(momentStep.robot_id)?.name || momentStep.robot_id || "")} · ${esc(momentStep.title)} (attempt ${momentStep.attempt})`
+      + (momentStep.item ? verdictRow(momentStep.item) : "") + `<div>${esc(momentStep.reason)}</div>`
+      + (ok ? `<div class="ok"><b>Retry succeeded</b> (attempt ${momentStep.retryAttempts})</div>` : `<div class="muted">retrying…</div>`);
+  }
+}
+function addVerdict(item) { verdicts.unshift(item); if (verdicts.length > 14) verdicts.length = 14; }
+function onLoopEvent(ev) {
+  switch (ev.type) {
+    case "plan.created": case "plan.revised": setPlan(JSON.parse(JSON.stringify(ev.plan))); break;
+    case "step.started":
+      upsertStep(ev.plan_id, Object.assign({}, ev.step, { status: "running", attempts: ev.attempt, _tier: ev.tier || undefined })); break;
+    case "vla.status": vlaByPlan.set(ev.plan_id, ev); if (ev.status.tier) patchStep(ev.plan_id, ev.step_id, { _tier: ev.status.tier }); break;
+    case "step.verified": {
+      patchStep(ev.plan_id, ev.step_id, { _verdict: ev.verdict });
+      if (ev.phase === "pre" && ev.verdict.outcome === "pass") break;  // routine pre-checks: plan row only
+      const item = { verdict: ev.verdict, phase: ev.phase, title: stepTitle(ev.plan_id, ev.step_id), caught: ev.caught_vla_false_success, plan_id: ev.plan_id, step_id: ev.step_id };
+      addVerdict(item);
+      if (ev.caught_vla_false_success) momentStep = { plan_id: ev.plan_id, step_id: ev.step_id, robot_id: ev.robot_id, title: item.title, attempt: ev.attempt, reason: "", item };
+      break;
+    }
+    case "step.failed":
+      patchStep(ev.plan_id, ev.step_id, { status: "failed", _caught: (ev.failure.caught_by_verifier ? "caught: " : "") + ev.decision.reason });
+      if (ev.failure.caught_by_verifier && momentStep && momentStep.step_id === ev.step_id) momentStep.reason = ev.decision.reason;
+      break;
+    case "step.completed": {
+      const note = ev.note || (ev.effects || []).map(e => e.kind).join(", ");
+      patchStep(ev.plan_id, ev.step_id, { status: ev.status, attempts: ev.attempts, _note: note });
+      if (momentStep && momentStep.step_id === ev.step_id && momentStep.plan_id === ev.plan_id) { momentStep.retry = ev.status; momentStep.retryAttempts = ev.attempts; }
+      break;
+    }
+    case "plan.completed": { const p = plans.get(ev.plan_id); if (p) { p.status = ev.status; p._summary = ev.summary; } break; }
+    case "vla.tier_changed": break;
+    case "demo.fault": loadFaults(); break;
+    default: return;
+  }
+  scheduleRender();
+}
+async function loadVerifier() {
+  const caps = await quiet("GET", "/api/verifier");
+  const providers = caps ? await quiet("GET", "/api/verifier/providers") : null;
+  if (!caps) { $("verifierBadge").textContent = "not wired"; $("verifierBadge").className = "pill muted"; return; }
+  const pr = (providers || [])[0];
+  $("verifierBadge").textContent = `${caps.provider}${caps.model ? " " + caps.model : ""} · ${caps.mode}${caps.healthy ? "" : " · unhealthy"}`
+    + (pr && pr.calls ? ` · ${pr.calls} calls` : "") + (pr && pr.agreement_with_ground_truth != null ? ` · ${Math.round(pr.agreement_with_ground_truth * 100)}% agree with sim` : "");
+  $("verifierBadge").className = "pill " + (caps.healthy ? "ok" : "warn");
+  $("verifierMode").value = caps.mode;
+}
+async function loadFaults() {
+  const st = await quiet("GET", "/api/dev/faults");
+  if (!st) { $("presenter").hidden = true; return; }
+  $("presenter").hidden = false;
+  $("faultInfo").textContent = `scenario: ${st.scenario || "none"} · ${st.rules.length} rule(s) · fired ${st.firings.length}` + (st.firings.length ? ` (last: ${st.firings[st.firings.length - 1].effect} on ${st.firings[st.firings.length - 1].context.step_kind || "?"})` : "");
+}
+async function initLoop() {
+  const health = await quiet("GET", "/health");
+  const mode = health?.details?.exec_mode || "direct";
+  $("execMode").textContent = `exec ${mode}`; $("execMode").className = "pill " + (mode === "direct" ? "muted" : "ok");
+  const sel = $("faultScenario");
+  for (const n of SCENARIOS) sel.insertAdjacentHTML("beforeend", `<option value="${n}">${n}</option>`);
+  await loadVerifier(); await loadFaults();
+  for (const r of robots.values()) {  // plans already running when the page opened
+    if (!r.current_goal_id) continue;
+    const p = await quiet("GET", `/api/goals/${encodeURIComponent(r.current_goal_id)}/plan`);
+    if (!p) continue;
+    setPlan(p);
+    const run = await quiet("GET", `/api/plans/${encodeURIComponent(p.plan_id)}/run`);
+    for (const att of (run?.attempts || []).slice(-10)) if (att.post) addVerdict({ verdict: att.post, phase: "post", title: stepTitle(p.plan_id, att.step_id), caught: !!(att.failure && att.failure.caught_by_verifier) });
+  }
+  scheduleRender();
+}
+$("planRobot").onchange = scheduleRender;
+$("planCancel").onclick = () => { const p = currentPlan(); if (p) api("POST", `/api/plans/${p.plan_id}/cancel`, { reason: "cancelled from /debug" }); };
+$("verifierMode").onchange = async () => { await quiet("PUT", "/api/verifier/mode", { mode: $("verifierMode").value }); loadVerifier(); };
+$("checkBasket").onclick = async () => {
+  const p = currentPlan(), rid = selectedRobot || p?.robot_id || [...robots.keys()][0];
+  if (!rid) return;
+  const v = await api("POST", "/api/verify", { robot_id: rid, preset: "basket" });
+  if (v) { addVerdict({ verdict: v, phase: "judge", title: `check ${robots.get(rid)?.name || rid}'s basket` }); scheduleRender(); }
+};
+$("faultLoad").onclick = async () => { await quiet("POST", "/api/dev/faults/scenario", { name: $("faultScenario").value }); loadFaults(); };
+$("faultClear").onclick = async () => { await quiet("DELETE", "/api/dev/faults"); loadFaults(); };
+
 // ---------------------------------------------------------------------------------------------------- boot
 async function boot() {
   const stores = ((await api("GET", "/api/stores")) || []).filter(s => s.store_id !== "online");
@@ -445,6 +654,7 @@ async function boot() {
   }
   if (stores.length) { $("camStore").value = stores[0].store_id; $("stockStore").value = stores[0].store_id; loadPlan(stores[0].store_id); }
   await initFleet();
+  await initLoop();
   await initCams();
   loadAlerts();
   const q = new URLSearchParams(location.search);

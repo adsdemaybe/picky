@@ -134,6 +134,25 @@ Tests (base deps, no Isaac / network): `arms/sim/supermarket/tests/test_vla_poli
 projection, tool call → Cartesian action with clamps, the live guards, detect boxes → held rule, action → grasp TCPs
 → IK on the rover's real SO-101 chain from `tests/fixtures/picky_so101_rover.kin.json`).
 
+### Live stream to the web app (`demo/frame_stream.py`)
+
+A stdlib-only relay (system `python3`, no GPU) serves the newest run's frames as they are written, plus the finished
+MP4s, to the web app's Live page:
+
+```bash
+# on vhagar (tmux session picky-stream); --run RUN pins a run instead of following the newest one
+python3 frame_stream.py --runs-root /data/advaiv2/picky-so101/runs --videos /data/advaiv2/picky-so101 --port 8120
+# on the Mac
+ssh -f -N -o ExitOnForwardFailure=yes -L 8120:localhost:8120 vhagar
+curl localhost:8120/cams        # {"run", "cameras": [{"name", "frames", "latest"}]}; open localhost:8120/ for all cams
+```
+
+`/stream/<cam>.mjpg` (MJPEG, ~12 fps, `?fps=N`), `/frame/<cam>.jpg`, `/videos`, `/video/<name>.mp4` (Range support),
+CORS `*`. Web app: Live → **Direct streams** → Head camera `http://localhost:8120/stream/director.mjpg`, Wrist
+`.../wrist.mjpg`, Basket `.../side.mjpg`, Overview `.../birdseye.mjpg` (or an MP4 URL from `/videos`) → **Use these
+streams**. Half-written frames are skipped (a frame is served once it is 0.2 s old and a whole JPEG); when the render
+stops, the last frame is resent once a second.
+
 The earlier rm2_car/AIRBOT autopilot (`--demo-robot rm2`, `demo/autopilot.py`, `demo/edit_video.py`):
 
 ```bash

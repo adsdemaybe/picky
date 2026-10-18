@@ -50,6 +50,7 @@ data/categories.yaml (``CategoriesFile``)::
       - {category_id: salsa, name: Salsa, parent_id: international}
 """
 
+import math
 import re
 from typing import Literal
 
@@ -192,6 +193,133 @@ class Planogram(Model):
 
     def aisle(self, aisle_id: AisleId) -> Aisle | None:
         return next((a for a in self.aisles if a.aisle_id == aisle_id), None)
+
+
+# --------------------------------------------------------------------------------------------------------------------
+# Checkout counter spots (0.2.4): where the arm puts each unit it unloads from the basket
+# --------------------------------------------------------------------------------------------------------------------
+COUNTER_SPOTS_PER_BAY = 3
+"""Spots the arm reaches from one counter approach pose (left, center, right as seen from the robot)."""
+COUNTER_SPOT_PITCH_M = 0.12
+"""Lateral distance between two spots of one bay (the 0.47 m reach still covers the outer ones)."""
+COUNTER_BAY_PITCH_M = 0.45
+COUNTER_SPOT_DEPTH_M = 0.06
+"""Spot center this far inside the counter's face edge (units stand on the counter, not on its edge)."""
+COUNTER_APPROACH_M = 0.37
+"""Robot base this far off the counter face (the shelf approach distance: >= ROBOT_RADIUS_M, reach <= 0.47 m)."""
+COUNTER_EDGE_MARGIN_M = 0.2
+
+
+class CounterSpot(Model):
+    """One place on the checkout counter for an unloaded unit (0.2.4), derived from the planogram's checkout fixture by
+    ``counter_spots`` (generated, never hand-written: CLAUDE.md section 4 rule 5)."""
+
+    index: int = Field(ge=0, description="0 = first spot used (bay 0 at the checkout pose, left to right).")
+    bay: int = Field(0, ge=0, description="Approach pose group: the robot shifts along the counter between bays.")
+    fixture_id: FixtureId | None = Field(None, description="The checkout fixture (None = virtual counter).")
+    position: Point3 = Field(description="Where the unit's BASE center lands (store frame; z = counter top).")
+    approach_pose: Pose2D = Field(description="Robot base pose facing the counter for this spot (slot_reachable).")
+    yaw: float = Field(0.0, description="Unit yaw on the counter (label toward the shopper side).")
+    label: str = Field("", description="'Counter spot 3'.")
+
+
+def _checkout_fixture(plan: "Planogram") -> Fixture | None:
+    best: tuple[float, Fixture] | None = None
+    for f in plan.fixtures:
+        if f.kind != "checkout":
+            continue
+        cx, cy = f.rect.x + f.rect.w / 2, f.rect.y + f.rect.h / 2
+        d = math.hypot(cx - plan.checkout.x, cy - plan.checkout.y)
+        if best is None or d < best[0]:
+            best = (d, f)
+    return best[1] if best else None
+
+
+def counter_spots(plan: "Planogram", count: int | None = None) -> list[CounterSpot]:
+    """Deterministic counter spots for unloading at checkout: bays of ``COUNTER_SPOTS_PER_BAY`` along the checkout
+    fixture's pick face, bay 0 straight ahead of ``plan.checkout``, then alternating right / left of it while they fit
+    (``COUNTER_EDGE_MARGIN_M`` from the ends); spots of a bay left -> right as seen by the robot. Without a checkout
+    fixture a virtual 2 m counter 0.43 m ahead of the checkout pose is used (height 0.9 m). ``count`` caps the list
+    (None = every spot)."""
+    f = _checkout_fixture(plan)
+    co = plan.checkout
+    if f is not None:
+        face = f.yaw  # the pick face points toward the shopper / robot side
+        fx, fy = math.cos(face), math.sin(face)
+        r = f.rect
+        if abs(fx) >= abs(fy):  # face along +-x: the edge is a vertical line, the counter runs along y
+            edge = r.x + r.w if fx > 0 else r.x
+            along = (0.0, 1.0)
+            lo, hi = r.y, r.y + r.h
+            origin_along = min(max(co.y, lo), hi)
+            edge_pt = (edge, origin_along)
+        else:
+            edge = r.y + r.h if fy > 0 else r.y
+            along = (1.0, 0.0)
+            lo, hi = r.x, r.x + r.w
+            origin_along = min(max(co.x, lo), hi)
+            edge_pt = (origin_along, edge)
+        top = f.height_m  # the counter is a solid block (scene_spec): units stand on its top
+        fid: str | None = f.fixture_id
+    else:  # virtual counter in front of the checkout pose
+        face = co.theta + math.pi
+        fx, fy = math.cos(face), math.sin(face)
+        along = (-fy, fx)
+        edge_pt = (co.x - fx * COUNTER_APPROACH_M, co.y - fy * COUNTER_APPROACH_M)
+        lo, hi = -1.0, 1.0
+        origin_along = 0.0
+        top, fid = 0.9, None
+    robot_theta = math.atan2(-fy, -fx)
+    left = (math.cos(robot_theta + math.pi / 2), math.sin(robot_theta + math.pi / 2))
+    # bay centers along the counter (in the 'along' coordinate), bay 0 at the checkout pose
+    half = COUNTER_SPOT_PITCH_M * (COUNTER_SPOTS_PER_BAY - 1) / 2
+    lo_ok, hi_ok = lo + COUNTER_EDGE_MARGIN_M + half, hi - COUNTER_EDGE_MARGIN_M - half
+    if f is None:
+        lo_ok, hi_ok = -0.9 + half, 0.9 - half
+    start = min(max(origin_along, lo_ok), hi_ok) if lo_ok <= hi_ok else (lo + hi) / 2
+    centers = [start]
+    k = 1
+    while k < 12:
+        added = False
+        for sign in (1, -1):
+            c = start + sign * k * COUNTER_BAY_PITCH_M
+            if lo_ok - 1e-9 <= c <= hi_ok + 1e-9:
+                centers.append(c)
+                added = True
+        if not added:
+            break
+        k += 1
+    out: list[CounterSpot] = []
+    for bay, c in enumerate(centers):
+        base = (
+            (edge_pt[0] + along[0] * (c - origin_along), edge_pt[1] + along[1] * (c - origin_along))
+            if f is not None
+            else (edge_pt[0] + along[0] * c, edge_pt[1] + along[1] * c)
+        )
+        approach = Pose2D(
+            x=round(base[0] + fx * COUNTER_APPROACH_M, 4),
+            y=round(base[1] + fy * COUNTER_APPROACH_M, 4),
+            theta=robot_theta,
+        )
+        offs = [half - i * COUNTER_SPOT_PITCH_M for i in range(COUNTER_SPOTS_PER_BAY)]  # +left first = left -> right
+        for off in offs:
+            px = base[0] - fx * COUNTER_SPOT_DEPTH_M + left[0] * off
+            py = base[1] - fy * COUNTER_SPOT_DEPTH_M + left[1] * off
+            n = len(out)
+            out.append(
+                CounterSpot(
+                    index=n,
+                    bay=bay,
+                    fixture_id=fid,
+                    position=Point3(x=round(px, 4), y=round(py, 4), z=round(top, 4)),
+                    approach_pose=approach,
+                    yaw=robot_theta + math.pi / 2,
+                    label=f"Counter spot {n + 1}",
+                )
+            )
+            if count is not None and len(out) >= count:
+                return out
+    return out
 
 
 class ProductsFile(Model):
