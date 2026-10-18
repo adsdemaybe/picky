@@ -30,7 +30,8 @@ export async function POST(req: Request) {
   };
 
   const hasCreds = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
-  if (!hasCreds) return Response.json({ ...localAnswer(last, purchases), source: "offline" });
+  const hasGemini = !!process.env.GEMINI_API_KEY;
+  if (!hasCreds && !hasGemini) return Response.json({ ...localAnswer(last, purchases), source: "offline" });
 
   const tools = [
     betaTool({
@@ -81,6 +82,16 @@ export async function POST(req: Request) {
     }),
   ];
 
+  if (!hasCreds) {
+    try {
+      const text = await geminiAnswer(body.messages.slice(-12), tools as unknown as ToolLike[]);
+      return Response.json({ text: text || "Done.", cards, source: "gemini" });
+    } catch (err) {
+      console.error("[chat] Gemini failed; answering offline", err);
+      return Response.json({ ...localAnswer(last, purchases), source: "offline" });
+    }
+  }
+
   try {
     const client = new Anthropic();
     const final = await client.beta.messages.toolRunner({
@@ -115,4 +126,76 @@ export async function POST(req: Request) {
     }
     return Response.json({ ...localAnswer(last, purchases), source: "offline" });
   }
+}
+
+// ---- Gemini (GEMINI_API_KEY): same tools, function calling over the REST API --------------------------------------
+type ToolLike = {
+  name: string;
+  description?: string;
+  input_schema?: Record<string, unknown>;
+  inputSchema?: Record<string, unknown>;
+  run: (args: Record<string, unknown>) => Promise<unknown> | unknown;
+};
+type GeminiPart = { text?: string; functionCall?: { name: string; args?: Record<string, unknown> }; [k: string]: unknown };
+
+/** Gemini function declarations take an OpenAPI subset: drop JSON-schema keys it rejects. */
+function geminiSchema(s: unknown): unknown {
+  if (Array.isArray(s)) return s.map(geminiSchema);
+  if (!s || typeof s !== "object") return s;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(s as Record<string, unknown>)) {
+    if (k === "additionalProperties" || k === "$schema") continue;
+    out[k] = geminiSchema(v);
+  }
+  return out;
+}
+
+async function geminiAnswer(history: ChatMsg[], tools: ToolLike[]): Promise<string> {
+  const model = process.env.PICKY_GEMINI_MODEL || "gemini-3.8-flash";
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
+  const decls = tools.map((t) => {
+    const params = geminiSchema(t.input_schema ?? t.inputSchema ?? { type: "object", properties: {} }) as Record<string, unknown>;
+    const empty = !params.properties || Object.keys(params.properties as object).length === 0;
+    return empty ? { name: t.name, description: t.description ?? "" } : { name: t.name, description: t.description ?? "", parameters: params };
+  });
+  const contents: { role: "user" | "model"; parts: GeminiPart[] }[] = history.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+  for (let i = 0; i < 6; i++) {
+    const r = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY! },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: SYSTEM }] },
+        contents,
+        tools: [{ functionDeclarations: decls }],
+        generationConfig: { maxOutputTokens: 2048 },
+      }),
+    });
+    if (!r.ok) throw new Error(`gemini ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const j = (await r.json()) as { candidates?: { content?: { parts?: GeminiPart[] } }[] };
+    const parts = j.candidates?.[0]?.content?.parts ?? [];
+    const calls = parts.filter((p) => p.functionCall);
+    if (!calls.length) {
+      return parts
+        .map((p) => p.text ?? "")
+        .join("")
+        .trim();
+    }
+    contents.push({ role: "model", parts }); // echo as returned (keeps thought signatures)
+    const results: GeminiPart[] = [];
+    for (const c of calls) {
+      const tool = tools.find((t) => t.name === c.functionCall!.name);
+      let result: unknown;
+      try {
+        result = tool ? await tool.run(c.functionCall!.args ?? {}) : `unknown tool ${c.functionCall!.name}`;
+      } catch (e) {
+        result = `error: ${String(e)}`;
+      }
+      results.push({ functionResponse: { name: c.functionCall!.name, response: { result } } });
+    }
+    contents.push({ role: "user", parts: results });
+  }
+  return "";
 }
