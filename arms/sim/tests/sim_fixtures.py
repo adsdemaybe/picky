@@ -1,9 +1,11 @@
-"""Synthetic store for sim tests (independent of data/, which is written by the data agent)."""
+"""Synthetic stores, robots and cameras for sim tests (independent of data/, which other builders edit)."""
 
 import math
 
+from contracts.cameras import CameraMount
 from contracts.catalog import Product, SimAsset
-from contracts.planogram import Planogram
+from contracts.common import Pose2D
+from contracts.planogram import Planogram, RobotSpec, StoreCameraSpec
 
 
 def products() -> list[Product]:
@@ -71,7 +73,7 @@ def planogram() -> Planogram:
                     "sku": "salsa_hot",
                     "level": 1,
                     "item_position": {"x": 2.6, "y": 5.0, "z": 0.55},
-                    "approach_pose": {"x": 3.3, "y": 5.0, "theta": math.pi},
+                    "approach_pose": {"x": 2.98, "y": 5.0, "theta": math.pi},
                     "facings": 2,
                     "qty": 6,
                     "lots": [{"lot_id": "L1", "qty": 6, "expiry": "2026-10-25"}],
@@ -82,7 +84,7 @@ def planogram() -> Planogram:
                     "sku": "tortillas",
                     "level": 0,
                     "item_position": {"x": 6.0, "y": 6.0, "z": 0.3},
-                    "approach_pose": {"x": 5.2, "y": 6.0, "theta": 0.0},
+                    "approach_pose": {"x": 5.62, "y": 6.0, "theta": 0.0},
                     "qty": 3,
                 },
                 {
@@ -91,7 +93,7 @@ def planogram() -> Planogram:
                     "sku": "beans",
                     "level": 1,
                     "item_position": {"x": 7.0, "y": 6.0, "z": 0.9},
-                    "approach_pose": {"x": 7.8, "y": 6.0, "theta": math.pi},
+                    "approach_pose": {"x": 7.38, "y": 6.0, "theta": math.pi},
                     "qty": 0,
                 },
                 {
@@ -100,7 +102,7 @@ def planogram() -> Planogram:
                     "sku": "avocado",
                     "level": 0,
                     "item_position": {"x": 11.0, "y": 15.0, "z": 0.8},
-                    "approach_pose": {"x": 11.0, "y": 14.2, "theta": math.pi / 2},
+                    "approach_pose": {"x": 11.0, "y": 14.62, "theta": math.pi / 2},
                     "qty": 6,
                     "lots": [
                         {"lot_id": "AV_OLD", "qty": 3, "freshness": 0.5},
@@ -113,9 +115,79 @@ def planogram() -> Planogram:
                     "sku": "does_not_exist",
                     "level": 0,
                     "item_position": {"x": 2.6, "y": 8.0, "z": 0.1},
-                    "approach_pose": {"x": 3.3, "y": 8.0, "theta": math.pi},
+                    "approach_pose": {"x": 2.98, "y": 8.0, "theta": math.pi},
                     "qty": 4,
                 },
             ],
         }
     )
+
+
+def planogram2() -> Planogram:
+    """A second, smaller store (slot ids unique across stores)."""
+    return Planogram.model_validate(
+        {
+            "store_id": "store_two",
+            "name": "Second Store",
+            "bounds": {"x": 0, "y": 0, "w": 8, "h": 10},
+            "entrance": {"x": 1, "y": 1, "theta": math.pi / 2},
+            "checkout": {"x": 6, "y": 1.5},
+            "fixtures": [
+                {
+                    "fixture_id": "f1",
+                    "kind": "shelf",
+                    "rect": {"x": 2, "y": 4, "w": 0.6, "h": 4},
+                    "yaw": 0.0,
+                    "levels": 3,
+                    "level_z_m": [0.1, 0.6, 1.1],
+                }
+            ],
+            "slots": [
+                {
+                    "slot_id": "TWO-salsa",
+                    "fixture_id": "f1",
+                    "sku": "salsa_hot",
+                    "level": 1,
+                    "item_position": {"x": 2.6, "y": 5.0, "z": 0.6},
+                    "approach_pose": {"x": 2.98, "y": 5.0, "theta": math.pi},
+                    "qty": 4,
+                }
+            ],
+        }
+    )
+
+
+def robots() -> list[RobotSpec]:
+    return [
+        RobotSpec(robot_id="rover-test-1", name="Pico", store_id="store_test", dock=Pose2D(x=1.0, y=2.0)),
+        RobotSpec(robot_id="rover-test-2", name="Rhea", store_id="store_test", dock=Pose2D(x=1.0, y=3.0)),
+        RobotSpec(robot_id="rover-two-1", name="Hazel", store_id="store_two", dock=Pose2D(x=1.0, y=2.0)),
+    ]
+
+
+def store_cameras() -> list[StoreCameraSpec]:
+    return [
+        StoreCameraSpec(
+            camera_id="store_test.ceiling-1",
+            store_id="store_test",
+            name="Test ceiling 1",
+            mount=CameraMount(frame="world", x=0.5, y=0.5, z=3.2, yaw=0.9, pitch=-0.5, hfov_deg=100),
+        ),
+        StoreCameraSpec(
+            camera_id="store_two.ceiling-1",
+            store_id="store_two",
+            name="Two ceiling 1",
+            mount=CameraMount(frame="world", x=0.5, y=0.5, z=3.0, yaw=0.9, pitch=-0.5, hfov_deg=100),
+        ),
+    ]
+
+
+def loader(store_id: str):
+    plans = {"store_test": planogram(), "store_two": planogram2()}
+    if store_id not in plans:
+        raise KeyError(store_id)
+    return plans[store_id], products()
+
+
+def robots_loader():
+    return robots(), store_cameras()

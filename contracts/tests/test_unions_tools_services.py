@@ -69,6 +69,18 @@ EXPECTED_EVENT_TYPES = {
     "feedback.received",
     "profile.updated",
     "frame",
+    "camera.frame",
+    "request.received",
+    "request.planned",
+    "goal.created",
+    "goal.assigned",
+    "goal.updated",
+    "goal.completed",
+    "goal.failed",
+    "fleet.robot_updated",
+    "brain.step",
+    "stock.updated",
+    "stock.alert",
     "agent.message",
     "error",
 }
@@ -184,8 +196,11 @@ class DummyBroker:
     async def resolve(self, response):
         return self._pending.pop(response.approval_id, None) is not None
 
-    def pending(self, trip_id=None):
+    def pending(self, trip_id=None, *, goal_id=None, robot_id=None, store_id=None, user_id=None):
         return list(self._pending.values())
+
+    async def cancel(self, approval_id, reason=""):
+        return self._pending.pop(approval_id, None) is not None
 
 
 class DummyPublisher:
@@ -198,8 +213,13 @@ class DummyPublisher:
 
 
 class DummySimLink:
-    def is_connected(self) -> bool:
+    def is_connected(self, robot_id=None) -> bool:
         return True
+
+    def status(self):
+        from contracts.sim import SimStatus
+
+        return SimStatus(connected=True)
 
     async def send(self, cmd, timeout_s=None):
         return CommandResult(cmd_id=cmd.cmd_id, ok=True)
@@ -235,7 +255,7 @@ async def test_protocol_conformance():
 def test_registry_constants():
     assert set(SERVICE_ARMS) <= set(ARM_NAMES)
     assert set(SERVICE_ARMS) <= set(Services.field_names())
-    assert len(ARM_NAMES) == 11
+    assert len(ARM_NAMES) == 12 and "fleet" in ARM_NAMES
     for proto in SERVICE_PROTOCOLS.values():
         assert getattr(proto, "_is_runtime_protocol", False)
 
@@ -244,23 +264,32 @@ def test_robot_protocol_accepts_async_generators():
     from contracts.services import RobotService
 
     class R:
-        async def state(self): ...
-        async def reset(self, store_id): ...
-        async def navigate(self, waypoints): ...
-        async def stop(self): ...
-        async def scan(self, slot_id): ...
-        async def capture(self, camera="head"): ...
-        async def list_instances(self, slot_id=None): ...
-        async def pick(self, slot_id, sku, instance_id=None): ...
-        async def place_in_basket(self): ...
+        async def list_robots(self): ...
+        async def state(self, robot_id): ...
+        async def reset(self, robot_id, store_id=None): ...
+        async def navigate(self, robot_id, waypoints): ...
+        async def stop(self, robot_id): ...
+        async def scan(self, robot_id, slot_id): ...
+        async def capture(self, robot_id, camera="front"): ...
+        async def capture_camera(self, camera_id): ...
+        async def list_instances(self, robot_id, slot_id=None): ...
+        async def pick(self, robot_id, slot_id, sku, instance_id=None): ...
+        async def place_in_basket(self, robot_id): ...
+        async def unload_basket(self, robot_id): ...
+        async def sync_stock(self, store_id, slot_ids=None): ...
 
-        async def frames(self):
+        async def frames(self, camera_id=None, robot_id=None):
             yield _frame(False)
 
-        async def states(self):
-            yield RobotState(pose=Pose2D(x=0, y=0))
+        async def states(self, robot_id=None):
+            yield RobotState(robot_id="rover-ave-1", pose=Pose2D(x=0, y=0))
 
     assert isinstance(R(), RobotService)
+
+    class OldSingleRobot(R):  # v0.1 shape (no list_robots / capture_camera) no longer conforms
+        list_robots = None  # type: ignore[assignment]
+
+    assert not isinstance(OldSingleRobot(), RobotService)
 
 
 def test_client_messages_parse_by_type():
