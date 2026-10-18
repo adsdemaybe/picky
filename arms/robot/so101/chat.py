@@ -63,8 +63,10 @@ def main() -> None:
     if not dry:
         say(f"connecting to the arm on {cfg.port} ...", "dim")
         robot = connect_robot(cfg)
-        rest, rest_grip = read_pose(robot)
-        say("connected; holding the current pose (this is /home)", "g")
+        _, rest_grip = read_pose(robot)
+        rest = dict(cfg.home_deg)  # raised pose, wrist camera overlooking the table
+        move(robot, rest, rest_grip, seconds=3.0)
+        say("connected; moved to the raised home pose (/home returns here)", "g")
     say(HELP, "dim")
 
     try:

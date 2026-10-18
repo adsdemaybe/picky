@@ -179,6 +179,14 @@ def _snap(cfg: RigConfig | None, name: str, which: tuple[str, ...], log) -> None
         log(f"  (no frame: {e})")
 
 
+def go_home(robot, home: dict[str, float], gripper: float) -> None:
+    """Move to the raised home pose (wrist camera overlooking the table) and settle there."""
+    pose, _ = read_pose(robot)
+    jump = max(abs(home[j] - pose[j]) for j in ARM_JOINTS)
+    move(robot, home, gripper, seconds=max(2.0, jump / 20.0), steps=60)
+    settle(robot, home, gripper)
+
+
 def describe(p: ScenePlan) -> str:
     if p.error:
         return f"can't do that: {p.error}"
@@ -205,7 +213,8 @@ def main() -> None:
     robot = connect_robot(cfg)
     try:
         set_limits_from_calibration(kin, robot)
-        rest, rest_grip = read_pose(robot)
+        rest = dict(cfg.home_deg)
+        go_home(robot, rest, GRIP_OPEN)
         p = plan(cfg, kin, cam, args.command, rest, args.height)
         print(describe(p))
         print(f"annotated camera frame: {p.frame_path}")
@@ -214,7 +223,7 @@ def main() -> None:
         execute(robot, kin, p, step=args.step, cfg=cfg)
         print("done")
     finally:
-        move(robot, rest, rest_grip, seconds=3.0)
+        go_home(robot, dict(cfg.home_deg), GRIP_OPEN)
         robot.disconnect()
 
 

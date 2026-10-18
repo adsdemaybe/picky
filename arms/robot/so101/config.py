@@ -43,6 +43,11 @@ def _parse_offsets(text: str) -> dict[str, float]:
     return out
 
 
+def _parse_home(text: str) -> dict[str, float]:
+    names = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll")
+    return dict(zip(names, (float(v) for v in text.split(",")), strict=True))
+
+
 def _default_port() -> str:
     """First USB serial device that looks like the SO-101 controller (macOS cu.usbmodem*, Linux ttyACM*)."""
     import glob
@@ -83,15 +88,8 @@ class RigConfig:
     # Per-rig fix-ups, e.g. SO101_JOINT_OFFSETS="wrist_flex=92" when a joint was calibrated off-centre.
     joint_offset_deg: dict[str, float] = field(default_factory=lambda: _parse_offsets(_env("JOINT_OFFSETS", "")))
 
-    # Safe pose (LeRobot degrees) the arm returns to between picks.
-    home_deg: dict[str, float] = field(
-        default_factory=lambda: {
-            "shoulder_pan": 0.0,
-            "shoulder_lift": -90.0,
-            "elbow_flex": 90.0,
-            "wrist_flex": 60.0,
-            "wrist_roll": 0.0,
-        }
-    )
+    # Home / reset pose (LeRobot degrees): arm raised, gripper looking ~60 deg down at the workspace so the wrist
+    # camera sees the whole table. Override with SO101_HOME="pan,lift,elbow,wrist,roll".
+    home_deg: dict[str, float] = field(default_factory=lambda: _parse_home(_env("HOME", "0,-15,-10,85,130")))
 
     perceptron_model: str = os.environ.get("PERCEPTRON_MODEL", "perceptron-mk1.5")

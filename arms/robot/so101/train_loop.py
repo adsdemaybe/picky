@@ -30,8 +30,8 @@ from .calibrate_camera import set_limits_from_calibration
 from .camera import grab_frame
 from .config import RigConfig
 from .kinematics import SO101Kinematics
-from .pick_place import connect_robot, move, read_pose
-from .pick_routine import describe, execute, plan
+from .pick_place import connect_robot, read_pose
+from .pick_routine import GRIP_OPEN, describe, execute, go_home, plan
 from .scene import CameraModel
 
 DATA_DIR = Path.home() / "picky_runs"
@@ -111,7 +111,9 @@ def main() -> None:
     threading.Thread(target=read_keys, daemon=True).start()
     robot = connect_robot(cfg)
     set_limits_from_calibration(kin, robot)
-    rest, rest_grip = read_pose(robot)
+    _, rest_grip = read_pose(robot)
+    rest = dict(cfg.home_deg)  # raised pose: the wrist camera sees the whole workspace
+    go_home(robot, rest, rest_grip)
     print(f"steering policy: {policy.episodes} episodes, {policy.successes} successes | {policy.summary()}")
     try:
         while True:
@@ -148,7 +150,7 @@ def main() -> None:
                         elif kk == "q":
                             raise KeyboardInterrupt
             finally:
-                move(robot, rest, rest_grip, seconds=3.0)  # reset pose
+                go_home(robot, rest, GRIP_OPEN)  # reset pose
             try:
                 cv2.imwrite(str(ep / "after.jpg"), grab_frame(cfg))
             except RuntimeError:
@@ -187,7 +189,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nstopping")
     finally:
-        move(robot, rest, rest_grip, seconds=3.0)
+        go_home(robot, rest, GRIP_OPEN)
         robot.disconnect()
         print("arm released")
 
