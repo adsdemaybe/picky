@@ -135,7 +135,7 @@ export default function StaffPage() {
                 </div>
               </div>
             ))}
-            {(dash.data?.near_expiry ?? []).slice(0, 5).map((n, i) => (
+            {(dash.data?.near_expiry ?? []).filter((n, i, all) => all.findIndex((x) => x.sku === n.sku) === i).slice(0, 5).map((n, i) => (
               <div key={`ne-${n.sku}-${i}`} className="flex items-center justify-between gap-3 p-4">
                 <div className="font-medium">{productName(stock.data, n.sku)}</div>
                 <Badge variant="secondary">Near expiry</Badge>

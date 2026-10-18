@@ -15,6 +15,9 @@ import { openEventSocket } from "@/lib/gateway/eventSocket";
 import type { GatewayEvent } from "@/lib/gateway/events";
 import { cn } from "@/lib/utils";
 
+/** No Stop button for a robot that is not moving. */
+const RESTING = new Set<string>(["idle", "charging", "disconnected"]);
+
 type FeedRow = { seq: number; type: string; ts: string; text: string };
 
 export default function FleetPage() {
@@ -93,7 +96,7 @@ export default function FleetPage() {
                   Basket {r.basket_skus.length}/{r.basket_capacity}
                   {r.current_goal_id ? ` · ${r.current_goal_id}` : ""}
                 </span>
-                {r.status !== "idle" && (
+                {!RESTING.has(r.status) && (
                   <Button
                     size="sm"
                     variant="outline"
