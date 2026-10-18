@@ -3702,8 +3702,8 @@ products:
 - sku: GN-CHOCOLATE-MILK
   name: Chocolate Milk
   brand: Meadow Moo
-  category: beverages
-  subcategory: drinks
+  category: dairy
+  subcategory: milk
   description: Meadow Moo chocolate milk, 10 fl oz.
   tags: [kid_friendly, vegetarian, genie_store]
   dietary: [vegetarian]
@@ -3713,7 +3713,7 @@ products:
   size: 10 fl oz
   barcode: '2000009000207'
   perishable: true
-  shelf_life_days: 120
+  shelf_life_days: 21
   asset:
     shape: cylinder
     dims_m: [0.055, 0.055, 0.13]
@@ -3780,8 +3780,8 @@ products:
 - sku: GN-PROBIOTIC-MILK
   name: Probiotic Milk Drink
   brand: Kiddo Cultures
-  category: beverages
-  subcategory: drinks
+  category: dairy
+  subcategory: cultured
   description: A white plastic bottle with a green and red label featuring 'AD' text.
   tags: [kid_friendly, probiotic, vegetarian, genie_store]
   dietary: [vegetarian]
@@ -3791,7 +3791,7 @@ products:
   size: 7.4 fl oz
   barcode: '2000009000245'
   perishable: true
-  shelf_life_days: 120
+  shelf_life_days: 21
   asset:
     shape: cylinder
     dims_m: [0.047, 0.047, 0.149]

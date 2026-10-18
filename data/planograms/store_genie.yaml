@@ -277,7 +277,7 @@ aisles:
 - aisle_id: genie-s8
   label: Drinks (north row)
   rect: {x: 3.989, y: 3.197, w: 1.521, h: 0.6}
-  categories: [beverages]
+  categories: [beverages, dairy]
   fixture_ids: [GEN-SHELF-17]
 - aisle_id: genie-s9
   label: Cleaning & paper goods (north row)
