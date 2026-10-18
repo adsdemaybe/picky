@@ -13,6 +13,8 @@ the last step (`agent.compose_followup` → `messaging.send` → reply → `agen
 - [ ] **P0** Live on at least 1 Photon channel (the beta shared iMessage line), which the Photon track requires
 - [x] **P0** Deterministic fake (console channel + scripted shopper) so the pipeline runs without Photon
 - [ ] **P1** Mid-trip suggestions pushed proactively ("they have a markdown guacamole kit, want it?")
+- [ ] **P1** Cart Whisperer WAIT reminder on the promo date ("SportFit earbuds are $59.99 today (were $79.99). Want them? Reply YES."), after contracts v0.3 (`docs/cart-whisperer.md` §8)
+- [ ] **P1** Pickup mode ("robot shops, I pick up"): extras asked by text, then "ready at pickup"
 - [ ] **P1** Persist the dedupe set, poll cursor and handle→space map (Postgres) across restarts
 - [ ] **P1** Account linking (`link ABC123`) for handles that are not in the fixtures
 - [ ] **P2** spectrum-ts sidecar (native polls, tapbacks, persistent connection) · Telegram as a second channel
