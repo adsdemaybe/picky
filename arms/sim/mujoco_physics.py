@@ -491,6 +491,9 @@ class MujocoPhysicsBackend(MujocoBackend):
                     elif jb == a["jaw_fixed"]:
                         touch_f.add(key)
             both = touch_m & touch_f
+            ext = self.robot_poses.get(rid, (None, 0.0, 0.0))[2]
+            if rid not in self._grasped and ext <= STOW_EXT_M:
+                continue  # a closed gripper brushing stock while driving / stowed is not a pick
             if rid in self._grasped:
                 key = self._grasped[rid]
                 tip = d.site_xpos[a["site"]]
