@@ -42,6 +42,7 @@ from arms.robot.render import (
     nearest_facing_slot,
     render_basket,
     render_ceiling,
+    render_director,
     render_front,
     render_wrist,
 )
@@ -56,7 +57,13 @@ from arms.robot.rover import (
     on_dock,
 )
 from arms.robot.world import StoreWorld, live_planogram, load_scene
-from contracts.cameras import DEFAULT_ROBOT_CAMERA_MOUNTS, CameraMount, parse_camera_id, robot_camera_id
+from contracts.cameras import (
+    DEFAULT_ROBOT_CAMERA_MOUNTS,
+    CameraMount,
+    director_camera_id,
+    parse_camera_id,
+    robot_camera_id,
+)
 from contracts.common import (
     ARM_MOUNT_X_M,
     ROBOT_RADIUS_M,
@@ -422,6 +429,10 @@ class FakeRobot:
     async def capture(self, robot_id: RobotId, camera: str = "front") -> CameraFrame:
         rv = self._rover(robot_id)
         kind = normalize_camera(camera)
+        if kind == "director":
+            frame = await self._render_director(rv)
+            self._push_frame(frame)
+            return frame
         if kind == "ceiling":
             cams = self.store_camera_specs(rv.store_id)
             return await self.capture_camera(cams[0].camera_id if cams else f"{rv.store_id}.ceiling-1")
@@ -906,11 +917,40 @@ class FakeRobot:
             ts=utcnow(),
         )
 
+    async def _render_director(self, rv: _Rover) -> CameraFrame:
+        """``<robot>.director`` on the 2D fake: a close top-down follow view (render.render_director)."""
+        world = await self._world(rv.store_id)
+        views = [self._rover_view(r) for r in self._fleet().values() if r.store_id == rv.store_id]
+        focus = self._rover_view(rv)
+        w, h = 640, 480
+        try:
+            r = await self._run_render(render_director, world.plan, views, focus, w=w, h=h)
+        except Exception as exc:
+            log.warning("fake director frame render failed (%s); using the placeholder", exc)
+            r = Rendered(base64.b64decode(PLACEHOLDER_JPEG_B64), PLACEHOLDER_W, PLACEHOLDER_H)
+        return CameraFrame(
+            frame_id=self._ids(FRAME_ID_PREFIX),
+            camera="director",
+            camera_id=director_camera_id(rv.robot_id),
+            robot_id=rv.robot_id,
+            store_id=rv.store_id,
+            jpeg_b64=base64.b64encode(r.jpeg).decode("ascii"),
+            w=r.w,
+            h=r.h,
+            blurred=False,
+            pose=rv.pose.model_copy(),
+            ts=utcnow(),
+        )
+
     async def _capture_by_id(self, camera_id: CameraId, live: bool = False) -> CameraFrame:
         try:
             owner, kind = parse_camera_id(camera_id)
         except ValueError as exc:
             raise RobotError("unknown_robot", str(exc)) from exc
+        if kind == "director":
+            return await self._render_director(self._rover(owner))
+        if kind == "perceived":
+            raise RobotError("unknown_robot", f"{camera_id!r} is produced by the cameras service, not the robot")
         if kind != "ceiling":
             rv = self._rover(owner)
             if kind not in rv.spec.cameras:

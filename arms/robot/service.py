@@ -271,6 +271,10 @@ class SimRobot:
             owner, kind = parse_camera_id(camera_id)
         except ValueError as exc:
             raise RobotError("unknown_robot", str(exc)) from exc
+        if kind == "director":
+            return await self._capture_director(owner, camera_id)
+        if kind == "perceived":
+            raise RobotError("unknown_robot", f"{camera_id!r} is produced by the cameras service, not the robot")
         if kind != "ceiling":
             return await self.capture(owner, kind)
         store_id = owner
@@ -287,6 +291,17 @@ class SimRobot:
         frame = res.frame.model_copy(update={"camera_id": camera_id, "store_id": store_id, "camera": "ceiling"})
         self._frame_cache[camera_id] = frame
         return frame
+
+    async def _capture_director(self, robot_id: RobotId, camera_id: CameraId) -> CameraFrame:
+        """``<robot>.director`` (0.2.3): the Isaac worker's chase camera (worker run with PICKY_SIM_DIRECTOR), else the
+        2D fake's follow view."""
+        spec = self._spec(robot_id)
+        if not await self._use_isaac(spec.store_id, robot_id):
+            return await self.fake.capture_camera(camera_id)
+        res = await self._isaac(spec, CaptureCmd(cmd_id=new_id("cmd"), robot_id=robot_id, camera_id=camera_id))
+        if res.frame is None:
+            raise RobotError("internal", f"capture({camera_id}) returned no frame")
+        return self._frame_from(res.frame.model_copy(update={"camera": "director"}), spec, camera="director")
 
     async def list_instances(self, robot_id: RobotId, slot_id: SlotId | None = None) -> list[ItemInstance]:
         spec = self._spec(robot_id)

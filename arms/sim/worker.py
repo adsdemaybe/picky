@@ -739,6 +739,8 @@ class WorkerCore:
         self.stream_fps = DEFAULT_STREAM_FPS
         self._frame_n = 0
         self._synthetic_kin: ArmKinematics | None = None
+        self.director: Any = None
+        """``arms.sim.director.Director`` (PICKY_SIM_DIRECTOR): '<robot>.director' cameras; None = off."""
 
     # ---- hosting ---------------------------------------------------------------------------------------------------
     def load_store(
@@ -893,7 +895,29 @@ class WorkerCore:
         source = getattr(self.backend, "camera_source", "isaac")
         robots = [r.robot for r in self.rovers.values()]
         cams = [c for s in self.stores.values() for c in s.cameras]
-        return camera_infos(robots, cams, source=source)
+        out = camera_infos(robots, cams, source=source)
+        if self.director is not None:  # 0.2.3: '<robot>.director' chase cameras are regular cameras
+            out += self.director.camera_infos(self, source=source)
+        return out
+
+    def director_frame(self, camera_id: str, cam: CameraPose, jpeg: bytes, w: int, h: int) -> CameraFrame:
+        """A rendered director image as an (unsolicited) CameraFrame for the live stream."""
+        rid = camera_id.rpartition(".")[0]
+        rover = self.rovers.get(rid)
+        self._frame_n += 1
+        return CameraFrame(
+            frame_id=f"{camera_id}-f{self._frame_n:06d}",
+            camera="director",
+            camera_id=camera_id,
+            robot_id=rid,
+            store_id=rover.store_id if rover else None,
+            jpeg_b64=base64.b64encode(jpeg).decode("ascii"),
+            w=w,
+            h=h,
+            blurred=False,
+            pose=rover.pose if rover else None,
+            camera_pose=cam.to_mount(),
+        )
 
     def hello(self, token: str, worker_id: str = "isaac-0", sim_version: str | None = None) -> SimHello:
         return SimHello(
@@ -1310,6 +1334,11 @@ class WorkerCore:
             if spec is None:
                 raise _Fail("unknown_robot", f"camera {camera_id!r} is not hosted here")
             return kind, owner, None, spec
+        if kind == "director":
+            rover = self.rovers.get(owner)
+            if rover is None or self.director is None or not self.director.follows(owner):
+                raise _Fail("unknown_robot", f"camera {camera_id!r} is not hosted here (PICKY_SIM_DIRECTOR)")
+            return kind, rover.store_id, rover, None
         rover = self.rovers.get(owner)
         if rover is None or kind not in rover.robot.cameras:
             raise _Fail("unknown_robot", f"camera {camera_id!r} is not hosted here")
@@ -1320,6 +1349,8 @@ class WorkerCore:
         if spec is not None:
             return mount_camera(spec.mount)
         assert rover is not None
+        if kind == "director":
+            return self.director.pose_for(self, rover.robot_id)
         aim = None
         if slot is not None and kind == "front":
             aim = self._slot_aim(self.stores[store_id], slot)
@@ -1400,6 +1431,8 @@ class WorkerCore:
         period = 1.0 / self.stream_fps
         due = []
         for cid, t in self.streams.items():
+            if self.director is not None and cid.endswith(".director"):
+                continue  # the director paces its own camera (its fps; Director.capture in the main loop)
             if now >= t:
                 due.append(cid)
                 self.streams[cid] = max(t + period, now)

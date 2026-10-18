@@ -1271,7 +1271,12 @@ def run(
                     if director is not None:
                         director.tee(frame)
         if director is not None and director_jobs:
-            rendered = director.capture(backend, director_jobs) or rendered
+
+            def live(camera_id: str, _store: str, cam: Any, jpeg: bytes, w: int, h: int) -> None:
+                if link is not None and link.connected.is_set() and camera_id in core.streams:
+                    link.offer_frame(core.director_frame(camera_id, cam, jpeg, w, h))
+
+            rendered = director.capture(backend, director_jobs, on_frame=live) or rendered
         if step is not None and not rendered:
             step()
         spent = time.monotonic() - now
@@ -1356,7 +1361,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     link: GatewayLink | None = None
-    director = Director.from_env()  # dev-only chase camera + frame tee for demo videos (PICKY_SIM_DIRECTOR)
+    director = Director.from_env()  # "<robot>.director" chase cameras + optional disk frames: PICKY_SIM_DIRECTOR
 
     def emit(msg: Any) -> None:
         if director is not None:
@@ -1371,6 +1376,7 @@ def main(argv: list[str] | None = None) -> int:
         assets=assets,
         rover_usd=rover_usd,
     )
+    core.director = director
     if args.store:
         store_ids = [args.store]
     elif args.stores:
