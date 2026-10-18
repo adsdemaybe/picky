@@ -261,7 +261,7 @@ aisles:
   fixture_ids: [GEN-SHELF-10, GEN-SHELF-13]
 - aisle_id: genie-s5
   label: Cleaning & paper goods (center island)
-  rect: {x: 3.27, y: 0.988, w: 1.815, h: 2.217}
+  rect: {x: 3.27, y: 0.988, w: 1.66, h: 2.217}
   categories: [household]
   fixture_ids: [GEN-SHELF-11]
 - aisle_id: genie-s6
@@ -277,7 +277,7 @@ aisles:
 - aisle_id: genie-s8
   label: Drinks (north row)
   rect: {x: 3.989, y: 3.197, w: 1.521, h: 0.6}
-  categories: [beverages, dairy]
+  categories: [beverages]
   fixture_ids: [GEN-SHELF-17]
 - aisle_id: genie-s9
   label: Cleaning & paper goods (north row)
@@ -285,28 +285,28 @@ aisles:
   categories: [household]
   fixture_ids: [GEN-SHELF-18, GEN-SHELF-19, GEN-SHELF-20]
 slots:
-- slot_id: GEN-SHELF-01-N3-00
-  fixture_id: GEN-SHELF-01
-  aisle_id: genie-s1
-  sku: GN-RICE-CRISPS
-  level: 3
-  index: 0
-  item_position: {x: 0.962, y: 0.504, z: 1.454}
-  approach_pose: {x: 0.962, y: 0.879, theta: -1.571}
-  facings: 3
-  capacity: 12
-  qty: 4
-  lots:
-  - {lot_id: gen-gen-shelf-01-n3-00-l1, qty: 4}
-- slot_id: GEN-SHELF-01-N2-01
+- slot_id: GEN-SHELF-01-N2-00
   fixture_id: GEN-SHELF-01
   aisle_id: genie-s1
   sku: GN-CINNAMON-SWIRL
   level: 2
-  index: 1
+  index: 0
   item_position: {x: 0.688, y: 0.492, z: 1.108}
   approach_pose: {x: 0.688, y: 0.867, theta: -1.571}
   facings: 1
+  capacity: 12
+  qty: 8
+  lots:
+  - {lot_id: gen-gen-shelf-01-n2-00-l1, qty: 8}
+- slot_id: GEN-SHELF-01-N2-01
+  fixture_id: GEN-SHELF-01
+  aisle_id: genie-s1
+  sku: GN-CHOCO-SWIRL-LOAF
+  level: 2
+  index: 1
+  item_position: {x: 0.92, y: 0.499, z: 1.108}
+  approach_pose: {x: 0.92, y: 0.874, theta: -1.571}
+  facings: 2
   capacity: 12
   qty: 8
   lots:
@@ -314,76 +314,76 @@ slots:
 - slot_id: GEN-SHELF-01-N2-02
   fixture_id: GEN-SHELF-01
   aisle_id: genie-s1
-  sku: GN-CHOCO-SWIRL-LOAF
-  level: 2
-  index: 2
-  item_position: {x: 0.92, y: 0.499, z: 1.108}
-  approach_pose: {x: 0.92, y: 0.874, theta: -1.571}
-  facings: 2
-  capacity: 12
-  qty: 8
-  lots:
-  - {lot_id: gen-gen-shelf-01-n2-02-l1, qty: 8}
-- slot_id: GEN-SHELF-01-N2-03
-  fixture_id: GEN-SHELF-01
-  aisle_id: genie-s1
   sku: GN-SWIRL-ROLLS-8
   level: 2
-  index: 3
+  index: 2
   item_position: {x: 1.185, y: 0.505, z: 1.108}
   approach_pose: {x: 1.185, y: 0.88, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 6
   lots:
-  - {lot_id: gen-gen-shelf-01-n2-03-l1, qty: 6}
-- slot_id: GEN-SHELF-01-N2-04
+  - {lot_id: gen-gen-shelf-01-n2-02-l1, qty: 6}
+- slot_id: GEN-SHELF-01-N2-03
   fixture_id: GEN-SHELF-01
   aisle_id: genie-s1
   sku: GN-RICE-CRISPS
   level: 2
-  index: 4
+  index: 3
   item_position: {x: 1.216, y: 0.51, z: 1.108}
   approach_pose: {x: 1.216, y: 0.885, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-01-n2-04-l1, qty: 2}
-- slot_id: GEN-SHELF-01-N1-05
+  - {lot_id: gen-gen-shelf-01-n2-03-l1, qty: 2}
+- slot_id: GEN-SHELF-01-N1-04
   fixture_id: GEN-SHELF-01
   aisle_id: genie-s1
   sku: GN-MATCHA-ROLL
   level: 1
-  index: 5
+  index: 4
   item_position: {x: 0.867, y: 0.481, z: 0.756}
   approach_pose: {x: 0.867, y: 0.856, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-01-n1-05-l1, qty: 4}
-- slot_id: GEN-SHELF-01-N1-06
+  - {lot_id: gen-gen-shelf-01-n1-04-l1, qty: 4}
+- slot_id: GEN-SHELF-01-N1-05
   fixture_id: GEN-SHELF-01
   aisle_id: genie-s1
   sku: GN-SESAME-RICE-CAKE
   level: 1
-  index: 6
+  index: 5
   item_position: {x: 1.069, y: 0.496, z: 0.756}
   approach_pose: {x: 1.069, y: 0.871, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-01-n1-06-l1, qty: 4}
+  - {lot_id: gen-gen-shelf-01-n1-05-l1, qty: 4}
+- slot_id: GEN-SHELF-01-N0-06
+  fixture_id: GEN-SHELF-01
+  aisle_id: genie-s1
+  sku: GN-MINI-CROISSANT
+  level: 0
+  index: 6
+  item_position: {x: 0.691, y: 0.482, z: 0.398}
+  approach_pose: {x: 0.691, y: 0.857, theta: -1.571}
+  facings: 2
+  capacity: 12
+  qty: 3
+  lots:
+  - {lot_id: gen-gen-shelf-01-n0-06-l1, qty: 3}
 - slot_id: GEN-SHELF-01-N0-07
   fixture_id: GEN-SHELF-01
   aisle_id: genie-s1
   sku: GN-MINI-CROISSANT
   level: 0
   index: 7
-  item_position: {x: 0.691, y: 0.482, z: 0.398}
-  approach_pose: {x: 0.691, y: 0.857, theta: -1.571}
+  item_position: {x: 0.944, y: 0.488, z: 0.398}
+  approach_pose: {x: 0.944, y: 0.863, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 3
@@ -392,51 +392,38 @@ slots:
 - slot_id: GEN-SHELF-01-N0-08
   fixture_id: GEN-SHELF-01
   aisle_id: genie-s1
-  sku: GN-MINI-CROISSANT
-  level: 0
-  index: 8
-  item_position: {x: 0.944, y: 0.488, z: 0.398}
-  approach_pose: {x: 0.944, y: 0.863, theta: -1.571}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-01-n0-08-l1, qty: 3}
-- slot_id: GEN-SHELF-01-N0-09
-  fixture_id: GEN-SHELF-01
-  aisle_id: genie-s1
   sku: GN-BUTTER-COOKIES
   level: 0
-  index: 9
+  index: 8
   item_position: {x: 1.265, y: 0.478, z: 0.398}
   approach_pose: {x: 1.265, y: 0.853, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 7
   lots:
-  - {lot_id: gen-gen-shelf-01-n0-09-l1, qty: 7}
-- slot_id: GEN-SHELF-02-N3-00
-  fixture_id: GEN-SHELF-02
-  aisle_id: genie-s1
-  sku: GN-RICE-CRISPS
-  level: 3
-  index: 0
-  item_position: {x: 1.771, y: 0.504, z: 1.454}
-  approach_pose: {x: 1.771, y: 0.879, theta: -1.571}
-  facings: 3
-  capacity: 12
-  qty: 4
-  lots:
-  - {lot_id: gen-gen-shelf-02-n3-00-l1, qty: 4}
-- slot_id: GEN-SHELF-02-N2-01
+  - {lot_id: gen-gen-shelf-01-n0-08-l1, qty: 7}
+- slot_id: GEN-SHELF-02-N2-00
   fixture_id: GEN-SHELF-02
   aisle_id: genie-s1
   sku: GN-CINNAMON-SWIRL
   level: 2
-  index: 1
+  index: 0
   item_position: {x: 1.497, y: 0.492, z: 1.108}
   approach_pose: {x: 1.497, y: 0.867, theta: -1.571}
   facings: 1
+  capacity: 12
+  qty: 8
+  lots:
+  - {lot_id: gen-gen-shelf-02-n2-00-l1, qty: 8}
+- slot_id: GEN-SHELF-02-N2-01
+  fixture_id: GEN-SHELF-02
+  aisle_id: genie-s1
+  sku: GN-CHOCO-SWIRL-LOAF
+  level: 2
+  index: 1
+  item_position: {x: 1.729, y: 0.499, z: 1.108}
+  approach_pose: {x: 1.729, y: 0.874, theta: -1.571}
+  facings: 2
   capacity: 12
   qty: 8
   lots:
@@ -444,77 +431,77 @@ slots:
 - slot_id: GEN-SHELF-02-N2-02
   fixture_id: GEN-SHELF-02
   aisle_id: genie-s1
-  sku: GN-CHOCO-SWIRL-LOAF
-  level: 2
-  index: 2
-  item_position: {x: 1.729, y: 0.499, z: 1.108}
-  approach_pose: {x: 1.729, y: 0.874, theta: -1.571}
-  facings: 2
-  capacity: 12
-  qty: 8
-  lots:
-  - {lot_id: gen-gen-shelf-02-n2-02-l1, qty: 8}
-- slot_id: GEN-SHELF-02-N2-03
-  fixture_id: GEN-SHELF-02
-  aisle_id: genie-s1
   sku: GN-SWIRL-ROLLS-8
   level: 2
-  index: 3
+  index: 2
   item_position: {x: 1.993, y: 0.505, z: 1.108}
   approach_pose: {x: 1.993, y: 0.88, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 6
   lots:
-  - {lot_id: gen-gen-shelf-02-n2-03-l1, qty: 6}
-- slot_id: GEN-SHELF-02-N2-04
+  - {lot_id: gen-gen-shelf-02-n2-02-l1, qty: 6}
+- slot_id: GEN-SHELF-02-N2-03
   fixture_id: GEN-SHELF-02
   aisle_id: genie-s1
   sku: GN-RICE-CRISPS
   level: 2
-  index: 4
+  index: 3
   item_position: {x: 2.024, y: 0.51, z: 1.108}
   approach_pose: {x: 2.024, y: 0.885, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-02-n2-04-l1, qty: 2}
-- slot_id: GEN-SHELF-02-N1-05
+  - {lot_id: gen-gen-shelf-02-n2-03-l1, qty: 2}
+- slot_id: GEN-SHELF-02-N1-04
   fixture_id: GEN-SHELF-02
   aisle_id: genie-s1
   sku: GN-MATCHA-ROLL
   level: 1
-  index: 5
+  index: 4
   item_position: {x: 1.676, y: 0.481, z: 0.756}
   approach_pose: {x: 1.676, y: 0.856, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-02-n1-05-l1, qty: 4}
-- slot_id: GEN-SHELF-02-N1-06
+  - {lot_id: gen-gen-shelf-02-n1-04-l1, qty: 4}
+- slot_id: GEN-SHELF-02-N1-05
   fixture_id: GEN-SHELF-02
   aisle_id: genie-s1
   sku: GN-SESAME-RICE-CAKE
   level: 1
-  index: 6
+  index: 5
   item_position: {x: 1.877, y: 0.496, z: 0.756}
   approach_pose: {x: 1.877, y: 0.871, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-02-n1-06-l1, qty: 4}
+  - {lot_id: gen-gen-shelf-02-n1-05-l1, qty: 4}
+- slot_id: GEN-SHELF-02-N0-06
+  fixture_id: GEN-SHELF-02
+  aisle_id: genie-s1
+  sku: GN-MINI-CROISSANT
+  level: 0
+  index: 6
+  item_position: {x: 1.499, y: 0.482, z: 0.398}
+  approach_pose: {x: 1.499, y: 0.857, theta: -1.571}
+  facings: 1
+  capacity: 12
+  qty: 3
+  lots:
+  - {lot_id: gen-gen-shelf-02-n0-06-l1, qty: 3}
 - slot_id: GEN-SHELF-02-N0-07
   fixture_id: GEN-SHELF-02
   aisle_id: genie-s1
   sku: GN-MINI-CROISSANT
   level: 0
   index: 7
-  item_position: {x: 1.499, y: 0.482, z: 0.398}
-  approach_pose: {x: 1.499, y: 0.857, theta: -1.571}
-  facings: 1
+  item_position: {x: 1.753, y: 0.488, z: 0.398}
+  approach_pose: {x: 1.753, y: 0.863, theta: -1.571}
+  facings: 2
   capacity: 12
   qty: 3
   lots:
@@ -522,50 +509,37 @@ slots:
 - slot_id: GEN-SHELF-02-N0-08
   fixture_id: GEN-SHELF-02
   aisle_id: genie-s1
-  sku: GN-MINI-CROISSANT
-  level: 0
-  index: 8
-  item_position: {x: 1.753, y: 0.488, z: 0.398}
-  approach_pose: {x: 1.753, y: 0.863, theta: -1.571}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-02-n0-08-l1, qty: 3}
-- slot_id: GEN-SHELF-02-N0-09
-  fixture_id: GEN-SHELF-02
-  aisle_id: genie-s1
   sku: GN-BUTTER-COOKIES
   level: 0
-  index: 9
+  index: 8
   item_position: {x: 1.936, y: 0.48, z: 0.398}
   approach_pose: {x: 1.936, y: 0.855, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 7
   lots:
-  - {lot_id: gen-gen-shelf-02-n0-09-l1, qty: 7}
-- slot_id: GEN-SHELF-03-N3-00
-  fixture_id: GEN-SHELF-03
-  aisle_id: genie-s1
-  sku: GN-RICE-CRISPS
-  level: 3
-  index: 0
-  item_position: {x: 2.586, y: 0.504, z: 1.454}
-  approach_pose: {x: 2.586, y: 0.879, theta: -1.571}
-  facings: 4
-  capacity: 12
-  qty: 4
-  lots:
-  - {lot_id: gen-gen-shelf-03-n3-00-l1, qty: 4}
-- slot_id: GEN-SHELF-03-N2-01
+  - {lot_id: gen-gen-shelf-02-n0-08-l1, qty: 7}
+- slot_id: GEN-SHELF-03-N2-00
   fixture_id: GEN-SHELF-03
   aisle_id: genie-s1
   sku: GN-CINNAMON-SWIRL
   level: 2
-  index: 1
+  index: 0
   item_position: {x: 2.312, y: 0.492, z: 1.108}
   approach_pose: {x: 2.312, y: 0.867, theta: -1.571}
+  facings: 2
+  capacity: 12
+  qty: 8
+  lots:
+  - {lot_id: gen-gen-shelf-03-n2-00-l1, qty: 8}
+- slot_id: GEN-SHELF-03-N2-01
+  fixture_id: GEN-SHELF-03
+  aisle_id: genie-s1
+  sku: GN-CHOCO-SWIRL-LOAF
+  level: 2
+  index: 1
+  item_position: {x: 2.544, y: 0.499, z: 1.108}
+  approach_pose: {x: 2.544, y: 0.874, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 8
@@ -574,77 +548,77 @@ slots:
 - slot_id: GEN-SHELF-03-N2-02
   fixture_id: GEN-SHELF-03
   aisle_id: genie-s1
-  sku: GN-CHOCO-SWIRL-LOAF
-  level: 2
-  index: 2
-  item_position: {x: 2.544, y: 0.499, z: 1.108}
-  approach_pose: {x: 2.544, y: 0.874, theta: -1.571}
-  facings: 2
-  capacity: 12
-  qty: 8
-  lots:
-  - {lot_id: gen-gen-shelf-03-n2-02-l1, qty: 8}
-- slot_id: GEN-SHELF-03-N2-03
-  fixture_id: GEN-SHELF-03
-  aisle_id: genie-s1
   sku: GN-SWIRL-ROLLS-8
   level: 2
-  index: 3
+  index: 2
   item_position: {x: 2.809, y: 0.505, z: 1.108}
   approach_pose: {x: 2.809, y: 0.88, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 6
   lots:
-  - {lot_id: gen-gen-shelf-03-n2-03-l1, qty: 6}
-- slot_id: GEN-SHELF-03-N2-04
+  - {lot_id: gen-gen-shelf-03-n2-02-l1, qty: 6}
+- slot_id: GEN-SHELF-03-N2-03
   fixture_id: GEN-SHELF-03
   aisle_id: genie-s1
   sku: GN-RICE-CRISPS
   level: 2
-  index: 4
+  index: 3
   item_position: {x: 2.84, y: 0.51, z: 1.108}
   approach_pose: {x: 2.84, y: 0.885, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-03-n2-04-l1, qty: 2}
-- slot_id: GEN-SHELF-03-N1-05
+  - {lot_id: gen-gen-shelf-03-n2-03-l1, qty: 2}
+- slot_id: GEN-SHELF-03-N1-04
   fixture_id: GEN-SHELF-03
   aisle_id: genie-s1
   sku: GN-MATCHA-ROLL
   level: 1
-  index: 5
+  index: 4
   item_position: {x: 2.491, y: 0.481, z: 0.756}
   approach_pose: {x: 2.491, y: 0.856, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-03-n1-05-l1, qty: 4}
-- slot_id: GEN-SHELF-03-N1-06
+  - {lot_id: gen-gen-shelf-03-n1-04-l1, qty: 4}
+- slot_id: GEN-SHELF-03-N1-05
   fixture_id: GEN-SHELF-03
   aisle_id: genie-s1
   sku: GN-SESAME-RICE-CAKE
   level: 1
-  index: 6
+  index: 5
   item_position: {x: 2.693, y: 0.496, z: 0.756}
   approach_pose: {x: 2.693, y: 0.871, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-03-n1-06-l1, qty: 4}
+  - {lot_id: gen-gen-shelf-03-n1-05-l1, qty: 4}
+- slot_id: GEN-SHELF-03-N0-06
+  fixture_id: GEN-SHELF-03
+  aisle_id: genie-s1
+  sku: GN-MINI-CROISSANT
+  level: 0
+  index: 6
+  item_position: {x: 2.315, y: 0.482, z: 0.398}
+  approach_pose: {x: 2.315, y: 0.857, theta: -1.571}
+  facings: 2
+  capacity: 12
+  qty: 3
+  lots:
+  - {lot_id: gen-gen-shelf-03-n0-06-l1, qty: 3}
 - slot_id: GEN-SHELF-03-N0-07
   fixture_id: GEN-SHELF-03
   aisle_id: genie-s1
   sku: GN-MINI-CROISSANT
   level: 0
   index: 7
-  item_position: {x: 2.315, y: 0.482, z: 0.398}
-  approach_pose: {x: 2.315, y: 0.857, theta: -1.571}
-  facings: 2
+  item_position: {x: 2.568, y: 0.488, z: 0.398}
+  approach_pose: {x: 2.568, y: 0.863, theta: -1.571}
+  facings: 1
   capacity: 12
   qty: 3
   lots:
@@ -652,51 +626,38 @@ slots:
 - slot_id: GEN-SHELF-03-N0-08
   fixture_id: GEN-SHELF-03
   aisle_id: genie-s1
-  sku: GN-MINI-CROISSANT
-  level: 0
-  index: 8
-  item_position: {x: 2.568, y: 0.488, z: 0.398}
-  approach_pose: {x: 2.568, y: 0.863, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-03-n0-08-l1, qty: 3}
-- slot_id: GEN-SHELF-03-N0-09
-  fixture_id: GEN-SHELF-03
-  aisle_id: genie-s1
   sku: GN-BUTTER-COOKIES
   level: 0
-  index: 9
+  index: 8
   item_position: {x: 2.889, y: 0.478, z: 0.398}
   approach_pose: {x: 2.889, y: 0.853, theta: -1.571}
   facings: 3
   capacity: 12
   qty: 7
   lots:
-  - {lot_id: gen-gen-shelf-03-n0-09-l1, qty: 7}
-- slot_id: GEN-SHELF-04-N3-00
-  fixture_id: GEN-SHELF-04
-  aisle_id: genie-s1
-  sku: GN-RICE-CRISPS
-  level: 3
-  index: 0
-  item_position: {x: 3.399, y: 0.504, z: 1.454}
-  approach_pose: {x: 3.399, y: 0.879, theta: -1.571}
-  facings: 4
-  capacity: 12
-  qty: 4
-  lots:
-  - {lot_id: gen-gen-shelf-04-n3-00-l1, qty: 4}
-- slot_id: GEN-SHELF-04-N2-01
+  - {lot_id: gen-gen-shelf-03-n0-08-l1, qty: 7}
+- slot_id: GEN-SHELF-04-N2-00
   fixture_id: GEN-SHELF-04
   aisle_id: genie-s1
   sku: GN-CINNAMON-SWIRL
   level: 2
-  index: 1
+  index: 0
   item_position: {x: 3.125, y: 0.492, z: 1.108}
   approach_pose: {x: 3.125, y: 0.867, theta: -1.571}
   facings: 2
+  capacity: 12
+  qty: 8
+  lots:
+  - {lot_id: gen-gen-shelf-04-n2-00-l1, qty: 8}
+- slot_id: GEN-SHELF-04-N2-01
+  fixture_id: GEN-SHELF-04
+  aisle_id: genie-s1
+  sku: GN-CHOCO-SWIRL-LOAF
+  level: 2
+  index: 1
+  item_position: {x: 3.357, y: 0.499, z: 1.108}
+  approach_pose: {x: 3.357, y: 0.874, theta: -1.571}
+  facings: 1
   capacity: 12
   qty: 8
   lots:
@@ -704,64 +665,64 @@ slots:
 - slot_id: GEN-SHELF-04-N2-02
   fixture_id: GEN-SHELF-04
   aisle_id: genie-s1
-  sku: GN-CHOCO-SWIRL-LOAF
-  level: 2
-  index: 2
-  item_position: {x: 3.357, y: 0.499, z: 1.108}
-  approach_pose: {x: 3.357, y: 0.874, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 8
-  lots:
-  - {lot_id: gen-gen-shelf-04-n2-02-l1, qty: 8}
-- slot_id: GEN-SHELF-04-N2-03
-  fixture_id: GEN-SHELF-04
-  aisle_id: genie-s1
   sku: GN-SWIRL-ROLLS-8
   level: 2
-  index: 3
+  index: 2
   item_position: {x: 3.621, y: 0.505, z: 1.108}
   approach_pose: {x: 3.621, y: 0.88, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 6
   lots:
-  - {lot_id: gen-gen-shelf-04-n2-03-l1, qty: 6}
-- slot_id: GEN-SHELF-04-N1-04
+  - {lot_id: gen-gen-shelf-04-n2-02-l1, qty: 6}
+- slot_id: GEN-SHELF-04-N1-03
   fixture_id: GEN-SHELF-04
   aisle_id: genie-s1
   sku: GN-MATCHA-ROLL
   level: 1
-  index: 4
+  index: 3
   item_position: {x: 3.304, y: 0.481, z: 0.756}
   approach_pose: {x: 3.304, y: 0.856, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-04-n1-04-l1, qty: 4}
-- slot_id: GEN-SHELF-04-N1-05
+  - {lot_id: gen-gen-shelf-04-n1-03-l1, qty: 4}
+- slot_id: GEN-SHELF-04-N1-04
   fixture_id: GEN-SHELF-04
   aisle_id: genie-s1
   sku: GN-SESAME-RICE-CAKE
   level: 1
-  index: 5
+  index: 4
   item_position: {x: 3.506, y: 0.496, z: 0.756}
   approach_pose: {x: 3.506, y: 0.871, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-04-n1-05-l1, qty: 2}
+  - {lot_id: gen-gen-shelf-04-n1-04-l1, qty: 2}
+- slot_id: GEN-SHELF-04-N0-05
+  fixture_id: GEN-SHELF-04
+  aisle_id: genie-s1
+  sku: GN-MINI-CROISSANT
+  level: 0
+  index: 5
+  item_position: {x: 3.127, y: 0.482, z: 0.396}
+  approach_pose: {x: 3.127, y: 0.857, theta: -1.571}
+  facings: 1
+  capacity: 12
+  qty: 3
+  lots:
+  - {lot_id: gen-gen-shelf-04-n0-05-l1, qty: 3}
 - slot_id: GEN-SHELF-04-N0-06
   fixture_id: GEN-SHELF-04
   aisle_id: genie-s1
   sku: GN-MINI-CROISSANT
   level: 0
   index: 6
-  item_position: {x: 3.127, y: 0.482, z: 0.396}
-  approach_pose: {x: 3.127, y: 0.857, theta: -1.571}
-  facings: 1
+  item_position: {x: 3.381, y: 0.488, z: 0.396}
+  approach_pose: {x: 3.381, y: 0.863, theta: -1.571}
+  facings: 2
   capacity: 12
   qty: 3
   lots:
@@ -769,376 +730,272 @@ slots:
 - slot_id: GEN-SHELF-04-N0-07
   fixture_id: GEN-SHELF-04
   aisle_id: genie-s1
-  sku: GN-MINI-CROISSANT
-  level: 0
-  index: 7
-  item_position: {x: 3.381, y: 0.488, z: 0.396}
-  approach_pose: {x: 3.381, y: 0.863, theta: -1.571}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-04-n0-07-l1, qty: 3}
-- slot_id: GEN-SHELF-04-N0-08
-  fixture_id: GEN-SHELF-04
-  aisle_id: genie-s1
   sku: GN-BUTTER-COOKIES
   level: 0
-  index: 8
+  index: 7
   item_position: {x: 3.564, y: 0.48, z: 0.396}
   approach_pose: {x: 3.564, y: 0.855, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 6
   lots:
-  - {lot_id: gen-gen-shelf-04-n0-08-l1, qty: 6}
-- slot_id: GEN-SHELF-05-W3-00
-  fixture_id: GEN-SHELF-05
-  aisle_id: genie-s2
-  sku: GN-RICE-CRISPS
-  level: 3
-  index: 0
-  item_position: {x: 7.89, y: 0.499, z: 1.454}
-  approach_pose: {x: 7.515, y: 0.499, theta: -0.0}
-  facings: 2
-  capacity: 12
-  qty: 2
-  lots:
-  - {lot_id: gen-gen-shelf-05-w3-00-l1, qty: 2}
-- slot_id: GEN-SHELF-05-W2-01
+  - {lot_id: gen-gen-shelf-04-n0-07-l1, qty: 6}
+- slot_id: GEN-SHELF-05-W2-00
   fixture_id: GEN-SHELF-05
   aisle_id: genie-s2
   sku: GN-CHOCO-SWIRL-LOAF
   level: 2
-  index: 1
+  index: 0
   item_position: {x: 7.896, y: 0.457, z: 1.106}
   approach_pose: {x: 7.521, y: 0.457, theta: -0.0}
   facings: 1
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-05-w2-01-l1, qty: 8}
-- slot_id: GEN-SHELF-05-W2-02
+  - {lot_id: gen-gen-shelf-05-w2-00-l1, qty: 8}
+- slot_id: GEN-SHELF-05-W2-01
   fixture_id: GEN-SHELF-05
   aisle_id: genie-s2
   sku: GN-SWIRL-ROLLS-8
   level: 2
-  index: 2
+  index: 1
   item_position: {x: 7.89, y: 0.721, z: 1.106}
   approach_pose: {x: 7.515, y: 0.721, theta: -0.0}
   facings: 2
   capacity: 12
   qty: 6
   lots:
-  - {lot_id: gen-gen-shelf-05-w2-02-l1, qty: 6}
-- slot_id: GEN-SHELF-05-W2-03
+  - {lot_id: gen-gen-shelf-05-w2-01-l1, qty: 6}
+- slot_id: GEN-SHELF-05-W2-02
   fixture_id: GEN-SHELF-05
   aisle_id: genie-s2
   sku: GN-RICE-CRISPS
   level: 2
-  index: 3
+  index: 2
   item_position: {x: 7.884, y: 0.753, z: 1.106}
   approach_pose: {x: 7.509, y: 0.753, theta: -0.0}
   facings: 2
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-05-w2-03-l1, qty: 2}
-- slot_id: GEN-SHELF-05-W1-04
+  - {lot_id: gen-gen-shelf-05-w2-02-l1, qty: 2}
+- slot_id: GEN-SHELF-05-W1-03
   fixture_id: GEN-SHELF-05
   aisle_id: genie-s2
   sku: GN-MATCHA-ROLL
   level: 1
-  index: 4
+  index: 3
   item_position: {x: 7.913, y: 0.404, z: 0.756}
   approach_pose: {x: 7.538, y: 0.404, theta: -0.0}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-05-w1-04-l1, qty: 2}
-- slot_id: GEN-SHELF-05-W1-05
+  - {lot_id: gen-gen-shelf-05-w1-03-l1, qty: 2}
+- slot_id: GEN-SHELF-05-W1-04
   fixture_id: GEN-SHELF-05
   aisle_id: genie-s2
   sku: GN-SESAME-RICE-CAKE
   level: 1
-  index: 5
+  index: 4
   item_position: {x: 7.898, y: 0.606, z: 0.756}
   approach_pose: {x: 7.523, y: 0.606, theta: -0.0}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-05-w1-05-l1, qty: 4}
-- slot_id: GEN-SHELF-05-W0-06
+  - {lot_id: gen-gen-shelf-05-w1-04-l1, qty: 4}
+- slot_id: GEN-SHELF-05-W0-05
   fixture_id: GEN-SHELF-05
   aisle_id: genie-s2
   sku: GN-MINI-CROISSANT
   level: 0
-  index: 6
+  index: 5
   item_position: {x: 7.906, y: 0.481, z: 0.402}
   approach_pose: {x: 7.531, y: 0.481, theta: -0.0}
   facings: 2
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-05-w0-06-l1, qty: 3}
-- slot_id: GEN-SHELF-05-W0-07
+  - {lot_id: gen-gen-shelf-05-w0-05-l1, qty: 3}
+- slot_id: GEN-SHELF-05-W0-06
   fixture_id: GEN-SHELF-05
   aisle_id: genie-s2
   sku: GN-BUTTER-COOKIES
   level: 0
-  index: 7
+  index: 6
   item_position: {x: 7.917, y: 0.801, z: 0.402}
   approach_pose: {x: 7.542, y: 0.801, theta: -0.0}
   facings: 3
   capacity: 12
   qty: 7
   lots:
-  - {lot_id: gen-gen-shelf-05-w0-07-l1, qty: 7}
-- slot_id: GEN-SHELF-06-N3-00
-  fixture_id: GEN-SHELF-06
-  aisle_id: genie-s3
-  sku: GN-CALMING-CREAM
-  level: 3
-  index: 0
-  item_position: {x: 3.95, y: 0.59, z: 1.485}
-  approach_pose: {x: 3.95, y: 0.965, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-06-n3-00-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N3-01
-  fixture_id: GEN-SHELF-06
-  aisle_id: genie-s3
-  sku: GN-ALOE-NIGHT-CREAM
-  level: 3
-  index: 1
-  item_position: {x: 4.138, y: 0.591, z: 1.485}
-  approach_pose: {x: 4.138, y: 0.966, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-06-n3-01-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N3-02
-  fixture_id: GEN-SHELF-06
-  aisle_id: genie-s3
-  sku: GN-SOFT-FACE-LOTION
-  level: 3
-  index: 2
-  item_position: {x: 4.308, y: 0.57, z: 1.485}
-  approach_pose: {x: 4.308, y: 0.945, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-06-n3-02-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N3-03
-  fixture_id: GEN-SHELF-06
-  aisle_id: genie-s3
-  sku: GN-CHARCOAL-CLEANSER
-  level: 3
-  index: 3
-  item_position: {x: 4.476, y: 0.581, z: 1.485}
-  approach_pose: {x: 4.476, y: 0.956, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-06-n3-03-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N3-04
-  fixture_id: GEN-SHELF-06
-  aisle_id: genie-s3
-  sku: GN-DAILY-FACE-WASH
-  level: 3
-  index: 4
-  item_position: {x: 4.641, y: 0.574, z: 1.485}
-  approach_pose: {x: 4.641, y: 0.949, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-06-n3-04-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N3-05
-  fixture_id: GEN-SHELF-06
-  aisle_id: genie-s3
-  sku: GN-RICE-CLEANSER
-  level: 3
-  index: 5
-  item_position: {x: 4.759, y: 0.579, z: 1.485}
-  approach_pose: {x: 4.759, y: 0.954, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-06-n3-05-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N2-06
+  - {lot_id: gen-gen-shelf-05-w0-06-l1, qty: 7}
+- slot_id: GEN-SHELF-06-N2-00
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-VITAMIN-E-LOTION
   level: 2
-  index: 6
+  index: 0
   item_position: {x: 3.95, y: 0.569, z: 1.038}
   approach_pose: {x: 3.95, y: 0.944, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-06-n2-06-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N2-07
+  - {lot_id: gen-gen-shelf-06-n2-00-l1, qty: 3}
+- slot_id: GEN-SHELF-06-N2-01
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-BABY-POWDER
   level: 2
-  index: 7
+  index: 1
   item_position: {x: 4.077, y: 0.58, z: 1.038}
   approach_pose: {x: 4.077, y: 0.955, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-06-n2-07-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N2-08
+  - {lot_id: gen-gen-shelf-06-n2-01-l1, qty: 3}
+- slot_id: GEN-SHELF-06-N2-02
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-BABY-LOTION
   level: 2
-  index: 8
+  index: 2
   item_position: {x: 4.209, y: 0.575, z: 1.038}
   approach_pose: {x: 4.209, y: 0.95, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-06-n2-08-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N2-09
+  - {lot_id: gen-gen-shelf-06-n2-02-l1, qty: 3}
+- slot_id: GEN-SHELF-06-N2-03
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-PEACH-BODY-WASH
   level: 2
-  index: 9
+  index: 3
   item_position: {x: 4.343, y: 0.584, z: 1.038}
   approach_pose: {x: 4.343, y: 0.959, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-06-n2-09-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N2-10
+  - {lot_id: gen-gen-shelf-06-n2-03-l1, qty: 3}
+- slot_id: GEN-SHELF-06-N2-04
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-KIDS-SHAMPOO
   level: 2
-  index: 10
+  index: 4
   item_position: {x: 4.485, y: 0.577, z: 1.038}
   approach_pose: {x: 4.485, y: 0.952, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-06-n2-10-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N2-11
+  - {lot_id: gen-gen-shelf-06-n2-04-l1, qty: 3}
+- slot_id: GEN-SHELF-06-N2-05
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-KIDS-FACE-WASH
   level: 2
-  index: 11
+  index: 5
   item_position: {x: 4.601, y: 0.571, z: 1.038}
   approach_pose: {x: 4.601, y: 0.946, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-06-n2-11-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N2-12
+  - {lot_id: gen-gen-shelf-06-n2-05-l1, qty: 3}
+- slot_id: GEN-SHELF-06-N2-06
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-KIDS-BODY-WASH
   level: 2
-  index: 12
+  index: 6
   item_position: {x: 4.762, y: 0.587, z: 1.038}
   approach_pose: {x: 4.762, y: 0.962, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-06-n2-12-l1, qty: 3}
-- slot_id: GEN-SHELF-06-N1-13
+  - {lot_id: gen-gen-shelf-06-n2-06-l1, qty: 3}
+- slot_id: GEN-SHELF-06-N1-07
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-DRINK-YOGURT-12
   level: 1
-  index: 13
+  index: 7
   item_position: {x: 4.815, y: 0.569, z: 0.591}
   approach_pose: {x: 4.815, y: 0.944, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-06-n1-13-l1, qty: 2}
-- slot_id: GEN-SHELF-06-N0-14
+  - {lot_id: gen-gen-shelf-06-n1-07-l1, qty: 2}
+- slot_id: GEN-SHELF-06-N0-08
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-BLACK-TEA-100
   level: 0
-  index: 14
+  index: 8
   item_position: {x: 4.057, y: 0.562, z: 0.126}
   approach_pose: {x: 4.057, y: 0.937, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 1
   lots:
-  - {lot_id: gen-gen-shelf-06-n0-14-l1, qty: 1}
-- slot_id: GEN-SHELF-06-N0-15
+  - {lot_id: gen-gen-shelf-06-n0-08-l1, qty: 1}
+- slot_id: GEN-SHELF-06-N0-09
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-SANDWICH-BREAD
   level: 0
-  index: 15
+  index: 9
   item_position: {x: 4.495, y: 0.566, z: 0.126}
   approach_pose: {x: 4.495, y: 0.941, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-06-n0-15-l1, qty: 2}
-- slot_id: GEN-SHELF-06-N0-16
+  - {lot_id: gen-gen-shelf-06-n0-09-l1, qty: 2}
+- slot_id: GEN-SHELF-06-N0-10
   fixture_id: GEN-SHELF-06
   aisle_id: genie-s3
   sku: GN-AP-FLOUR-5LB
   level: 0
-  index: 16
+  index: 10
   item_position: {x: 4.836, y: 0.615, z: 0.126}
   approach_pose: {x: 4.836, y: 0.99, theta: -1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-06-n0-16-l1, qty: 2}
-- slot_id: GEN-SHELF-08-W3-00
-  fixture_id: GEN-SHELF-08
-  aisle_id: genie-s2
-  sku: GN-RICE-CRISPS
-  level: 3
-  index: 0
-  item_position: {x: 7.89, y: 1.319, z: 1.454}
-  approach_pose: {x: 7.515, y: 1.319, theta: -0.0}
-  facings: 4
-  capacity: 12
-  qty: 4
-  lots:
-  - {lot_id: gen-gen-shelf-08-w3-00-l1, qty: 4}
-- slot_id: GEN-SHELF-08-W2-01
+  - {lot_id: gen-gen-shelf-06-n0-10-l1, qty: 2}
+- slot_id: GEN-SHELF-08-W2-00
   fixture_id: GEN-SHELF-08
   aisle_id: genie-s2
   sku: GN-CINNAMON-SWIRL
   level: 2
-  index: 1
+  index: 0
   item_position: {x: 7.902, y: 1.045, z: 1.108}
   approach_pose: {x: 7.527, y: 1.045, theta: -0.0}
   facings: 2
+  capacity: 12
+  qty: 8
+  lots:
+  - {lot_id: gen-gen-shelf-08-w2-00-l1, qty: 8}
+- slot_id: GEN-SHELF-08-W2-01
+  fixture_id: GEN-SHELF-08
+  aisle_id: genie-s2
+  sku: GN-CHOCO-SWIRL-LOAF
+  level: 2
+  index: 1
+  item_position: {x: 7.896, y: 1.277, z: 1.108}
+  approach_pose: {x: 7.521, y: 1.277, theta: -0.0}
+  facings: 1
   capacity: 12
   qty: 8
   lots:
@@ -1146,77 +1003,77 @@ slots:
 - slot_id: GEN-SHELF-08-W2-02
   fixture_id: GEN-SHELF-08
   aisle_id: genie-s2
-  sku: GN-CHOCO-SWIRL-LOAF
-  level: 2
-  index: 2
-  item_position: {x: 7.896, y: 1.277, z: 1.108}
-  approach_pose: {x: 7.521, y: 1.277, theta: -0.0}
-  facings: 1
-  capacity: 12
-  qty: 8
-  lots:
-  - {lot_id: gen-gen-shelf-08-w2-02-l1, qty: 8}
-- slot_id: GEN-SHELF-08-W2-03
-  fixture_id: GEN-SHELF-08
-  aisle_id: genie-s2
   sku: GN-SWIRL-ROLLS-8
   level: 2
-  index: 3
+  index: 2
   item_position: {x: 7.89, y: 1.541, z: 1.108}
   approach_pose: {x: 7.515, y: 1.541, theta: -0.0}
   facings: 2
   capacity: 12
   qty: 6
   lots:
-  - {lot_id: gen-gen-shelf-08-w2-03-l1, qty: 6}
-- slot_id: GEN-SHELF-08-W2-04
+  - {lot_id: gen-gen-shelf-08-w2-02-l1, qty: 6}
+- slot_id: GEN-SHELF-08-W2-03
   fixture_id: GEN-SHELF-08
   aisle_id: genie-s2
   sku: GN-RICE-CRISPS
   level: 2
-  index: 4
+  index: 3
   item_position: {x: 7.884, y: 1.572, z: 1.108}
   approach_pose: {x: 7.509, y: 1.572, theta: -0.0}
   facings: 2
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-08-w2-04-l1, qty: 2}
-- slot_id: GEN-SHELF-08-W1-05
+  - {lot_id: gen-gen-shelf-08-w2-03-l1, qty: 2}
+- slot_id: GEN-SHELF-08-W1-04
   fixture_id: GEN-SHELF-08
   aisle_id: genie-s2
   sku: GN-MATCHA-ROLL
   level: 1
-  index: 5
+  index: 4
   item_position: {x: 7.918, y: 1.016, z: 0.756}
   approach_pose: {x: 7.543, y: 1.016, theta: -0.0}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-08-w1-05-l1, qty: 4}
-- slot_id: GEN-SHELF-08-W1-06
+  - {lot_id: gen-gen-shelf-08-w1-04-l1, qty: 4}
+- slot_id: GEN-SHELF-08-W1-05
   fixture_id: GEN-SHELF-08
   aisle_id: genie-s2
   sku: GN-SESAME-RICE-CAKE
   level: 1
-  index: 6
+  index: 5
   item_position: {x: 7.898, y: 1.425, z: 0.756}
   approach_pose: {x: 7.523, y: 1.425, theta: -0.0}
   facings: 2
   capacity: 12
   qty: 4
   lots:
-  - {lot_id: gen-gen-shelf-08-w1-06-l1, qty: 4}
+  - {lot_id: gen-gen-shelf-08-w1-05-l1, qty: 4}
+- slot_id: GEN-SHELF-08-W0-06
+  fixture_id: GEN-SHELF-08
+  aisle_id: genie-s2
+  sku: GN-MINI-CROISSANT
+  level: 0
+  index: 6
+  item_position: {x: 7.912, y: 1.047, z: 0.398}
+  approach_pose: {x: 7.537, y: 1.047, theta: -0.0}
+  facings: 1
+  capacity: 12
+  qty: 3
+  lots:
+  - {lot_id: gen-gen-shelf-08-w0-06-l1, qty: 3}
 - slot_id: GEN-SHELF-08-W0-07
   fixture_id: GEN-SHELF-08
   aisle_id: genie-s2
   sku: GN-MINI-CROISSANT
   level: 0
   index: 7
-  item_position: {x: 7.912, y: 1.047, z: 0.398}
-  approach_pose: {x: 7.537, y: 1.047, theta: -0.0}
-  facings: 1
+  item_position: {x: 7.906, y: 1.301, z: 0.398}
+  approach_pose: {x: 7.531, y: 1.301, theta: -0.0}
+  facings: 2
   capacity: 12
   qty: 3
   lots:
@@ -1224,29 +1081,16 @@ slots:
 - slot_id: GEN-SHELF-08-W0-08
   fixture_id: GEN-SHELF-08
   aisle_id: genie-s2
-  sku: GN-MINI-CROISSANT
-  level: 0
-  index: 8
-  item_position: {x: 7.906, y: 1.301, z: 0.398}
-  approach_pose: {x: 7.531, y: 1.301, theta: -0.0}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-08-w0-08-l1, qty: 3}
-- slot_id: GEN-SHELF-08-W0-09
-  fixture_id: GEN-SHELF-08
-  aisle_id: genie-s2
   sku: GN-BUTTER-COOKIES
   level: 0
-  index: 9
+  index: 8
   item_position: {x: 7.915, y: 1.484, z: 0.398}
   approach_pose: {x: 7.54, y: 1.484, theta: -0.0}
   facings: 3
   capacity: 12
   qty: 7
   lots:
-  - {lot_id: gen-gen-shelf-08-w0-09-l1, qty: 7}
+  - {lot_id: gen-gen-shelf-08-w0-08-l1, qty: 7}
 - slot_id: GEN-SHELF-10-E2-00
   fixture_id: GEN-SHELF-10
   aisle_id: genie-s4
@@ -1299,136 +1143,110 @@ slots:
   qty: 4
   lots:
   - {lot_id: gen-gen-shelf-10-e1-03-l1, qty: 4}
-- slot_id: GEN-SHELF-11-N5-00
-  fixture_id: GEN-SHELF-11
-  aisle_id: genie-s5
-  sku: GN-DEGREASER-2PK
-  level: 5
-  index: 0
-  item_position: {x: 4.785, y: 2.528, z: 1.178}
-  approach_pose: {x: 4.785, y: 2.903, theta: -1.571}
-  facings: 1
-  capacity: 12
-  qty: 2
-  lots:
-  - {lot_id: gen-gen-shelf-11-n5-00-l1, qty: 2}
-- slot_id: GEN-SHELF-11-N4-01
+- slot_id: GEN-SHELF-11-N4-00
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
   sku: GN-DEGREASER-2PK
   level: 4
-  index: 1
+  index: 0
   item_position: {x: 4.63, y: 2.528, z: 1.075}
   approach_pose: {x: 4.63, y: 2.903, theta: -1.571}
   facings: 4
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-11-n4-01-l1, qty: 8}
-- slot_id: GEN-SHELF-11-N3-02
+  - {lot_id: gen-gen-shelf-11-n4-00-l1, qty: 8}
+- slot_id: GEN-SHELF-11-N3-01
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
   sku: GN-DEGREASER-2PK
   level: 3
-  index: 2
+  index: 1
   item_position: {x: 4.33, y: 2.528, z: 0.988}
   approach_pose: {x: 4.33, y: 2.903, theta: -1.571}
   facings: 4
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-11-n3-02-l1, qty: 8}
-- slot_id: GEN-SHELF-11-N2-03
+  - {lot_id: gen-gen-shelf-11-n3-01-l1, qty: 8}
+- slot_id: GEN-SHELF-11-N2-02
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
   sku: GN-TOILET-CLEANER
   level: 2
-  index: 3
+  index: 2
   item_position: {x: 4.01, y: 2.53, z: 0.772}
   approach_pose: {x: 4.01, y: 2.905, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 5
   lots:
-  - {lot_id: gen-gen-shelf-11-n2-03-l1, qty: 5}
-- slot_id: GEN-SHELF-11-N1-04
+  - {lot_id: gen-gen-shelf-11-n2-02-l1, qty: 5}
+- slot_id: GEN-SHELF-11-N1-03
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
   sku: GN-TOILET-CLEANER
   level: 1
-  index: 4
+  index: 3
   item_position: {x: 3.973, y: 2.53, z: 0.438}
   approach_pose: {x: 3.973, y: 2.905, theta: -1.571}
   facings: 2
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-11-n1-04-l1, qty: 3}
-- slot_id: GEN-SHELF-11-S5-00
-  fixture_id: GEN-SHELF-11
-  aisle_id: genie-s5
-  sku: GN-DEGREASER-2PK
-  level: 5
-  index: 0
-  item_position: {x: 4.785, y: 1.663, z: 1.178}
-  approach_pose: {x: 4.785, y: 1.288, theta: 1.571}
-  facings: 1
-  capacity: 12
-  qty: 2
-  lots:
-  - {lot_id: gen-gen-shelf-11-s5-00-l1, qty: 2}
-- slot_id: GEN-SHELF-11-S4-01
+  - {lot_id: gen-gen-shelf-11-n1-03-l1, qty: 3}
+- slot_id: GEN-SHELF-11-S4-00
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
   sku: GN-DEGREASER-2PK
   level: 4
-  index: 1
+  index: 0
   item_position: {x: 4.63, y: 1.663, z: 1.075}
   approach_pose: {x: 4.63, y: 1.288, theta: 1.571}
   facings: 4
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-11-s4-01-l1, qty: 8}
-- slot_id: GEN-SHELF-11-S3-02
+  - {lot_id: gen-gen-shelf-11-s4-00-l1, qty: 8}
+- slot_id: GEN-SHELF-11-S3-01
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
   sku: GN-DEGREASER-2PK
   level: 3
-  index: 2
+  index: 1
   item_position: {x: 4.33, y: 1.663, z: 0.988}
   approach_pose: {x: 4.33, y: 1.288, theta: 1.571}
   facings: 4
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-11-s3-02-l1, qty: 8}
-- slot_id: GEN-SHELF-11-S2-03
+  - {lot_id: gen-gen-shelf-11-s3-01-l1, qty: 8}
+- slot_id: GEN-SHELF-11-S2-02
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
   sku: GN-TOILET-CLEANER
   level: 2
-  index: 3
+  index: 2
   item_position: {x: 4.01, y: 1.696, z: 0.772}
   approach_pose: {x: 4.01, y: 1.321, theta: 1.571}
   facings: 2
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-11-s2-03-l1, qty: 3}
-- slot_id: GEN-SHELF-11-S1-04
+  - {lot_id: gen-gen-shelf-11-s2-02-l1, qty: 3}
+- slot_id: GEN-SHELF-11-S1-03
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
   sku: GN-TOILET-CLEANER
   level: 1
-  index: 4
+  index: 3
   item_position: {x: 3.973, y: 1.669, z: 0.438}
   approach_pose: {x: 3.973, y: 1.294, theta: 1.571}
   facings: 2
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-11-s1-04-l1, qty: 3}
+  - {lot_id: gen-gen-shelf-11-s1-03-l1, qty: 3}
 - slot_id: GEN-SHELF-11-W2-00
   fixture_id: GEN-SHELF-11
   aisle_id: genie-s5
@@ -1780,435 +1598,266 @@ slots:
   qty: 3
   lots:
   - {lot_id: gen-gen-shelf-15-w0-05-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S3-00
-  fixture_id: GEN-SHELF-16
-  aisle_id: genie-s7
-  sku: GN-HAND-CREAM
-  level: 3
-  index: 0
-  item_position: {x: 5.529, y: 3.857, z: 1.485}
-  approach_pose: {x: 5.529, y: 3.471, theta: 1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-16-s3-00-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S3-01
-  fixture_id: GEN-SHELF-16
-  aisle_id: genie-s7
-  sku: GN-RICE-CLEANSER
-  level: 3
-  index: 1
-  item_position: {x: 5.664, y: 3.847, z: 1.485}
-  approach_pose: {x: 5.664, y: 3.471, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-16-s3-01-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S3-02
-  fixture_id: GEN-SHELF-16
-  aisle_id: genie-s7
-  sku: GN-DAILY-FACE-WASH
-  level: 3
-  index: 2
-  item_position: {x: 5.782, y: 3.849, z: 1.485}
-  approach_pose: {x: 5.782, y: 3.471, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-16-s3-02-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S3-03
-  fixture_id: GEN-SHELF-16
-  aisle_id: genie-s7
-  sku: GN-CHARCOAL-CLEANSER
-  level: 3
-  index: 3
-  item_position: {x: 5.946, y: 3.839, z: 1.485}
-  approach_pose: {x: 5.946, y: 3.464, theta: 1.571}
-  facings: 1
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-16-s3-03-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S3-04
-  fixture_id: GEN-SHELF-16
-  aisle_id: genie-s7
-  sku: GN-SOFT-FACE-LOTION
-  level: 3
-  index: 4
-  item_position: {x: 6.115, y: 3.847, z: 1.485}
-  approach_pose: {x: 6.115, y: 3.471, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-16-s3-04-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S3-05
-  fixture_id: GEN-SHELF-16
-  aisle_id: genie-s7
-  sku: GN-ALOE-NIGHT-CREAM
-  level: 3
-  index: 5
-  item_position: {x: 6.284, y: 3.822, z: 1.485}
-  approach_pose: {x: 6.284, y: 3.447, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-16-s3-05-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S3-06
-  fixture_id: GEN-SHELF-16
-  aisle_id: genie-s7
-  sku: GN-CALMING-CREAM
-  level: 3
-  index: 6
-  item_position: {x: 6.472, y: 3.819, z: 1.485}
-  approach_pose: {x: 6.472, y: 3.444, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 3
-  lots:
-  - {lot_id: gen-gen-shelf-16-s3-06-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S2-07
+- slot_id: GEN-SHELF-16-S2-00
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-HAND-SANITIZER
   level: 2
-  index: 7
+  index: 0
   item_position: {x: 5.508, y: 3.858, z: 1.038}
   approach_pose: {x: 5.508, y: 3.471, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-16-s2-07-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S2-08
+  - {lot_id: gen-gen-shelf-16-s2-00-l1, qty: 3}
+- slot_id: GEN-SHELF-16-S2-01
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-KIDS-BODY-WASH
   level: 2
-  index: 8
+  index: 1
   item_position: {x: 5.661, y: 3.838, z: 1.038}
   approach_pose: {x: 5.661, y: 3.463, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-16-s2-08-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S2-09
+  - {lot_id: gen-gen-shelf-16-s2-01-l1, qty: 3}
+- slot_id: GEN-SHELF-16-S2-02
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-KIDS-FACE-WASH
   level: 2
-  index: 9
+  index: 2
   item_position: {x: 5.822, y: 3.852, z: 1.038}
   approach_pose: {x: 5.822, y: 3.471, theta: 1.571}
   facings: 2
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-16-s2-09-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S2-10
+  - {lot_id: gen-gen-shelf-16-s2-02-l1, qty: 3}
+- slot_id: GEN-SHELF-16-S2-03
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-KIDS-SHAMPOO
   level: 2
-  index: 10
+  index: 3
   item_position: {x: 5.937, y: 3.843, z: 1.038}
   approach_pose: {x: 5.937, y: 3.468, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-16-s2-10-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S2-11
+  - {lot_id: gen-gen-shelf-16-s2-03-l1, qty: 3}
+- slot_id: GEN-SHELF-16-S2-04
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-PEACH-BODY-WASH
   level: 2
-  index: 11
+  index: 4
   item_position: {x: 6.08, y: 3.834, z: 1.038}
   approach_pose: {x: 6.08, y: 3.459, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-16-s2-11-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S2-12
+  - {lot_id: gen-gen-shelf-16-s2-04-l1, qty: 3}
+- slot_id: GEN-SHELF-16-S2-05
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-BABY-LOTION
   level: 2
-  index: 12
+  index: 5
   item_position: {x: 6.214, y: 3.839, z: 1.038}
   approach_pose: {x: 6.214, y: 3.464, theta: 1.571}
   facings: 2
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-16-s2-12-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S2-13
+  - {lot_id: gen-gen-shelf-16-s2-05-l1, qty: 3}
+- slot_id: GEN-SHELF-16-S2-06
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-BABY-POWDER
   level: 2
-  index: 13
+  index: 6
   item_position: {x: 6.346, y: 3.832, z: 1.038}
   approach_pose: {x: 6.346, y: 3.457, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-16-s2-13-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S2-14
+  - {lot_id: gen-gen-shelf-16-s2-06-l1, qty: 3}
+- slot_id: GEN-SHELF-16-S2-07
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-VITAMIN-E-LOTION
   level: 2
-  index: 14
+  index: 7
   item_position: {x: 6.472, y: 3.84, z: 1.038}
   approach_pose: {x: 6.472, y: 3.465, theta: 1.571}
   facings: 2
   capacity: 12
   qty: 3
   lots:
-  - {lot_id: gen-gen-shelf-16-s2-14-l1, qty: 3}
-- slot_id: GEN-SHELF-16-S1-15
+  - {lot_id: gen-gen-shelf-16-s2-07-l1, qty: 3}
+- slot_id: GEN-SHELF-16-S1-08
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-DRINK-YOGURT-12
   level: 1
-  index: 15
+  index: 8
   item_position: {x: 5.609, y: 3.856, z: 0.591}
   approach_pose: {x: 5.609, y: 3.471, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-16-s1-15-l1, qty: 2}
-- slot_id: GEN-SHELF-16-S0-16
+  - {lot_id: gen-gen-shelf-16-s1-08-l1, qty: 2}
+- slot_id: GEN-SHELF-16-S0-09
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-AP-FLOUR-5LB
   level: 0
-  index: 16
+  index: 9
   item_position: {x: 5.587, y: 3.811, z: 0.126}
   approach_pose: {x: 5.587, y: 3.436, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-16-s0-16-l1, qty: 2}
-- slot_id: GEN-SHELF-16-S0-17
+  - {lot_id: gen-gen-shelf-16-s0-09-l1, qty: 2}
+- slot_id: GEN-SHELF-16-S0-10
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-SANDWICH-BREAD
   level: 0
-  index: 17
+  index: 10
   item_position: {x: 5.929, y: 3.852, z: 0.126}
   approach_pose: {x: 5.929, y: 3.471, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 2
   lots:
-  - {lot_id: gen-gen-shelf-16-s0-17-l1, qty: 2}
-- slot_id: GEN-SHELF-16-S0-18
+  - {lot_id: gen-gen-shelf-16-s0-10-l1, qty: 2}
+- slot_id: GEN-SHELF-16-S0-11
   fixture_id: GEN-SHELF-16
   aisle_id: genie-s7
   sku: GN-BLACK-TEA-100
   level: 0
-  index: 18
+  index: 11
   item_position: {x: 6.366, y: 3.846, z: 0.126}
   approach_pose: {x: 6.366, y: 3.471, theta: 1.571}
   facings: 1
   capacity: 12
   qty: 1
   lots:
-  - {lot_id: gen-gen-shelf-16-s0-18-l1, qty: 1}
-- slot_id: GEN-SHELF-17-S3-00
-  fixture_id: GEN-SHELF-17
-  aisle_id: genie-s8
-  sku: GN-SPRING-WATER
-  level: 3
-  index: 0
-  item_position: {x: 4.337, y: 3.873, z: 1.483}
-  approach_pose: {x: 4.337, y: 3.497, theta: 1.571}
-  facings: 3
-  capacity: 12
-  qty: 5
-  lots:
-  - {lot_id: gen-gen-shelf-17-s3-00-l1, qty: 5}
-- slot_id: GEN-SHELF-17-S3-01
-  fixture_id: GEN-SHELF-17
-  aisle_id: genie-s8
-  sku: GN-SOY-MILK
-  level: 3
-  index: 1
-  item_position: {x: 4.5, y: 3.884, z: 1.483}
-  approach_pose: {x: 4.5, y: 3.497, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 5
-  lots:
-  - {lot_id: gen-gen-shelf-17-s3-01-l1, qty: 5}
-- slot_id: GEN-SHELF-17-S3-02
-  fixture_id: GEN-SHELF-17
-  aisle_id: genie-s8
-  sku: GN-PEACH-OOLONG
-  level: 3
-  index: 2
-  item_position: {x: 4.656, y: 3.873, z: 1.483}
-  approach_pose: {x: 4.656, y: 3.497, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 5
-  lots:
-  - {lot_id: gen-gen-shelf-17-s3-02-l1, qty: 5}
-- slot_id: GEN-SHELF-17-S3-03
-  fixture_id: GEN-SHELF-17
-  aisle_id: genie-s8
-  sku: GN-BLUEBERRY-YOGURT-DRINK
-  level: 3
-  index: 3
-  item_position: {x: 4.84, y: 3.89, z: 1.483}
-  approach_pose: {x: 4.84, y: 3.497, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 5
-  lots:
-  - {lot_id: gen-gen-shelf-17-s3-03-l1, qty: 5}
-- slot_id: GEN-SHELF-17-S3-04
-  fixture_id: GEN-SHELF-17
-  aisle_id: genie-s8
-  sku: GN-STRAWBERRY-YOGURT-DRINK
-  level: 3
-  index: 4
-  item_position: {x: 5.021, y: 3.897, z: 1.483}
-  approach_pose: {x: 5.021, y: 3.497, theta: 1.571}
-  facings: 2
-  capacity: 12
-  qty: 5
-  lots:
-  - {lot_id: gen-gen-shelf-17-s3-04-l1, qty: 5}
-- slot_id: GEN-SHELF-17-S3-05
-  fixture_id: GEN-SHELF-17
-  aisle_id: genie-s8
-  sku: GN-MANGO-YOGURT-DRINK
-  level: 3
-  index: 5
-  item_position: {x: 5.184, y: 3.897, z: 1.483}
-  approach_pose: {x: 5.184, y: 3.497, theta: 1.571}
-  facings: 5
-  capacity: 12
-  qty: 8
-  lots:
-  - {lot_id: gen-gen-shelf-17-s3-05-l1, qty: 8}
-- slot_id: GEN-SHELF-17-S2-06
+  - {lot_id: gen-gen-shelf-16-s0-11-l1, qty: 1}
+- slot_id: GEN-SHELF-17-S2-00
   fixture_id: GEN-SHELF-17
   aisle_id: genie-s8
   sku: GN-GREEN-TEA
   level: 2
-  index: 6
+  index: 0
   item_position: {x: 4.349, y: 3.897, z: 1.039}
   approach_pose: {x: 4.349, y: 3.497, theta: 1.571}
   facings: 4
   capacity: 12
   qty: 7
   lots:
-  - {lot_id: gen-gen-shelf-17-s2-06-l1, qty: 7}
-- slot_id: GEN-SHELF-17-S2-07
+  - {lot_id: gen-gen-shelf-17-s2-00-l1, qty: 7}
+- slot_id: GEN-SHELF-17-S2-01
   fixture_id: GEN-SHELF-17
   aisle_id: genie-s8
   sku: GN-COCONUT-JUICE
   level: 2
-  index: 7
+  index: 1
   item_position: {x: 4.63, y: 3.897, z: 1.039}
   approach_pose: {x: 4.63, y: 3.497, theta: 1.571}
   facings: 4
   capacity: 12
   qty: 10
   lots:
-  - {lot_id: gen-gen-shelf-17-s2-07-l1, qty: 10}
-- slot_id: GEN-SHELF-17-S2-08
+  - {lot_id: gen-gen-shelf-17-s2-01-l1, qty: 10}
+- slot_id: GEN-SHELF-17-S2-02
   fixture_id: GEN-SHELF-17
   aisle_id: genie-s8
   sku: GN-GRAPE-JUICE
   level: 2
-  index: 8
+  index: 2
   item_position: {x: 5.064, y: 3.897, z: 1.039}
   approach_pose: {x: 5.064, y: 3.497, theta: 1.571}
   facings: 5
   capacity: 12
   qty: 7
   lots:
-  - {lot_id: gen-gen-shelf-17-s2-08-l1, qty: 7}
-- slot_id: GEN-SHELF-17-S1-09
+  - {lot_id: gen-gen-shelf-17-s2-02-l1, qty: 7}
+- slot_id: GEN-SHELF-17-S1-03
   fixture_id: GEN-SHELF-17
   aisle_id: genie-s8
   sku: GN-COCONUT-WATER
   level: 1
-  index: 9
+  index: 3
   item_position: {x: 4.289, y: 3.896, z: 0.593}
   approach_pose: {x: 4.289, y: 3.497, theta: 1.571}
   facings: 3
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-17-s1-09-l1, qty: 8}
-- slot_id: GEN-SHELF-17-S1-10
+  - {lot_id: gen-gen-shelf-17-s1-03-l1, qty: 8}
+- slot_id: GEN-SHELF-17-S1-04
   fixture_id: GEN-SHELF-17
   aisle_id: genie-s8
   sku: GN-CHOCOLATE-MILK
   level: 1
-  index: 10
+  index: 4
   item_position: {x: 4.553, y: 3.895, z: 0.593}
   approach_pose: {x: 4.553, y: 3.497, theta: 1.571}
   facings: 5
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-17-s1-10-l1, qty: 8}
-- slot_id: GEN-SHELF-17-S1-11
+  - {lot_id: gen-gen-shelf-17-s1-04-l1, qty: 8}
+- slot_id: GEN-SHELF-17-S1-05
   fixture_id: GEN-SHELF-17
   aisle_id: genie-s8
   sku: GN-COLD-BREW
   level: 1
-  index: 11
+  index: 5
   item_position: {x: 4.783, y: 3.894, z: 0.593}
   approach_pose: {x: 4.783, y: 3.497, theta: 1.571}
   facings: 6
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-17-s1-11-l1, qty: 8}
-- slot_id: GEN-SHELF-17-S1-12
+  - {lot_id: gen-gen-shelf-17-s1-05-l1, qty: 8}
+- slot_id: GEN-SHELF-17-S1-06
   fixture_id: GEN-SHELF-17
   aisle_id: genie-s8
   sku: GN-COLD-BREW-LATTE
   level: 1
-  index: 12
+  index: 6
   item_position: {x: 5.007, y: 3.896, z: 0.593}
   approach_pose: {x: 5.007, y: 3.497, theta: 1.571}
   facings: 5
   capacity: 12
   qty: 8
   lots:
-  - {lot_id: gen-gen-shelf-17-s1-12-l1, qty: 8}
-- slot_id: GEN-SHELF-17-S1-13
+  - {lot_id: gen-gen-shelf-17-s1-06-l1, qty: 8}
+- slot_id: GEN-SHELF-17-S1-07
   fixture_id: GEN-SHELF-17
   aisle_id: genie-s8
   sku: GN-PROBIOTIC-MILK
   level: 1
-  index: 13
+  index: 7
   item_position: {x: 5.21, y: 3.881, z: 0.593}
   approach_pose: {x: 5.21, y: 3.497, theta: 1.571}
   facings: 2
   capacity: 12
   qty: 5
   lots:
-  - {lot_id: gen-gen-shelf-17-s1-13-l1, qty: 5}
+  - {lot_id: gen-gen-shelf-17-s1-07-l1, qty: 5}
 - slot_id: GEN-SHELF-18-S2-00
   fixture_id: GEN-SHELF-18
   aisle_id: genie-s9

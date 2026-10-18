@@ -17,20 +17,7 @@ fixtures_in_usd: [GEN-FRZ-09, GEN-SHELF-01, GEN-SHELF-02, GEN-SHELF-03, GEN-SHEL
   GEN-SHELF-08, GEN-SHELF-10, GEN-SHELF-11, GEN-SHELF-12, GEN-SHELF-13, GEN-SHELF-14, GEN-SHELF-15, GEN-SHELF-16, GEN-SHELF-17,
   GEN-SHELF-18, GEN-SHELF-19, GEN-SHELF-20, GEN-SHELF-21]
 slots:
-  GEN-SHELF-01-N3-00:
-  - path: background/Group_10/benchmark_snack_263_000
-    c: [0.962, 0.431, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_10/benchmark_snack_263_001
-    c: [0.714, 0.425, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_10/benchmark_snack_263_004
-    c: [0.957, 0.233, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_10/benchmark_snack_263_005
-    c: [0.729, 0.227, 1.593]
-    s: [0.207, 0.145, 0.276]
-  GEN-SHELF-01-N2-01:
+  GEN-SHELF-01-N2-00:
   - path: background/Group_10/benchmark_snack_265_000
     c: [0.688, 0.446, 1.184]
     s: [0.234, 0.091, 0.132]
@@ -55,7 +42,7 @@ slots:
   - path: background/Group_10/benchmark_snack_265_007
     c: [0.695, 0.17, 1.315]
     s: [0.234, 0.091, 0.132]
-  GEN-SHELF-01-N2-02:
+  GEN-SHELF-01-N2-01:
   - path: background/Group_10/benchmark_snack_266_000
     c: [0.92, 0.452, 1.182]
     s: [0.233, 0.094, 0.132]
@@ -80,7 +67,7 @@ slots:
   - path: background/Group_10/benchmark_snack_266_007
     c: [0.927, 0.175, 1.313]
     s: [0.233, 0.094, 0.132]
-  GEN-SHELF-01-N2-03:
+  GEN-SHELF-01-N2-02:
   - path: background/Group_10/benchmark_snack_261_000
     c: [1.185, 0.448, 1.185]
     s: [0.292, 0.113, 0.166]
@@ -99,14 +86,14 @@ slots:
   - path: background/Group_10/benchmark_snack_261_005
     c: [1.191, 0.189, 1.342]
     s: [0.292, 0.113, 0.166]
-  GEN-SHELF-01-N2-04:
+  GEN-SHELF-01-N2-03:
   - path: background/Group_10/benchmark_snack_263_002
     c: [1.216, 0.438, 1.593]
     s: [0.207, 0.145, 0.276]
   - path: background/Group_10/benchmark_snack_263_003
     c: [1.22, 0.239, 1.593]
     s: [0.207, 0.145, 0.276]
-  GEN-SHELF-01-N1-05:
+  GEN-SHELF-01-N1-04:
   - path: background/Group_10/benchmark_snack_264_001
     c: [0.867, 0.433, 0.791]
     s: [0.215, 0.096, 0.07]
@@ -119,7 +106,7 @@ slots:
   - path: background/Group_10/benchmark_snack_264_002
     c: [0.66, 0.428, 0.868]
     s: [0.215, 0.096, 0.07]
-  GEN-SHELF-01-N1-06:
+  GEN-SHELF-01-N1-05:
   - path: background/Group_10/benchmark_snack_262_001
     c: [1.069, 0.438, 0.791]
     s: [0.204, 0.116, 0.07]
@@ -132,7 +119,7 @@ slots:
   - path: background/Group_10/benchmark_snack_262_002
     c: [1.267, 0.443, 0.868]
     s: [0.204, 0.116, 0.07]
-  GEN-SHELF-01-N0-07:
+  GEN-SHELF-01-N0-06:
   - path: background/Group_10/benchmark_snack_267_001
     c: [0.691, 0.386, 0.514]
     s: [0.247, 0.192, 0.253]
@@ -142,7 +129,7 @@ slots:
   - path: background/Group_10/benchmark_snack_267_003
     c: [0.696, 0.158, 0.514]
     s: [0.247, 0.192, 0.253]
-  GEN-SHELF-01-N0-08:
+  GEN-SHELF-01-N0-07:
   - path: background/Group_10/benchmark_snack_267_000
     c: [0.944, 0.392, 0.514]
     s: [0.247, 0.192, 0.253]
@@ -152,7 +139,7 @@ slots:
   - path: background/Group_10/benchmark_snack_267_004
     c: [0.95, 0.164, 0.514]
     s: [0.247, 0.192, 0.253]
-  GEN-SHELF-01-N0-09:
+  GEN-SHELF-01-N0-08:
   - path: background/Group_10/benchmark_snack_260_006
     c: [1.265, 0.421, 0.49]
     s: [0.115, 0.115, 0.156]
@@ -174,20 +161,7 @@ slots:
   - path: background/Group_10/benchmark_snack_260_004
     c: [1.135, 0.127, 0.647]
     s: [0.115, 0.115, 0.156]
-  GEN-SHELF-02-N3-00:
-  - path: background/Group_09/benchmark_snack_263_000
-    c: [1.771, 0.431, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_09/benchmark_snack_263_001
-    c: [1.523, 0.425, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_09/benchmark_snack_263_004
-    c: [1.765, 0.233, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_09/benchmark_snack_263_005
-    c: [1.537, 0.227, 1.593]
-    s: [0.207, 0.145, 0.276]
-  GEN-SHELF-02-N2-01:
+  GEN-SHELF-02-N2-00:
   - path: background/Group_09/benchmark_snack_265_000
     c: [1.497, 0.446, 1.184]
     s: [0.234, 0.091, 0.132]
@@ -212,7 +186,7 @@ slots:
   - path: background/Group_09/benchmark_snack_265_007
     c: [1.503, 0.17, 1.315]
     s: [0.234, 0.091, 0.132]
-  GEN-SHELF-02-N2-02:
+  GEN-SHELF-02-N2-01:
   - path: background/Group_09/benchmark_snack_266_000
     c: [1.729, 0.452, 1.182]
     s: [0.233, 0.094, 0.132]
@@ -237,7 +211,7 @@ slots:
   - path: background/Group_09/benchmark_snack_266_007
     c: [1.736, 0.175, 1.313]
     s: [0.233, 0.094, 0.132]
-  GEN-SHELF-02-N2-03:
+  GEN-SHELF-02-N2-02:
   - path: background/Group_09/benchmark_snack_261_000
     c: [1.993, 0.448, 1.185]
     s: [0.292, 0.113, 0.166]
@@ -256,14 +230,14 @@ slots:
   - path: background/Group_09/benchmark_snack_261_005
     c: [1.999, 0.189, 1.342]
     s: [0.292, 0.113, 0.166]
-  GEN-SHELF-02-N2-04:
+  GEN-SHELF-02-N2-03:
   - path: background/Group_09/benchmark_snack_263_002
     c: [2.024, 0.438, 1.593]
     s: [0.207, 0.145, 0.276]
   - path: background/Group_09/benchmark_snack_263_003
     c: [2.029, 0.239, 1.593]
     s: [0.207, 0.145, 0.276]
-  GEN-SHELF-02-N1-05:
+  GEN-SHELF-02-N1-04:
   - path: background/Group_09/benchmark_snack_264_001
     c: [1.676, 0.433, 0.791]
     s: [0.215, 0.096, 0.07]
@@ -276,7 +250,7 @@ slots:
   - path: background/Group_09/benchmark_snack_264_002
     c: [1.468, 0.428, 0.868]
     s: [0.215, 0.096, 0.07]
-  GEN-SHELF-02-N1-06:
+  GEN-SHELF-02-N1-05:
   - path: background/Group_09/benchmark_snack_262_001
     c: [1.877, 0.438, 0.791]
     s: [0.204, 0.116, 0.07]
@@ -289,7 +263,7 @@ slots:
   - path: background/Group_09/benchmark_snack_262_002
     c: [2.075, 0.443, 0.868]
     s: [0.204, 0.116, 0.07]
-  GEN-SHELF-02-N0-07:
+  GEN-SHELF-02-N0-06:
   - path: background/Group_09/benchmark_snack_267_001
     c: [1.499, 0.386, 0.514]
     s: [0.247, 0.192, 0.253]
@@ -299,7 +273,7 @@ slots:
   - path: background/Group_09/benchmark_snack_267_003
     c: [1.505, 0.158, 0.514]
     s: [0.247, 0.192, 0.253]
-  GEN-SHELF-02-N0-08:
+  GEN-SHELF-02-N0-07:
   - path: background/Group_09/benchmark_snack_267_000
     c: [1.753, 0.392, 0.514]
     s: [0.247, 0.192, 0.253]
@@ -309,7 +283,7 @@ slots:
   - path: background/Group_09/benchmark_snack_267_004
     c: [1.758, 0.164, 0.514]
     s: [0.247, 0.192, 0.253]
-  GEN-SHELF-02-N0-09:
+  GEN-SHELF-02-N0-08:
   - path: background/Group_09/benchmark_snack_260_000
     c: [1.936, 0.422, 0.49]
     s: [0.115, 0.115, 0.156]
@@ -331,20 +305,7 @@ slots:
   - path: background/Group_09/benchmark_snack_260_004
     c: [1.943, 0.127, 0.647]
     s: [0.115, 0.115, 0.156]
-  GEN-SHELF-03-N3-00:
-  - path: background/Group_07/benchmark_snack_263_000
-    c: [2.586, 0.431, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_07/benchmark_snack_263_001
-    c: [2.338, 0.425, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_07/benchmark_snack_263_004
-    c: [2.581, 0.233, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_07/benchmark_snack_263_005
-    c: [2.353, 0.227, 1.593]
-    s: [0.207, 0.145, 0.276]
-  GEN-SHELF-03-N2-01:
+  GEN-SHELF-03-N2-00:
   - path: background/Group_07/benchmark_snack_265_000
     c: [2.312, 0.446, 1.184]
     s: [0.234, 0.091, 0.132]
@@ -369,7 +330,7 @@ slots:
   - path: background/Group_07/benchmark_snack_265_007
     c: [2.319, 0.17, 1.315]
     s: [0.234, 0.091, 0.132]
-  GEN-SHELF-03-N2-02:
+  GEN-SHELF-03-N2-01:
   - path: background/Group_07/benchmark_snack_266_000
     c: [2.544, 0.452, 1.182]
     s: [0.233, 0.094, 0.132]
@@ -394,7 +355,7 @@ slots:
   - path: background/Group_07/benchmark_snack_266_007
     c: [2.551, 0.175, 1.313]
     s: [0.233, 0.094, 0.132]
-  GEN-SHELF-03-N2-03:
+  GEN-SHELF-03-N2-02:
   - path: background/Group_07/benchmark_snack_261_000
     c: [2.809, 0.448, 1.185]
     s: [0.292, 0.113, 0.166]
@@ -413,14 +374,14 @@ slots:
   - path: background/Group_07/benchmark_snack_261_005
     c: [2.815, 0.189, 1.342]
     s: [0.292, 0.113, 0.166]
-  GEN-SHELF-03-N2-04:
+  GEN-SHELF-03-N2-03:
   - path: background/Group_07/benchmark_snack_263_002
     c: [2.84, 0.438, 1.593]
     s: [0.207, 0.145, 0.276]
   - path: background/Group_07/benchmark_snack_263_003
     c: [2.845, 0.239, 1.593]
     s: [0.207, 0.145, 0.276]
-  GEN-SHELF-03-N1-05:
+  GEN-SHELF-03-N1-04:
   - path: background/Group_07/benchmark_snack_264_001
     c: [2.491, 0.433, 0.791]
     s: [0.215, 0.096, 0.07]
@@ -433,7 +394,7 @@ slots:
   - path: background/Group_07/benchmark_snack_264_002
     c: [2.284, 0.428, 0.868]
     s: [0.215, 0.096, 0.07]
-  GEN-SHELF-03-N1-06:
+  GEN-SHELF-03-N1-05:
   - path: background/Group_07/benchmark_snack_262_001
     c: [2.693, 0.438, 0.791]
     s: [0.204, 0.116, 0.07]
@@ -446,7 +407,7 @@ slots:
   - path: background/Group_07/benchmark_snack_262_002
     c: [2.891, 0.443, 0.868]
     s: [0.204, 0.116, 0.07]
-  GEN-SHELF-03-N0-07:
+  GEN-SHELF-03-N0-06:
   - path: background/Group_07/benchmark_snack_267_001
     c: [2.315, 0.386, 0.514]
     s: [0.247, 0.192, 0.253]
@@ -456,7 +417,7 @@ slots:
   - path: background/Group_07/benchmark_snack_267_003
     c: [2.32, 0.158, 0.514]
     s: [0.247, 0.192, 0.253]
-  GEN-SHELF-03-N0-08:
+  GEN-SHELF-03-N0-07:
   - path: background/Group_07/benchmark_snack_267_000
     c: [2.568, 0.392, 0.514]
     s: [0.247, 0.192, 0.253]
@@ -466,7 +427,7 @@ slots:
   - path: background/Group_07/benchmark_snack_267_004
     c: [2.574, 0.164, 0.514]
     s: [0.247, 0.192, 0.253]
-  GEN-SHELF-03-N0-09:
+  GEN-SHELF-03-N0-08:
   - path: background/Group_07/benchmark_snack_260_006
     c: [2.889, 0.421, 0.49]
     s: [0.115, 0.115, 0.156]
@@ -488,20 +449,7 @@ slots:
   - path: background/Group_07/benchmark_snack_260_004
     c: [2.759, 0.127, 0.647]
     s: [0.115, 0.115, 0.156]
-  GEN-SHELF-04-N3-00:
-  - path: background/Group_06/benchmark_snack_263_000
-    c: [3.399, 0.431, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_06/benchmark_snack_263_001
-    c: [3.151, 0.425, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_06/benchmark_snack_263_004
-    c: [3.393, 0.233, 1.593]
-    s: [0.207, 0.145, 0.276]
-  - path: background/Group_06/benchmark_snack_263_005
-    c: [3.165, 0.227, 1.593]
-    s: [0.207, 0.145, 0.276]
-  GEN-SHELF-04-N2-01:
+  GEN-SHELF-04-N2-00:
   - path: background/Group_06/benchmark_snack_265_000
     c: [3.125, 0.446, 1.184]
     s: [0.234, 0.091, 0.132]
@@ -526,7 +474,7 @@ slots:
   - path: background/Group_06/benchmark_snack_265_007
     c: [3.132, 0.17, 1.315]
     s: [0.233, 0.091, 0.132]
-  GEN-SHELF-04-N2-02:
+  GEN-SHELF-04-N2-01:
   - path: background/Group_06/benchmark_snack_266_000
     c: [3.357, 0.452, 1.182]
     s: [0.233, 0.094, 0.132]
@@ -551,7 +499,7 @@ slots:
   - path: background/Group_06/benchmark_snack_266_007
     c: [3.364, 0.175, 1.313]
     s: [0.233, 0.094, 0.132]
-  GEN-SHELF-04-N2-03:
+  GEN-SHELF-04-N2-02:
   - path: background/Group_06/benchmark_snack_261_000
     c: [3.621, 0.448, 1.185]
     s: [0.292, 0.113, 0.166]
@@ -570,7 +518,7 @@ slots:
   - path: background/Group_06/benchmark_snack_261_005
     c: [3.627, 0.189, 1.342]
     s: [0.292, 0.113, 0.166]
-  GEN-SHELF-04-N1-04:
+  GEN-SHELF-04-N1-03:
   - path: background/Group_06/benchmark_snack_264_001
     c: [3.304, 0.433, 0.791]
     s: [0.215, 0.096, 0.07]
@@ -583,14 +531,14 @@ slots:
   - path: background/Group_06/benchmark_snack_264_002
     c: [3.096, 0.428, 0.868]
     s: [0.215, 0.096, 0.07]
-  GEN-SHELF-04-N1-05:
+  GEN-SHELF-04-N1-04:
   - path: background/Group_06/benchmark_snack_262_001
     c: [3.506, 0.438, 0.791]
     s: [0.204, 0.116, 0.07]
   - path: background/Group_06/benchmark_snack_262_003
     c: [3.506, 0.438, 0.868]
     s: [0.204, 0.116, 0.07]
-  GEN-SHELF-04-N0-06:
+  GEN-SHELF-04-N0-05:
   - path: background/Group_06/benchmark_snack_267_001
     c: [3.127, 0.386, 0.514]
     s: [0.247, 0.192, 0.253]
@@ -600,7 +548,7 @@ slots:
   - path: background/Group_06/benchmark_snack_267_003
     c: [3.133, 0.158, 0.514]
     s: [0.247, 0.192, 0.253]
-  GEN-SHELF-04-N0-07:
+  GEN-SHELF-04-N0-06:
   - path: background/Group_06/benchmark_snack_267_000
     c: [3.381, 0.392, 0.514]
     s: [0.247, 0.192, 0.253]
@@ -610,7 +558,7 @@ slots:
   - path: background/Group_06/benchmark_snack_267_004
     c: [3.386, 0.164, 0.514]
     s: [0.247, 0.192, 0.253]
-  GEN-SHELF-04-N0-08:
+  GEN-SHELF-04-N0-07:
   - path: background/Group_06/benchmark_snack_260_000
     c: [3.564, 0.422, 0.49]
     s: [0.115, 0.115, 0.156]
@@ -629,14 +577,7 @@ slots:
   - path: background/Group_06/benchmark_snack_260_004
     c: [3.571, 0.127, 0.647]
     s: [0.115, 0.115, 0.156]
-  GEN-SHELF-05-W3-00:
-  - path: background/Group_03/benchmark_snack_263_000
-    c: [7.963, 0.499, 1.593]
-    s: [0.145, 0.207, 0.276]
-  - path: background/Group_03/benchmark_snack_263_004
-    c: [8.162, 0.494, 1.593]
-    s: [0.145, 0.207, 0.276]
-  GEN-SHELF-05-W2-01:
+  GEN-SHELF-05-W2-00:
   - path: background/Group_03/benchmark_snack_266_000
     c: [7.942, 0.457, 1.182]
     s: [0.094, 0.233, 0.132]
@@ -661,7 +602,7 @@ slots:
   - path: background/Group_03/benchmark_snack_266_007
     c: [8.219, 0.464, 1.313]
     s: [0.093, 0.233, 0.132]
-  GEN-SHELF-05-W2-02:
+  GEN-SHELF-05-W2-01:
   - path: background/Group_03/benchmark_snack_261_000
     c: [7.946, 0.721, 1.185]
     s: [0.113, 0.292, 0.166]
@@ -680,21 +621,21 @@ slots:
   - path: background/Group_03/benchmark_snack_261_005
     c: [8.206, 0.728, 1.342]
     s: [0.113, 0.292, 0.166]
-  GEN-SHELF-05-W2-03:
+  GEN-SHELF-05-W2-02:
   - path: background/Group_03/benchmark_snack_263_002
     c: [7.957, 0.753, 1.593]
     s: [0.145, 0.207, 0.276]
   - path: background/Group_03/benchmark_snack_263_003
     c: [8.155, 0.757, 1.593]
     s: [0.145, 0.207, 0.276]
-  GEN-SHELF-05-W1-04:
+  GEN-SHELF-05-W1-03:
   - path: background/Group_03/benchmark_snack_264_001
     c: [7.961, 0.404, 0.791]
     s: [0.096, 0.215, 0.07]
   - path: background/Group_03/benchmark_snack_264_003
     c: [7.961, 0.404, 0.868]
     s: [0.096, 0.215, 0.07]
-  GEN-SHELF-05-W1-05:
+  GEN-SHELF-05-W1-04:
   - path: background/Group_03/benchmark_snack_262_001
     c: [7.957, 0.606, 0.791]
     s: [0.116, 0.204, 0.07]
@@ -707,7 +648,7 @@ slots:
   - path: background/Group_03/benchmark_snack_262_002
     c: [7.952, 0.803, 0.868]
     s: [0.116, 0.204, 0.07]
-  GEN-SHELF-05-W0-06:
+  GEN-SHELF-05-W0-05:
   - path: background/Group_03/benchmark_snack_267_000
     c: [8.002, 0.481, 0.514]
     s: [0.192, 0.247, 0.253]
@@ -717,7 +658,7 @@ slots:
   - path: background/Group_03/benchmark_snack_267_004
     c: [8.23, 0.487, 0.514]
     s: [0.192, 0.247, 0.253]
-  GEN-SHELF-05-W0-07:
+  GEN-SHELF-05-W0-06:
   - path: background/Group_03/benchmark_snack_260_006
     c: [7.974, 0.801, 0.49]
     s: [0.115, 0.115, 0.156]
@@ -739,67 +680,7 @@ slots:
   - path: background/Group_03/benchmark_snack_260_004
     c: [8.268, 0.672, 0.647]
     s: [0.115, 0.115, 0.156]
-  GEN-SHELF-06-N3-00:
-  - path: background/benchmark_skincare_products_007
-    c: [3.95, 0.554, 1.518]
-    s: [0.071, 0.071, 0.064]
-  - path: background/benchmark_skincare_products_007_01
-    c: [3.95, 0.465, 1.518]
-    s: [0.071, 0.071, 0.064]
-  - path: background/benchmark_skincare_products_007_02
-    c: [3.95, 0.373, 1.518]
-    s: [0.071, 0.071, 0.064]
-  GEN-SHELF-06-N3-01:
-  - path: background/benchmark_skincare_products_008
-    c: [4.138, 0.555, 1.513]
-    s: [0.07, 0.072, 0.057]
-  - path: background/benchmark_skincare_products_008_01
-    c: [4.138, 0.465, 1.513]
-    s: [0.07, 0.072, 0.057]
-  - path: background/benchmark_skincare_products_008_02
-    c: [4.138, 0.374, 1.513]
-    s: [0.07, 0.072, 0.057]
-  GEN-SHELF-06-N3-02:
-  - path: background/benchmark_skincare_products_009
-    c: [4.308, 0.554, 1.549]
-    s: [0.061, 0.03, 0.131]
-  - path: background/benchmark_skincare_products_009_02
-    c: [4.308, 0.465, 1.549]
-    s: [0.061, 0.03, 0.131]
-  - path: background/benchmark_skincare_products_009_01
-    c: [4.308, 0.373, 1.549]
-    s: [0.061, 0.03, 0.131]
-  GEN-SHELF-06-N3-03:
-  - path: background/benchmark_skincare_products_010
-    c: [4.476, 0.556, 1.562]
-    s: [0.077, 0.049, 0.154]
-  - path: background/benchmark_skincare_products_010_01
-    c: [4.476, 0.467, 1.562]
-    s: [0.077, 0.049, 0.154]
-  - path: background/benchmark_skincare_products_010_02
-    c: [4.476, 0.375, 1.562]
-    s: [0.077, 0.049, 0.154]
-  GEN-SHELF-06-N3-04:
-  - path: background/benchmark_skincare_products_011
-    c: [4.641, 0.554, 1.571]
-    s: [0.06, 0.039, 0.168]
-  - path: background/benchmark_skincare_products_011_03
-    c: [4.641, 0.465, 1.571]
-    s: [0.06, 0.04, 0.168]
-  - path: background/benchmark_skincare_products_011_04
-    c: [4.641, 0.373, 1.571]
-    s: [0.06, 0.039, 0.168]
-  GEN-SHELF-06-N3-05:
-  - path: background/benchmark_skincare_products_012
-    c: [4.759, 0.554, 1.562]
-    s: [0.078, 0.049, 0.155]
-  - path: background/benchmark_skincare_products_012_04
-    c: [4.759, 0.465, 1.562]
-    s: [0.078, 0.049, 0.155]
-  - path: background/benchmark_skincare_products_012_03
-    c: [4.759, 0.373, 1.562]
-    s: [0.078, 0.049, 0.155]
-  GEN-SHELF-06-N2-06:
+  GEN-SHELF-06-N2-00:
   - path: background/benchmark_skincare_products_000
     c: [3.95, 0.554, 1.1]
     s: [0.058, 0.03, 0.13]
@@ -809,7 +690,7 @@ slots:
   - path: background/benchmark_skincare_products_000_02
     c: [3.95, 0.373, 1.1]
     s: [0.058, 0.03, 0.13]
-  GEN-SHELF-06-N2-07:
+  GEN-SHELF-06-N2-01:
   - path: background/benchmark_skincare_products_001
     c: [4.077, 0.554, 1.122]
     s: [0.06, 0.052, 0.159]
@@ -819,7 +700,7 @@ slots:
   - path: background/benchmark_skincare_products_001_02
     c: [4.077, 0.373, 1.122]
     s: [0.06, 0.052, 0.159]
-  GEN-SHELF-06-N2-08:
+  GEN-SHELF-06-N2-02:
   - path: background/benchmark_skincare_products_002
     c: [4.209, 0.554, 1.1]
     s: [0.064, 0.042, 0.126]
@@ -829,7 +710,7 @@ slots:
   - path: background/benchmark_skincare_products_002_02
     c: [4.209, 0.373, 1.1]
     s: [0.064, 0.042, 0.126]
-  GEN-SHELF-06-N2-09:
+  GEN-SHELF-06-N2-03:
   - path: background/benchmark_skincare_products_003
     c: [4.343, 0.554, 1.12]
     s: [0.059, 0.059, 0.162]
@@ -839,7 +720,7 @@ slots:
   - path: background/benchmark_skincare_products_003_02
     c: [4.343, 0.373, 1.12]
     s: [0.059, 0.059, 0.162]
-  GEN-SHELF-06-N2-10:
+  GEN-SHELF-06-N2-04:
   - path: background/benchmark_skincare_products_004
     c: [4.485, 0.554, 1.103]
     s: [0.073, 0.045, 0.129]
@@ -849,7 +730,7 @@ slots:
   - path: background/benchmark_skincare_products_004_01
     c: [4.485, 0.373, 1.103]
     s: [0.073, 0.045, 0.129]
-  GEN-SHELF-06-N2-11:
+  GEN-SHELF-06-N2-05:
   - path: background/benchmark_skincare_products_005
     c: [4.601, 0.554, 1.085]
     s: [0.052, 0.034, 0.094]
@@ -859,7 +740,7 @@ slots:
   - path: background/benchmark_skincare_products_005_02
     c: [4.601, 0.373, 1.085]
     s: [0.052, 0.034, 0.094]
-  GEN-SHELF-06-N2-12:
+  GEN-SHELF-06-N2-06:
   - path: background/benchmark_skincare_products_006
     c: [4.762, 0.54, 1.152]
     s: [0.093, 0.094, 0.236]
@@ -869,45 +750,32 @@ slots:
   - path: background/benchmark_skincare_products_006_02
     c: [4.762, 0.359, 1.152]
     s: [0.093, 0.094, 0.236]
-  GEN-SHELF-06-N1-13:
+  GEN-SHELF-06-N1-07:
   - path: background/benchmark_dairy_003_02
     c: [4.815, 0.514, 0.733]
     s: [0.284, 0.109, 0.3]
   - path: background/benchmark_dairy_003_01
     c: [4.815, 0.34, 0.733]
     s: [0.284, 0.109, 0.3]
-  GEN-SHELF-06-N0-14:
+  GEN-SHELF-06-N0-08:
   - path: background/benchmark_snack_247
     c: [4.057, 0.515, 0.204]
     s: [0.338, 0.094, 0.143]
-  GEN-SHELF-06-N0-15:
+  GEN-SHELF-06-N0-09:
   - path: background/benchmark_snack_223
     c: [4.495, 0.506, 0.215]
     s: [0.294, 0.121, 0.167]
   - path: background/benchmark_snack_223_01
     c: [4.495, 0.346, 0.215]
     s: [0.294, 0.121, 0.167]
-  GEN-SHELF-06-N0-16:
+  GEN-SHELF-06-N0-10:
   - path: background/benchmark_grain_000
     c: [4.836, 0.523, 0.247]
     s: [0.163, 0.184, 0.261]
   - path: background/benchmark_grain_000_01
     c: [4.836, 0.392, 0.247]
     s: [0.163, 0.184, 0.261]
-  GEN-SHELF-08-W3-00:
-  - path: background/Group_01/benchmark_snack_263_000
-    c: [7.963, 1.319, 1.593]
-    s: [0.145, 0.207, 0.276]
-  - path: background/Group_01/benchmark_snack_263_001
-    c: [7.969, 1.071, 1.593]
-    s: [0.145, 0.207, 0.276]
-  - path: background/Group_01/benchmark_snack_263_004
-    c: [8.162, 1.313, 1.593]
-    s: [0.145, 0.207, 0.276]
-  - path: background/Group_01/benchmark_snack_263_005
-    c: [8.167, 1.085, 1.593]
-    s: [0.145, 0.207, 0.276]
-  GEN-SHELF-08-W2-01:
+  GEN-SHELF-08-W2-00:
   - path: background/Group_01/benchmark_snack_265_000
     c: [7.948, 1.045, 1.184]
     s: [0.091, 0.234, 0.132]
@@ -932,7 +800,7 @@ slots:
   - path: background/Group_01/benchmark_snack_265_007
     c: [8.224, 1.052, 1.315]
     s: [0.091, 0.234, 0.132]
-  GEN-SHELF-08-W2-02:
+  GEN-SHELF-08-W2-01:
   - path: background/Group_01/benchmark_snack_266_000
     c: [7.942, 1.277, 1.182]
     s: [0.094, 0.233, 0.132]
@@ -957,7 +825,7 @@ slots:
   - path: background/Group_01/benchmark_snack_266_007
     c: [8.219, 1.284, 1.313]
     s: [0.093, 0.233, 0.132]
-  GEN-SHELF-08-W2-03:
+  GEN-SHELF-08-W2-02:
   - path: background/Group_01/benchmark_snack_261_000
     c: [7.946, 1.541, 1.185]
     s: [0.113, 0.292, 0.166]
@@ -976,14 +844,14 @@ slots:
   - path: background/Group_01/benchmark_snack_261_005
     c: [8.206, 1.547, 1.342]
     s: [0.113, 0.292, 0.166]
-  GEN-SHELF-08-W2-04:
+  GEN-SHELF-08-W2-03:
   - path: background/Group_01/benchmark_snack_263_002
     c: [7.957, 1.572, 1.593]
     s: [0.145, 0.207, 0.276]
   - path: background/Group_01/benchmark_snack_263_003
     c: [8.155, 1.577, 1.593]
     s: [0.145, 0.207, 0.276]
-  GEN-SHELF-08-W1-05:
+  GEN-SHELF-08-W1-04:
   - path: background/Group_01/benchmark_snack_264_000
     c: [7.966, 1.016, 0.791]
     s: [0.096, 0.215, 0.07]
@@ -996,7 +864,7 @@ slots:
   - path: background/Group_01/benchmark_snack_264_003
     c: [7.961, 1.224, 0.868]
     s: [0.096, 0.215, 0.07]
-  GEN-SHELF-08-W1-06:
+  GEN-SHELF-08-W1-05:
   - path: background/Group_01/benchmark_snack_262_001
     c: [7.957, 1.425, 0.791]
     s: [0.116, 0.204, 0.07]
@@ -1009,7 +877,7 @@ slots:
   - path: background/Group_01/benchmark_snack_262_002
     c: [7.952, 1.623, 0.868]
     s: [0.116, 0.204, 0.07]
-  GEN-SHELF-08-W0-07:
+  GEN-SHELF-08-W0-06:
   - path: background/Group_01/benchmark_snack_267_001
     c: [8.008, 1.047, 0.514]
     s: [0.192, 0.247, 0.253]
@@ -1019,7 +887,7 @@ slots:
   - path: background/Group_01/benchmark_snack_267_003
     c: [8.236, 1.053, 0.514]
     s: [0.192, 0.247, 0.253]
-  GEN-SHELF-08-W0-08:
+  GEN-SHELF-08-W0-07:
   - path: background/Group_01/benchmark_snack_267_000
     c: [8.002, 1.301, 0.514]
     s: [0.192, 0.247, 0.253]
@@ -1029,7 +897,7 @@ slots:
   - path: background/Group_01/benchmark_snack_267_004
     c: [8.23, 1.306, 0.514]
     s: [0.192, 0.247, 0.253]
-  GEN-SHELF-08-W0-09:
+  GEN-SHELF-08-W0-08:
   - path: background/Group_01/benchmark_snack_260_000
     c: [7.972, 1.484, 0.49]
     s: [0.115, 0.115, 0.156]
@@ -1139,14 +1007,7 @@ slots:
   - path: background/Group_05/benchmark_cleaning_products_014_77
     c: [1.049, 2.192, 0.573]
     s: [0.057, 0.113, 0.27]
-  GEN-SHELF-11-N5-00:
-  - path: background/benchmark_cleaning_products_015_35
-    c: [4.785, 2.421, 1.308]
-    s: [0.056, 0.214, 0.26]
-  - path: background/benchmark_cleaning_products_015_34
-    c: [4.785, 2.195, 1.308]
-    s: [0.056, 0.214, 0.26]
-  GEN-SHELF-11-N4-01:
+  GEN-SHELF-11-N4-00:
   - path: background/benchmark_cleaning_products_015_27
     c: [4.63, 2.421, 1.205]
     s: [0.056, 0.214, 0.26]
@@ -1171,7 +1032,7 @@ slots:
   - path: background/benchmark_cleaning_products_015_30
     c: [4.704, 2.195, 1.205]
     s: [0.056, 0.214, 0.26]
-  GEN-SHELF-11-N3-02:
+  GEN-SHELF-11-N3-01:
   - path: background/benchmark_cleaning_products_015_11
     c: [4.33, 2.421, 1.118]
     s: [0.056, 0.214, 0.26]
@@ -1196,7 +1057,7 @@ slots:
   - path: background/benchmark_cleaning_products_015_14
     c: [4.404, 2.195, 1.118]
     s: [0.056, 0.214, 0.26]
-  GEN-SHELF-11-N2-03:
+  GEN-SHELF-11-N2-02:
   - path: background/benchmark_cleaning_products_014_06
     c: [4.01, 2.474, 0.907]
     s: [0.057, 0.113, 0.27]
@@ -1212,7 +1073,7 @@ slots:
   - path: background/benchmark_cleaning_products_014_14
     c: [4.072, 2.36, 0.907]
     s: [0.057, 0.113, 0.27]
-  GEN-SHELF-11-N1-04:
+  GEN-SHELF-11-N1-03:
   - path: background/benchmark_cleaning_products_014_24
     c: [3.973, 2.474, 0.573]
     s: [0.057, 0.113, 0.27]
@@ -1222,14 +1083,7 @@ slots:
   - path: background/benchmark_cleaning_products_014_22
     c: [4.072, 2.352, 0.573]
     s: [0.057, 0.113, 0.27]
-  GEN-SHELF-11-S5-00:
-  - path: background/benchmark_cleaning_products_015_32
-    c: [4.785, 1.763, 1.308]
-    s: [0.056, 0.214, 0.26]
-  - path: background/benchmark_cleaning_products_015_33
-    c: [4.785, 1.978, 1.308]
-    s: [0.056, 0.214, 0.26]
-  GEN-SHELF-11-S4-01:
+  GEN-SHELF-11-S4-00:
   - path: background/benchmark_cleaning_products_015_24
     c: [4.63, 1.763, 1.205]
     s: [0.056, 0.214, 0.26]
@@ -1254,7 +1108,7 @@ slots:
   - path: background/benchmark_cleaning_products_015_29
     c: [4.704, 1.978, 1.205]
     s: [0.056, 0.214, 0.26]
-  GEN-SHELF-11-S3-02:
+  GEN-SHELF-11-S3-01:
   - path: background/benchmark_cleaning_products_015_08
     c: [4.33, 1.763, 1.118]
     s: [0.056, 0.214, 0.26]
@@ -1279,7 +1133,7 @@ slots:
   - path: background/benchmark_cleaning_products_015_13
     c: [4.404, 1.978, 1.118]
     s: [0.056, 0.214, 0.26]
-  GEN-SHELF-11-S2-03:
+  GEN-SHELF-11-S2-02:
   - path: background/benchmark_cleaning_products_014_000
     c: [4.01, 1.753, 0.907]
     s: [0.057, 0.113, 0.27]
@@ -1289,7 +1143,7 @@ slots:
   - path: background/benchmark_cleaning_products_014_19
     c: [4.072, 1.747, 0.907]
     s: [0.057, 0.113, 0.27]
-  GEN-SHELF-11-S1-04:
+  GEN-SHELF-11-S1-03:
   - path: background/benchmark_cleaning_products_014_30
     c: [3.973, 1.726, 0.573]
     s: [0.057, 0.113, 0.27]
@@ -1722,77 +1576,7 @@ slots:
   - path: background/Group_02/benchmark_disposable_paper_cup_packaging_bag_000_08
     c: [8.064, 4.055, 0.439]
     s: [0.301, 0.216, 0.079]
-  GEN-SHELF-16-S3-00:
-  - path: background/benchmark_skincare_products_14
-    c: [5.529, 3.875, 1.548]
-    s: [0.054, 0.035, 0.125]
-  - path: background/benchmark_skincare_products_013_04
-    c: [5.531, 3.965, 1.548]
-    s: [0.054, 0.035, 0.125]
-  - path: background/benchmark_skincare_products_013_05
-    c: [5.533, 4.056, 1.548]
-    s: [0.054, 0.035, 0.125]
-  GEN-SHELF-16-S3-01:
-  - path: background/benchmark_skincare_products_13
-    c: [5.664, 3.872, 1.562]
-    s: [0.079, 0.05, 0.155]
-  - path: background/benchmark_skincare_products_012_06
-    c: [5.666, 3.962, 1.562]
-    s: [0.079, 0.05, 0.155]
-  - path: background/benchmark_skincare_products_012_05
-    c: [5.668, 4.053, 1.562]
-    s: [0.079, 0.05, 0.155]
-  GEN-SHELF-16-S3-02:
-  - path: background/benchmark_skincare_products_12
-    c: [5.782, 3.87, 1.571]
-    s: [0.061, 0.041, 0.168]
-  - path: background/benchmark_skincare_products_011_05
-    c: [5.784, 3.959, 1.571]
-    s: [0.061, 0.041, 0.168]
-  - path: background/benchmark_skincare_products_011_06
-    c: [5.786, 4.051, 1.571]
-    s: [0.061, 0.041, 0.168]
-  GEN-SHELF-16-S3-03:
-  - path: background/benchmark_skincare_products_11
-    c: [5.946, 3.864, 1.562]
-    s: [0.077, 0.05, 0.154]
-  - path: background/benchmark_skincare_products_010_03
-    c: [5.948, 3.954, 1.562]
-    s: [0.078, 0.05, 0.154]
-  - path: background/benchmark_skincare_products_010_04
-    c: [5.95, 4.045, 1.562]
-    s: [0.077, 0.05, 0.154]
-  GEN-SHELF-16-S3-04:
-  - path: background/benchmark_skincare_products_10
-    c: [6.115, 3.863, 1.549]
-    s: [0.062, 0.032, 0.131]
-  - path: background/benchmark_skincare_products_009_04
-    c: [6.117, 3.953, 1.549]
-    s: [0.062, 0.032, 0.131]
-  - path: background/benchmark_skincare_products_009_03
-    c: [6.118, 4.044, 1.549]
-    s: [0.062, 0.032, 0.131]
-  GEN-SHELF-16-S3-05:
-  - path: background/benchmark_skincare_products_09
-    c: [6.284, 3.859, 1.513]
-    s: [0.071, 0.074, 0.057]
-  - path: background/benchmark_skincare_products_008_03
-    c: [6.286, 3.949, 1.513]
-    s: [0.071, 0.074, 0.057]
-  - path: background/benchmark_skincare_products_008_04
-    c: [6.288, 4.04, 1.513]
-    s: [0.071, 0.074, 0.057]
-  GEN-SHELF-16-S3-06:
-  - path: background/benchmark_skincare_products_08
-    c: [6.472, 3.856, 1.518]
-    s: [0.073, 0.073, 0.064]
-  - path: background/benchmark_skincare_products_007_03
-    c: [6.474, 3.945, 1.518]
-    s: [0.072, 0.073, 0.064]
-  - path: background/benchmark_skincare_products_007_04
-    c: [6.476, 4.037, 1.518]
-    s: [0.072, 0.073, 0.064]
-  GEN-SHELF-16-S2-07:
+  GEN-SHELF-16-S2-00:
   - path: background/benchmark_skincare_products_15
     c: [5.508, 3.875, 1.095]
     s: [0.053, 0.035, 0.115]
@@ -1802,7 +1586,7 @@ slots:
   - path: background/benchmark_skincare_products_014_04
     c: [5.512, 4.056, 1.095]
     s: [0.053, 0.035, 0.115]
-  GEN-SHELF-16-S2-08:
+  GEN-SHELF-16-S2-01:
   - path: background/benchmark_skincare_products_07
     c: [5.661, 3.887, 1.152]
     s: [0.095, 0.096, 0.236]
@@ -1812,7 +1596,7 @@ slots:
   - path: background/benchmark_skincare_products_006_04
     c: [5.665, 4.067, 1.152]
     s: [0.095, 0.096, 0.236]
-  GEN-SHELF-16-S2-09:
+  GEN-SHELF-16-S2-02:
   - path: background/benchmark_skincare_products_06
     c: [5.822, 3.869, 1.085]
     s: [0.053, 0.035, 0.094]
@@ -1822,7 +1606,7 @@ slots:
   - path: background/benchmark_skincare_products_005_04
     c: [5.825, 4.05, 1.085]
     s: [0.053, 0.035, 0.094]
-  GEN-SHELF-16-S2-10:
+  GEN-SHELF-16-S2-03:
   - path: background/benchmark_skincare_products_05
     c: [5.937, 3.867, 1.103]
     s: [0.074, 0.047, 0.129]
@@ -1832,7 +1616,7 @@ slots:
   - path: background/benchmark_skincare_products_004_03
     c: [5.941, 4.048, 1.103]
     s: [0.074, 0.047, 0.129]
-  GEN-SHELF-16-S2-11:
+  GEN-SHELF-16-S2-04:
   - path: background/benchmark_skincare_products_04
     c: [6.08, 3.864, 1.12]
     s: [0.06, 0.06, 0.162]
@@ -1842,7 +1626,7 @@ slots:
   - path: background/benchmark_skincare_products_003_04
     c: [6.083, 4.045, 1.12]
     s: [0.06, 0.06, 0.162]
-  GEN-SHELF-16-S2-12:
+  GEN-SHELF-16-S2-05:
   - path: background/benchmark_skincare_products_03
     c: [6.214, 3.861, 1.1]
     s: [0.065, 0.044, 0.126]
@@ -1852,7 +1636,7 @@ slots:
   - path: background/benchmark_skincare_products_002_04
     c: [6.218, 4.042, 1.1]
     s: [0.065, 0.043, 0.126]
-  GEN-SHELF-16-S2-13:
+  GEN-SHELF-16-S2-06:
   - path: background/benchmark_skincare_products_02
     c: [6.346, 3.858, 1.122]
     s: [0.061, 0.054, 0.159]
@@ -1862,7 +1646,7 @@ slots:
   - path: background/benchmark_skincare_products_001_04
     c: [6.35, 4.039, 1.122]
     s: [0.061, 0.054, 0.159]
-  GEN-SHELF-16-S2-14:
+  GEN-SHELF-16-S2-07:
   - path: background/benchmark_skincare_products_01
     c: [6.472, 3.856, 1.1]
     s: [0.058, 0.031, 0.13]
@@ -1872,137 +1656,32 @@ slots:
   - path: background/benchmark_skincare_products_000_04
     c: [6.476, 4.037, 1.1]
     s: [0.059, 0.031, 0.13]
-  GEN-SHELF-16-S1-15:
+  GEN-SHELF-16-S1-08:
   - path: background/benchmark_dairy_003_04
     c: [5.609, 3.913, 0.733]
     s: [0.286, 0.115, 0.3]
   - path: background/benchmark_dairy_003_03
     c: [5.612, 4.088, 0.733]
     s: [0.286, 0.114, 0.3]
-  GEN-SHELF-16-S0-16:
+  GEN-SHELF-16-S0-09:
   - path: background/benchmark_grain_01
     c: [5.587, 3.905, 0.247]
     s: [0.167, 0.188, 0.261]
   - path: background/benchmark_grain_000_02
     c: [5.59, 4.036, 0.247]
     s: [0.167, 0.188, 0.261]
-  GEN-SHELF-16-S0-17:
+  GEN-SHELF-16-S0-10:
   - path: background/benchmark_snack_224
     c: [5.929, 3.915, 0.215]
     s: [0.296, 0.127, 0.167]
   - path: background/benchmark_snack_223_02
     c: [5.932, 4.075, 0.215]
     s: [0.296, 0.127, 0.167]
-  GEN-SHELF-16-S0-18:
+  GEN-SHELF-16-S0-11:
   - path: background/benchmark_snack_248
     c: [6.366, 3.897, 0.204]
     s: [0.34, 0.101, 0.143]
-  GEN-SHELF-17-S3-00:
-  - path: background/genie_beverage_bottle_000_10
-    c: [4.337, 3.916, 1.545]
-    s: [0.087, 0.087, 0.125]
-  - path: background/genie_beverage_bottle_000_09
-    c: [4.339, 4.014, 1.545]
-    s: [0.087, 0.087, 0.125]
-  - path: background/genie_beverage_bottle_000_06
-    c: [4.255, 4.01, 1.545]
-    s: [0.087, 0.087, 0.125]
-  - path: background/genie_beverage_bottle_000_07
-    c: [4.256, 4.102, 1.545]
-    s: [0.087, 0.087, 0.125]
-  - path: background/genie_beverage_bottle_000_08
-    c: [4.341, 4.111, 1.545]
-    s: [0.087, 0.087, 0.125]
-  GEN-SHELF-17-S3-01:
-  - path: background/genie_beverage_bottle_001_10
-    c: [4.5, 3.916, 1.552]
-    s: [0.063, 0.063, 0.132]
-  - path: background/genie_beverage_bottle_001_06
-    c: [4.428, 4.009, 1.552]
-    s: [0.063, 0.063, 0.132]
-  - path: background/genie_beverage_bottle_001_09
-    c: [4.502, 4.016, 1.552]
-    s: [0.063, 0.063, 0.132]
-  - path: background/genie_beverage_bottle_001_07
-    c: [4.43, 4.105, 1.552]
-    s: [0.063, 0.063, 0.132]
-  - path: background/genie_beverage_bottle_001_08
-    c: [4.504, 4.104, 1.552]
-    s: [0.063, 0.063, 0.132]
-  GEN-SHELF-17-S3-02:
-  - path: background/genie_beverage_bottle_002_10
-    c: [4.656, 3.901, 1.56]
-    s: [0.057, 0.056, 0.164]
-  - path: background/genie_beverage_bottle_002_09
-    c: [4.658, 3.987, 1.56]
-    s: [0.056, 0.056, 0.164]
-  - path: background/genie_beverage_bottle_002_06
-    c: [4.576, 3.991, 1.56]
-    s: [0.056, 0.056, 0.164]
-  - path: background/genie_beverage_bottle_002_07
-    c: [4.577, 4.084, 1.56]
-    s: [0.056, 0.057, 0.164]
-  - path: background/genie_beverage_bottle_002_08
-    c: [4.66, 4.082, 1.56]
-    s: [0.056, 0.057, 0.164]
-  GEN-SHELF-17-S3-03:
-  - path: background/genie_beverage_bottle_003_10
-    c: [4.84, 3.916, 1.568]
-    s: [0.066, 0.051, 0.17]
-  - path: background/genie_beverage_bottle_003_09
-    c: [4.841, 4.003, 1.568]
-    s: [0.066, 0.051, 0.17]
-  - path: background/genie_beverage_bottle_003_06
-    c: [4.77, 4.0, 1.568]
-    s: [0.067, 0.051, 0.17]
-  - path: background/genie_beverage_bottle_003_07
-    c: [4.772, 4.101, 1.568]
-    s: [0.066, 0.051, 0.17]
-  - path: background/genie_beverage_bottle_003_08
-    c: [4.843, 4.1, 1.568]
-    s: [0.066, 0.051, 0.17]
-  GEN-SHELF-17-S3-04:
-  - path: background/genie_beverage_bottle_004_10
-    c: [5.021, 3.934, 1.546]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_004_09
-    c: [5.022, 4.007, 1.546]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_004_06
-    c: [4.948, 4.004, 1.546]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_004_07
-    c: [4.95, 4.095, 1.546]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_004_08
-    c: [5.024, 4.094, 1.546]
-    s: [0.055, 0.055, 0.124]
-  GEN-SHELF-17-S3-05:
-  - path: background/genie_beverage_bottle_005_13
-    c: [5.184, 3.928, 1.547]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_005_14
-    c: [5.254, 3.926, 1.547]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_005_12
-    c: [5.186, 4.009, 1.547]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_005_15
-    c: [5.255, 4.005, 1.547]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_005_09
-    c: [5.106, 4.014, 1.547]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_005_11
-    c: [5.188, 4.105, 1.547]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_005_10
-    c: [5.107, 4.107, 1.547]
-    s: [0.055, 0.055, 0.124]
-  - path: background/genie_beverage_bottle_005_16
-    c: [5.258, 4.11, 1.547]
-    s: [0.055, 0.055, 0.124]
-  GEN-SHELF-17-S2-06:
+  GEN-SHELF-17-S2-00:
   - path: background/genie_beverage_bottle_006_14
     c: [4.349, 3.949, 1.117]
     s: [0.061, 0.061, 0.158]
@@ -2024,7 +1703,7 @@ slots:
   - path: background/genie_beverage_bottle_006_11
     c: [4.433, 4.127, 1.117]
     s: [0.061, 0.061, 0.158]
-  GEN-SHELF-17-S2-07:
+  GEN-SHELF-17-S2-01:
   - path: background/genie_beverage_bottle_007_16
     c: [4.63, 3.944, 1.117]
     s: [0.051, 0.051, 0.155]
@@ -2055,7 +1734,7 @@ slots:
   - path: background/genie_beverage_bottle_007_12
     c: [4.513, 4.109, 1.117]
     s: [0.051, 0.051, 0.155]
-  GEN-SHELF-17-S2-08:
+  GEN-SHELF-17-S2-02:
   - path: background/genie_beverage_bottle_009_12
     c: [5.064, 3.957, 1.122]
     s: [0.061, 0.05, 0.167]
@@ -2077,7 +1756,7 @@ slots:
   - path: background/genie_beverage_bottle_009_14
     c: [5.137, 4.131, 1.122]
     s: [0.061, 0.05, 0.167]
-  GEN-SHELF-17-S1-09:
+  GEN-SHELF-17-S1-03:
   - path: background/genie_beverage_bottle_011_13
     c: [4.289, 3.923, 0.684]
     s: [0.054, 0.054, 0.184]
@@ -2102,7 +1781,7 @@ slots:
   - path: background/genie_beverage_bottle_011_10
     c: [4.21, 4.101, 0.684]
     s: [0.054, 0.054, 0.184]
-  GEN-SHELF-17-S1-10:
+  GEN-SHELF-17-S1-04:
   - path: background/genie_beverage_bottle_012_16
     c: [4.553, 3.923, 0.659]
     s: [0.056, 0.056, 0.13]
@@ -2127,7 +1806,7 @@ slots:
   - path: background/genie_beverage_bottle_012_10
     c: [4.467, 4.103, 0.659]
     s: [0.056, 0.056, 0.13]
-  GEN-SHELF-17-S1-11:
+  GEN-SHELF-17-S1-05:
   - path: background/genie_beverage_bottle_013_16
     c: [4.783, 3.922, 0.668]
     s: [0.058, 0.056, 0.153]
@@ -2152,7 +1831,7 @@ slots:
   - path: background/genie_beverage_bottle_013_10
     c: [4.715, 4.122, 0.668]
     s: [0.057, 0.056, 0.153]
-  GEN-SHELF-17-S1-12:
+  GEN-SHELF-17-S1-06:
   - path: background/genie_beverage_bottle_014_16
     c: [5.007, 3.924, 0.668]
     s: [0.058, 0.056, 0.153]
@@ -2177,7 +1856,7 @@ slots:
   - path: background/genie_beverage_bottle_014_12
     c: [5.096, 4.113, 0.668]
     s: [0.058, 0.056, 0.153]
-  GEN-SHELF-17-S1-13:
+  GEN-SHELF-17-S1-07:
   - path: background/genie_beverage_bottle_015_10
     c: [5.21, 3.905, 0.668]
     s: [0.048, 0.048, 0.149]

@@ -67,7 +67,9 @@ RECESS_MAX_M = 0.09
 """item_position sits on the front unit's face, at most this far behind the fixture's face (validator: rect + 0.1 m)."""
 ROBOT_RADIUS_M = 0.3
 CLEARANCE_EPS = 0.005
-REACH_Z = (0.1, 1.5)
+REACH_Z = (0.1, 1.15)
+"""Shelf boards the robot picks from: contracts.common allows 0.1-1.5 m, but the white SO-101 rover v3 that drives this
+store in Isaac has a fixed riser (no lift) and its reach table tops out at a 1.2 m TCP, so top boards stay scenery."""
 LEVEL_GAP_M = 0.06
 """Product bottoms closer than this on one fixture are the same shelf board."""
 SLOT_MAX_WIDTH_M = 0.5

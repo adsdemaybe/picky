@@ -3699,26 +3699,6 @@ products:
     dims_m: [0.055, 0.056, 0.153]
     label_color: '#92400e'
     mass_kg: 0.4
-- sku: GN-MANGO-YOGURT-DRINK
-  name: Mango Yogurt Drink
-  brand: Sunny Cup
-  category: beverages
-  subcategory: drinks
-  description: A white rectangular beverage bottle with a white cap and yellow branding featuring printed text and fruit imagery.
-  tags: [fruit, kid_friendly, vegetarian, genie_store]
-  dietary: [vegetarian]
-  allergens: [milk]
-  price_cents: 249
-  unit: each
-  size: 8.5 fl oz
-  barcode: '2000009000207'
-  perishable: true
-  shelf_life_days: 120
-  asset:
-    shape: box
-    dims_m: [0.054, 0.054, 0.124]
-    label_color: '#fbbf24'
-    mass_kg: 0.4
 - sku: GN-CHOCOLATE-MILK
   name: Chocolate Milk
   brand: Meadow Moo
@@ -3731,7 +3711,7 @@ products:
   price_cents: 229
   unit: each
   size: 10 fl oz
-  barcode: '2000009000214'
+  barcode: '2000009000207'
   perishable: true
   shelf_life_days: 120
   asset:
@@ -3751,7 +3731,7 @@ products:
   price_cents: 299
   unit: each
   size: 12 fl oz
-  barcode: '2000009000221'
+  barcode: '2000009000214'
   perishable: false
   asset:
     shape: cylinder
@@ -3770,7 +3750,7 @@ products:
   price_cents: 249
   unit: each
   size: 12 fl oz
-  barcode: '2000009000238'
+  barcode: '2000009000221'
   perishable: false
   asset:
     shape: cylinder
@@ -3790,31 +3770,12 @@ products:
   price_cents: 229
   unit: each
   size: 16.9 fl oz
-  barcode: '2000009000245'
+  barcode: '2000009000238'
   perishable: false
   asset:
     shape: cylinder
     dims_m: [0.06, 0.06, 0.158]
     label_color: '#15803d'
-    mass_kg: 0.4
-- sku: GN-SPRING-WATER
-  name: Natural Spring Water
-  brand: Clearbrook
-  category: beverages
-  subcategory: water
-  description: A white, translucent plastic bottle with a tapered top and a green-and-white label featuring printed text.
-  tags: [water, hydration, vegan, genie_store]
-  dietary: [vegan]
-  allergens: []
-  price_cents: 149
-  unit: each
-  size: 16.9 fl oz
-  barcode: '2000009000252'
-  perishable: false
-  asset:
-    shape: cylinder
-    dims_m: [0.071, 0.071, 0.125]
-    label_color: '#86efac'
     mass_kg: 0.4
 - sku: GN-PROBIOTIC-MILK
   name: Probiotic Milk Drink
@@ -3828,93 +3789,13 @@ products:
   price_cents: 199
   unit: each
   size: 7.4 fl oz
-  barcode: '2000009000269'
+  barcode: '2000009000245'
   perishable: true
   shelf_life_days: 120
   asset:
     shape: cylinder
     dims_m: [0.047, 0.047, 0.149]
     label_color: '#ef4444'
-    mass_kg: 0.4
-- sku: GN-STRAWBERRY-YOGURT-DRINK
-  name: Strawberry Yogurt Drink
-  brand: Sunny Cup
-  category: beverages
-  subcategory: drinks
-  description: A white rectangular beverage bottle with a white cap, featuring pink and red text and graphics including strawberries
-    on its label.
-  tags: [fruit, kid_friendly, vegetarian, genie_store]
-  dietary: [vegetarian]
-  allergens: [milk]
-  price_cents: 249
-  unit: each
-  size: 8.5 fl oz
-  barcode: '2000009000276'
-  perishable: true
-  shelf_life_days: 120
-  asset:
-    shape: box
-    dims_m: [0.054, 0.054, 0.124]
-    label_color: '#f472b6'
-    mass_kg: 0.4
-- sku: GN-PEACH-OOLONG
-  name: Peach Oolong Tea
-  brand: Teahouse Lane
-  category: beverages
-  subcategory: drinks
-  description: A white plastic beverage bottle with a maroon cap and pink label featuring 'COSTA cha' branding.
-  tags: [tea, fruit, vegan, genie_store]
-  dietary: [vegan]
-  allergens: []
-  price_cents: 299
-  unit: each
-  size: 13.5 fl oz
-  barcode: '2000009000283'
-  perishable: false
-  asset:
-    shape: cylinder
-    dims_m: [0.055, 0.055, 0.164]
-    label_color: '#fda4af'
-    mass_kg: 0.4
-- sku: GN-SOY-MILK
-  name: Original Soy Milk
-  brand: Bean Bright
-  category: dairy
-  subcategory: plant_milk
-  description: A white rectangular beverage bottle with a white cap and printed text on its label.
-  tags: [dairy_free, vegan, genie_store]
-  dietary: [dairy_free, vegan]
-  allergens: [soy]
-  price_cents: 199
-  unit: each
-  size: 8.5 fl oz
-  barcode: '2000009000290'
-  perishable: true
-  shelf_life_days: 21
-  asset:
-    shape: box
-    dims_m: [0.062, 0.061, 0.132]
-    label_color: '#f5f5f4'
-    mass_kg: 0.4
-- sku: GN-BLUEBERRY-YOGURT-DRINK
-  name: Blueberry Yogurt Drink
-  brand: Sunny Cup
-  category: beverages
-  subcategory: drinks
-  description: A white plastic bottle with a purple and blue label featuring printed text and a white cap.
-  tags: [fruit, kid_friendly, vegetarian, genie_store]
-  dietary: [vegetarian]
-  allergens: [milk]
-  price_cents: 249
-  unit: each
-  size: 10 fl oz
-  barcode: '2000009000306'
-  perishable: true
-  shelf_life_days: 120
-  asset:
-    shape: cylinder
-    dims_m: [0.05, 0.065, 0.17]
-    label_color: '#6d28d9'
     mass_kg: 0.4
 - sku: GN-BABY-POWDER
   name: Baby Powder
@@ -3928,31 +3809,12 @@ products:
   price_cents: 499
   unit: each
   size: 7 oz
-  barcode: '2000009000313'
+  barcode: '2000009000252'
   perishable: false
   asset:
     shape: cylinder
     dims_m: [0.052, 0.06, 0.159]
     label_color: '#22c55e'
-    mass_kg: 0.4
-- sku: GN-RICE-CLEANSER
-  name: Rice Bran Facial Cleanser
-  brand: Bloom & Dew
-  category: personal_care
-  subcategory: bath_body
-  description: Bloom & Dew rice bran facial cleanser, 3.4 oz.
-  tags: [skincare, face, genie_store]
-  dietary: []
-  allergens: []
-  price_cents: 799
-  unit: each
-  size: 3.4 oz
-  barcode: '2000009000320'
-  perishable: false
-  asset:
-    shape: box
-    dims_m: [0.049, 0.078, 0.155]
-    label_color: '#facc15'
     mass_kg: 0.4
 - sku: GN-PEACH-BODY-WASH
   name: Peach Leaf Baby Body Wash
@@ -3966,71 +3828,12 @@ products:
   price_cents: 899
   unit: each
   size: 6.8 fl oz
-  barcode: '2000009000337'
+  barcode: '2000009000269'
   perishable: false
   asset:
     shape: box
     dims_m: [0.056, 0.056, 0.162]
     label_color: '#f9a8d4'
-    mass_kg: 0.4
-- sku: GN-ALOE-NIGHT-CREAM
-  name: Aloe Night Cream
-  brand: Bloom & Dew
-  category: personal_care
-  subcategory: bath_body
-  description: A small, rectangular skincare product box with a pink top and white sides featuring green imagery and printed
-    text.
-  tags: [skincare, face, genie_store]
-  dietary: []
-  allergens: []
-  price_cents: 1299
-  unit: each
-  size: 1.7 oz
-  barcode: '2000009000344'
-  perishable: false
-  asset:
-    shape: box
-    dims_m: [0.072, 0.07, 0.057]
-    label_color: '#f472b6'
-    mass_kg: 0.4
-- sku: GN-CHARCOAL-CLEANSER
-  name: Charcoal Facial Cleanser
-  brand: Bloom & Dew
-  category: personal_care
-  subcategory: bath_body
-  description: A small, translucent plastic tube with a black cap, featuring blue and black branding for Pond's bamboo charcoal
-    facial cleanser.
-  tags: [skincare, face, genie_store]
-  dietary: []
-  allergens: []
-  price_cents: 799
-  unit: each
-  size: 3.4 oz
-  barcode: '2000009000351'
-  perishable: false
-  asset:
-    shape: box
-    dims_m: [0.049, 0.076, 0.154]
-    label_color: '#111827'
-    mass_kg: 0.4
-- sku: GN-DAILY-FACE-WASH
-  name: Oil-Free Daily Face Wash
-  brand: ClearDay
-  category: personal_care
-  subcategory: bath_body
-  description: A blue and white plastic tube with 'Clean & Clear' branding, featuring a tapered top and flat base.
-  tags: [skincare, face, genie_store]
-  dietary: []
-  allergens: []
-  price_cents: 749
-  unit: each
-  size: 5 fl oz
-  barcode: '2000009000368'
-  perishable: false
-  asset:
-    shape: box
-    dims_m: [0.04, 0.06, 0.168]
-    label_color: '#2563eb'
     mass_kg: 0.4
 - sku: GN-KIDS-FACE-WASH
   name: Kids Gentle Face Wash
@@ -4044,7 +3847,7 @@ products:
   price_cents: 599
   unit: each
   size: 2.8 fl oz
-  barcode: '2000009000375'
+  barcode: '2000009000276'
   perishable: false
   asset:
     shape: box
@@ -4063,31 +3866,12 @@ products:
   price_cents: 699
   unit: each
   size: 13.5 fl oz
-  barcode: '2000009000382'
+  barcode: '2000009000283'
   perishable: false
   asset:
     shape: cylinder
     dims_m: [0.094, 0.093, 0.236]
     label_color: '#7dd3fc'
-    mass_kg: 0.4
-- sku: GN-HAND-CREAM
-  name: Hand Cream
-  brand: Silk Harbor
-  category: personal_care
-  subcategory: bath_body
-  description: A white plastic tube with a blue cap and NIVEA branding, featuring blue wave graphics and text on its surface.
-  tags: [skincare, hands, genie_store]
-  dietary: []
-  allergens: []
-  price_cents: 549
-  unit: each
-  size: 2.5 oz
-  barcode: '2000009000399'
-  perishable: false
-  asset:
-    shape: box
-    dims_m: [0.034, 0.053, 0.125]
-    label_color: '#1e3a8a'
     mass_kg: 0.4
 - sku: GN-HAND-SANITIZER
   name: Hand Sanitizer Gel
@@ -4102,7 +3886,7 @@ products:
   price_cents: 399
   unit: each
   size: 8 fl oz
-  barcode: '2000009000405'
+  barcode: '2000009000290'
   perishable: false
   asset:
     shape: cylinder
@@ -4121,7 +3905,7 @@ products:
   price_cents: 849
   unit: each
   size: 6.8 fl oz
-  barcode: '2000009000412'
+  barcode: '2000009000306'
   perishable: false
   asset:
     shape: cylinder
@@ -4141,7 +3925,7 @@ products:
   price_cents: 699
   unit: each
   size: 6.8 fl oz
-  barcode: '2000009000429'
+  barcode: '2000009000313'
   perishable: false
   asset:
     shape: cylinder
@@ -4160,50 +3944,11 @@ products:
   price_cents: 649
   unit: each
   size: 8 fl oz
-  barcode: '2000009000436'
+  barcode: '2000009000320'
   perishable: false
   asset:
     shape: cylinder
     dims_m: [0.045, 0.073, 0.129]
     label_color: '#a3e635'
-    mass_kg: 0.4
-- sku: GN-CALMING-CREAM
-  name: Calming Face Cream
-  brand: Bloom & Dew
-  category: personal_care
-  subcategory: bath_body
-  description: A small, light green cardboard box with a red oval logo and text, wrapped in clear plastic, showing product
-    details and a barcode on its sides.
-  tags: [skincare, face, genie_store]
-  dietary: []
-  allergens: []
-  price_cents: 1199
-  unit: each
-  size: 1.7 oz
-  barcode: '2000009000443'
-  perishable: false
-  asset:
-    shape: box
-    dims_m: [0.071, 0.071, 0.064]
-    label_color: '#86efac'
-    mass_kg: 0.4
-- sku: GN-SOFT-FACE-LOTION
-  name: Soft Facial Lotion
-  brand: Silk Harbor
-  category: personal_care
-  subcategory: bath_body
-  description: A white plastic bottle with a green cap and labeled 'SOD Soft Facial Lotion' on its front.
-  tags: [skincare, face, genie_store]
-  dietary: []
-  allergens: []
-  price_cents: 899
-  unit: each
-  size: 3.4 fl oz
-  barcode: '2000009000450'
-  perishable: false
-  asset:
-    shape: cylinder
-    dims_m: [0.03, 0.061, 0.131]
-    label_color: '#16a34a'
     mass_kg: 0.4
 # --- END generated: store_genie ---
