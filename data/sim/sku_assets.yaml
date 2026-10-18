@@ -8,7 +8,7 @@ generated_from:
   planograms: data/planograms/store_ave.yaml, store_hill.yaml
 asset_root:
   env: PICKY_ASSET_ROOT
-  default: /data/advaiv2/picky-assets/products
+  default: /data/$USER/picky-assets/products
   paths: usd / parts[].usd are relative to the asset root
 conventions: 'Z-up, meters, kg. Item frame = scene_spec.py''s unit frame (x width, y depth, -y faces the aisle, z up); world
   yaw = scene_spec.item_yaw_for(slot) + facing.yaw_offset_deg. Asset origin = bottom center, so the unit translate is PrimSpec.center

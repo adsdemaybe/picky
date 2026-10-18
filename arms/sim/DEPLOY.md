@@ -62,7 +62,8 @@ export PICKY_SIM_STORES=store_ave,store_hill  # optional; default = every planog
 export PICKY_SIM_WORKER_ID=isaac-vhagar
 export PICKY_SIM_LABEL_DIR=/data/$USER/picky/labels
 # export PICKY_SO101_URDF=/data/$USER/SO-ARM100/Simulation/SO101/so101_new_calib.urdf   # optional, experimental
-# Optional visuals (arms/sim/ASSETS.md); unset = primitive boxes / primitive rovers, exactly as before
+# Optional visuals: build them first (arms/sim/ASSETS.md). Unset = primitive boxes / rovers as before; a path that
+# does not exist yet only logs a warning and draws the primitives
 export PICKY_ASSET_ROOT=/data/$USER/picky-assets/products                          # per-item grocery models
 export PICKY_ROVER_USD=/data/$USER/picky-assets/robots/picky-rover/picky_rover.usda  # LeKiwi + SO-101 + lift
 # export PICKY_SIM_ASSETS=off        # rollback switch: primitives for every SKU even with PICKY_ASSET_ROOT set

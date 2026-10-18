@@ -24,7 +24,8 @@ positions (hidden behind the front rows) and a warning is recorded.
 Per-item models (``arms.sim.assets.SkuAssets``, optional): a SKU that resolves to a model uses the model's
 ``target_dims_m`` as its unit size (``SlotLayout.dims``) and its prims carry ``render='asset'|'parts'``, so the Isaac
 backend references the model instead of drawing a box. Unit counts, instance ids and lots never change; without assets
-(the default) everything is exactly the primitive scene.
+(the default) every unit is the primitive box at its products.yaml size. Shelf slots fill wide first in both cases
+(``slot_lateral_room``).
 
 Rovers (``RoverSpec``): a small diff-drive base + vertical lift mast + an SO-101 approximated with primitives (links
 sized from the SO-ARM100 repo's SO-101 URDF: base, shoulder, upper arm 0.116 m, forearm 0.135 m, wrist + gripper),

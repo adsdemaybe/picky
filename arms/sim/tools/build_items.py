@@ -26,7 +26,7 @@ import concurrent.futures as cf
 import yaml
 from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
 
-R = os.environ.get("PICKY_ASSET_ROOT") or f"/data/{os.environ.get('USER', 'advaiv2')}/picky-assets/products"
+R = os.environ.get("PICKY_ASSET_ROOT") or f"/data/{os.environ.get('USER', 'user')}/picky-assets/products"
 T = os.path.dirname(os.path.abspath(__file__))  # this tools dir: poses.yaml, obj2usd.py
 ITEMS = f"{R}/items"
 PY = os.environ.get("PICKY_ASSET_PY") or f"{R}/.venv/bin/python"

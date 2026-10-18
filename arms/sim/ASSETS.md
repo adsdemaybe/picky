@@ -8,11 +8,14 @@ everything.
 | What | In the repo | On vhagar |
 |---|---|---|
 | SKU -> model map (125 SKUs) | `data/sim/sku_assets.yaml` (generated, never hand-edited) | |
-| Normalized product models | | `/data/advaiv2/picky-assets/products/items/<asset_id>/{item,geom}.usda` |
+| Normalized product models | | `/data/$USER/picky-assets/products/items/<asset_id>/{item,geom}.usda` |
 | Raw sources + conversions | | `.../products/{simready,robocasa,lightwheel,converted}/` |
-| Asset catalog (463 assets) | | `.../products/index.yaml` (+ `ATTRIBUTION.md`) |
-| Rover USD | | `/data/advaiv2/picky-assets/robots/picky-rover/{picky_rover.usda,lekiwi.usd}` |
+| Asset catalog (463 assets) | | `.../products/index.yaml` |
+| License notice | `arms/sim/tools/ATTRIBUTION.md` | copied to `.../products/` and `.../picky-rover/` |
+| Rover USD | | `/data/$USER/picky-assets/robots/picky-rover/{picky_rover.usda,lekiwi.usd}` |
 | Tools (download, normalize, map, rover) | `arms/sim/tools/` | |
+
+Nothing binary is committed: no USD, mesh or texture, and not LeIsaac's `lekiwi.usd`, which is fetched (below).
 
 ## Environment (worker host only; process env, not `.env`)
 
@@ -118,16 +121,23 @@ kinematic puppet (`arms/sim/rover_puppet.py`):
 
 | # | Source | License | Used for |
 |---|---|---|---|
-| 1 | NVIDIA SimReady Assets, https://huggingface.co/datasets/nvidia/simready-assets | CC BY 4.0 (per-package `.metadata/LICENSE.txt`) | 60 of the 100 product models used (`sr_*`) |
-| 2 | RoboCasa365 AI-generated objects. Nasiriany et al., "RoboCasa: Large-Scale Simulation of Everyday Tasks for Generalist Robots", RSS 2024, https://robocasa.ai | CC BY 4.0 (RoboCasa README) | 18 models (`rc_*`) |
-| 3 | Lightwheel kitchen objects via NVIDIA PhysicalAI-Robotics-Manipulation-Objects-Kitchen-MJCF, https://huggingface.co/datasets/nvidia/PhysicalAI-Robotics-Manipulation-Objects-Kitchen-MJCF | CC BY 4.0 (dataset card) | 22 models (`lw_*`) |
-| 4 | LeIsaac `lekiwi.usd` (LightwheelAI), https://huggingface.co/LightwheelAI/leisaac_env (`assets/robots/lekiwi.usd`) | Apache-2.0 | Rover base + SO-101 arm |
+| 1 | NVIDIA SimReady Assets, (c) NVIDIA, https://huggingface.co/datasets/nvidia/simready-assets | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (per-package `.metadata/LICENSE.txt`) | 60 of the 100 product models used (`sr_*`) |
+| 2 | RoboCasa365 object library, AI-generated objects. Nasiriany et al., "RoboCasa: Large-Scale Simulation of Everyday Tasks for Generalist Robots", RSS 2024, https://robocasa.ai | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) per the [RoboCasa README](https://github.com/robocasa/robocasa#license) (the zip has no license file) | 18 models (`rc_*`) |
+| 3 | Lightwheel kitchen objects via NVIDIA PhysicalAI-Robotics-Manipulation-Objects-Kitchen-MJCF, https://huggingface.co/datasets/nvidia/PhysicalAI-Robotics-Manipulation-Objects-Kitchen-MJCF | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) (dataset card) | 22 models (`lw_*`) |
+| 4 | LeIsaac `lekiwi.usd` (LightwheelAI), https://huggingface.co/LightwheelAI/leisaac_env (`assets/robots/lekiwi.usd`) | [Apache-2.0](https://www.apache.org/licenses/LICENSE-2.0) (model card + GitHub) | Rover base + SO-101 arm (fetched, never committed) |
+| 5 | Upstream robot designs behind `lekiwi.usd`: LeKiwi (SIGRobotics-UIUC, https://github.com/SIGRobotics-UIUC/LeKiwi) and SO-101 / SO-ARM100 (TheRobotStudio, https://github.com/TheRobotStudio/SO-ARM100) | Apache-2.0 | Credited, not downloaded |
+
+**Which models exactly.** The models drawn are the `asset_id` and `parts[].asset` values in `data/sim/sku_assets.yaml`
+(100 distinct). For each one, `index.yaml` on vhagar records `source`, `source_id`, `source_usd`, `license` and
+`attribution`, and every SimReady package keeps its own `.metadata/LICENSE.txt`. `arms/sim/tools/ATTRIBUTION.md` is
+the license notice that travels with the asset tree (rebuild step 5 copies it in).
 
 **Credit line.** Use this in the README, the demo credits and on Devpost:
 
 > Product 3D models: NVIDIA SimReady Assets (CC BY 4.0), RoboCasa (Nasiriany et al., RSS 2024; CC BY 4.0),
 > Lightwheel/NVIDIA PhysicalAI Kitchen objects (CC BY 4.0); modified by the Picky team. Robot model: LeIsaac LeKiwi +
-> SO-101 (LightwheelAI, Apache-2.0), with a lift overlay by the Picky team.
+> SO-101 (LightwheelAI, Apache-2.0; LeKiwi by SIGRobotics-UIUC, SO-101 by TheRobotStudio), with a lift overlay by the
+> Picky team. CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
 
 What we changed:
 
@@ -136,6 +146,8 @@ What we changed:
 - Converted MJCF/OBJ to USD.
 - Rescaled each model to its SKU.
 - Covered the front with our labels.
+- Rover: our overlay `picky_rover.usda` sublayers the untouched `lekiwi.usd` and adds the lift, mast, basket and
+  cameras; the worker hides the overlay's own lift parts and poses the arm links kinematically.
 
 **Trademark caution.** CC BY covers copyright, not trademarks. Some SimReady art resembles real brands: Dr. Oetker,
 Nesquik, the Coca-Cola contour bottle, a Heinz-like label, "Lysa" ≈ Lay's, "Doradoss" ≈ Doritos, and "Monte Delight"
@@ -156,40 +168,52 @@ ssh vhagar
 export PICKY_ASSET_ROOT=/data/$USER/picky-assets/products R=/data/$USER/picky-assets/products
 REPO=/data/$USER/picky/repo                       # the rsynced repo (DEPLOY.md step 1)
 mkdir -p $R/_tools $R/_logs
-# 0) tool venv: usd-core + hf + numpy (NOT Isaac's python)
+# 0) tool venv: usd-core + hf + numpy (NOT Isaac's python); needs uv, tmux, curl and unzip on the host
 uv venv $R/.venv --python 3.12 && uv pip install --python $R/.venv/bin/python "huggingface_hub>=0.35" usd-core numpy pyyaml pillow
-# 1) downloads (~2.2 GB, ~4 min): SimReady folders, Lightwheel zips, 64 RoboCasa objects via HTTP Range reads
-tmux new -d -s picky-assets-dl "bash $REPO/arms/sim/tools/dl.sh > $R/_logs/dl.log 2>&1"
+# 1) downloads (~2.2 GB, ~4 min): SimReady folders, Lightwheel zips, 64 RoboCasa objects via HTTP Range reads.
+#    The env is passed inline: a tmux server that is already running does not see this shell's exports.
+tmux new -d -s picky-assets-dl "PICKY_ASSET_ROOT=$R bash $REPO/arms/sim/tools/dl.sh > $R/_logs/dl.log 2>&1"
 #    RoboCasa's category scales: kitchen_objects.py from the RoboCasa repo (path as of 2026-10; adjust if it moved)
 curl -fsSL https://raw.githubusercontent.com/robocasa/robocasa/main/robocasa/models/objects/kitchen_objects.py \
   -o $R/_tools/kitchen_objects.py
+sha256sum $R/_tools/kitchen_objects.py   # 17ca0549417be86abff519ce51024255bfed44f7787a16eadd55fea872fa4585 when built
+#    WAIT for the downloads: `tail -f $R/_logs/dl.log` until it prints "== done" (each step prints rc=0)
 # 2) convert MJCF/OBJ -> USD, normalize every asset, write items/*/{item,geom}.usda + index.yaml (~3 min)
 $R/.venv/bin/python -I $REPO/arms/sim/tools/build_items.py --convert
 # 3) the SKU map (repo venv, any machine with index.yaml): planogram slot stats -> generator -> validator
 cd $REPO && uv run python arms/sim/tools/slot_stats.py /tmp/slot_stats.json
 uv run python arms/sim/tools/gen_sku_assets.py data/products.yaml $R/index.yaml /tmp/slot_stats.json data/sim/sku_assets.yaml
 uv run python arms/sim/tools/check_sku_assets.py data/products.yaml $R/index.yaml data/sim/sku_assets.yaml /tmp/slot_stats.json
+git diff --stat data/sim/sku_assets.yaml  # in a git checkout: no change unless products / planograms / index changed
 # 4) optional checks: contact sheets / test shelf (Isaac), triangle budget (asset venv)
 /data/$USER/isaacsim/python.sh $REPO/arms/sim/tools/render_assets.py shelf
+# 5) the license notice travels with the assets
+cp $REPO/arms/sim/tools/ATTRIBUTION.md $R/
 ```
 
-Steps 3 and 4 also work from the Mac with a copy of `index.yaml`. The generator reproduces the committed map byte
-for byte, header aside. Rerun step 3 after any change to `products.yaml` or the planograms. Data files are the source
-of truth (CLAUDE.md rule 5): fix the generator, never the YAML.
+Step 3 also works from the Mac with a copy of `index.yaml`, and the generator reproduces the committed map byte for
+byte. Rerun step 3 after any change to `products.yaml` or the planograms. Data files are the source of truth
+(CLAUDE.md rule 5): fix the generator, never the YAML.
 
-**Rover USD.** Downloaded once (35.7 MB), then composed with usd-core:
+**Rover USD.** `lekiwi.usd` is downloaded once (35.7 MB, never committed), then composed with usd-core:
 
 ```bash
 D=/data/$USER/picky-assets/robots/picky-rover && mkdir -p $D
 $R/.venv/bin/hf download LightwheelAI/leisaac_env assets/robots/lekiwi.usd --local-dir /tmp/leisaac
 cp /tmp/leisaac/assets/robots/lekiwi.usd $D/
 $R/.venv/bin/python -I $REPO/arms/sim/tools/compose_picky_rover.py $D/lekiwi.usd $D/picky_rover.usda
+cp $REPO/arms/sim/tools/ATTRIBUTION.md $D/
+sha256sum $D/lekiwi.usd $D/picky_rover.usda
+#   636d148716e3c231d8d8b68dc223fbff00b7596fbf69e446883ffa2e7397c0da  lekiwi.usd        (the file we used)
+#   79e6150f81a966861e219f49f6e19d88c74db3752315cf541177b51f4bb0d16a  picky_rover.usda  (composer output for it)
 # optional physics sanity check of the overlay (plays physics, renders 4 views):
 /data/$USER/isaacsim/python.sh $REPO/arms/sim/tools/isaac_check_rover.py $D/picky_rover.usda /data/$USER/picky-assets/robots/renders 0.8
 ```
 
-Keep `lekiwi.usd` next to `picky_rover.usda`, because the overlay sublayers it by relative path. For the same reason,
-move or copy the whole `products/` tree as one unit: each `geom.usda` reaches its sources through relative paths.
+If upstream changes `lekiwi.usd`, the hashes differ. The puppet checks the SO-101 link names when it loads the file
+and falls back to the primitive rover when they are missing. Keep `lekiwi.usd` next to `picky_rover.usda`, because
+the overlay sublayers it by relative path. For the same reason, move or copy the whole `products/` tree as one unit:
+each `geom.usda` reaches its sources through relative paths.
 
 ## Tools (`arms/sim/tools/`)
 
@@ -202,6 +226,7 @@ move or copy the whole `products/` tree as one unit: each `geom.usda` reaches it
 | `slot_stats.py`, `gen_sku_assets.py`, `check_sku_assets.py` | Build the SKU map (decision table: model, fit, label plan, grasp hints) and validate it. |
 | `overlap_check.py`, `tri_budget.py`, `render_assets.py` | Check produce-bin overlap and the triangle budget, and render contact sheets. |
 | `compose_picky_rover.py`, `isaac_check_rover.py` | Compose and check the rover overlay. |
+| `ATTRIBUTION.md` | The license notice copied into the asset tree and the rover folder. |
 
 The tools are standalone scripts for usd-core, Isaac's python or the repo venv. The worker never imports them, and
 they carry `# ruff: noqa`.

@@ -348,3 +348,132 @@ def test_puppet_frames_and_lift():
     assert tcp == pytest.approx((0.38, 0.0, 0.3))
     assert puppet.names_ok(["base", *puppet.ARM_LINKS]) and not puppet.names_ok(["base", "shoulder"])
     assert ARM_MOUNT_X_M + ARM_STOW_EXT_M < ARM_MOUNT_X_M + ARM_FULL_EXT_M
+
+
+# ---- fallbacks without Isaac: CLI config, Pillow sketch, Isaac backend failure paths (stubbed stage) ---------------
+def _args(**kw):
+    import argparse
+
+    base = {"backend": "isaac", "asset_root": "", "sku_assets": "", "no_assets": False, "rover_usd": ""}
+    return argparse.Namespace(**{**base, **kw})
+
+
+def test_cli_visual_config_degrades(tmp_path: Path, asset_root: Path, monkeypatch: pytest.MonkeyPatch):
+    import yaml
+
+    import arms.sim.app as app
+
+    monkeypatch.delenv("PICKY_SIM_ASSETS", raising=False)
+    m = tmp_path / "map.yaml"
+    m.write_text(yaml.safe_dump({"skus": entries()}))
+    usd = tmp_path / "picky_rover.usda"
+    usd.write_text("#usda 1.0\n")
+    assets, rover = app.visual_config(_args())  # nothing set: primitives everywhere
+    assert not assets.active and rover is None
+    assets, rover = app.visual_config(_args(asset_root=str(asset_root), sku_assets=str(m), rover_usd=str(usd)))
+    assert assets.active and assets.resolve("salsa_hot") is not None and rover == str(usd)
+    assets, _ = app.visual_config(_args(asset_root=str(asset_root), sku_assets=str(m), no_assets=True))
+    assert not assets.active and assets.resolve("salsa_hot") is None  # --no-assets wins over the asset root
+    monkeypatch.setenv("PICKY_SIM_ASSETS", "off")
+    assert not app.visual_config(_args(asset_root=str(asset_root), sku_assets=str(m)))[0].active
+    _, rover = app.visual_config(_args(backend="sketch", rover_usd=str(usd)))
+    assert rover is None  # the rover USD is Isaac-only
+    _, rover = app.visual_config(_args(rover_usd=str(tmp_path / "missing.usda")))
+    assert rover is None
+
+
+def test_sketch_backend_renders_with_models_and_rover_usd_set(assets: SkuAssets, tmp_path: Path):
+    """Without Isaac the same specs (model dims, rover USD plan) still render as primitives."""
+    pytest.importorskip("PIL")
+    import base64
+    import io
+
+    from PIL import Image
+
+    from arms.sim.sketch import SketchBackend
+
+    usd = tmp_path / "picky_rover.usda"
+    usd.write_text("#usda 1.0\n")
+    out: list = []
+    backend = SketchBackend()
+    core = WorkerCore(
+        backend, out.append, loader=loader, robots_loader=robots_loader, assets=assets, rover_usd=str(usd)
+    )
+    core.load_stores(["store_test"])
+    assert backend.rovers["rover-test-1"].model_usd == str(usd) and backend.rovers["rover-test-1"].prims
+    for cid in ("rover-test-1.front", "rover-test-1.wrist", "rover-test-1.basket"):
+        frame = core.capture(cid)
+        img = Image.open(io.BytesIO(base64.b64decode(frame.jpeg_b64)))
+        assert img.size == (frame.w, frame.h)
+        colors = img.convert("RGB").getcolors(maxcolors=1_000_000)
+        assert colors is not None and len(colors) > 20, cid
+
+
+class _Stage:
+    """Just enough of a Usd.Stage for the backend's fallback paths."""
+
+    def __init__(self, children: tuple[str, ...] = ()) -> None:
+        self.removed: list[str] = []
+        self.children = children
+
+    def GetPrimAtPath(self, path: str):  # noqa: N802 - pxr API
+        return True
+
+    def RemovePrim(self, path: str) -> None:  # noqa: N802 - pxr API
+        self.removed.append(path)
+
+    def DefinePrim(self, path: str, kind: str = ""):  # noqa: N802 - pxr API
+        from unittest.mock import MagicMock
+
+        prim = MagicMock()
+        kids = []
+        for name in self.children:
+            kid = MagicMock()
+            kid.GetName.return_value = name
+            kids.append(kid)
+        prim.GetChildren.return_value = kids
+        return prim
+
+
+def test_isaac_unit_falls_back_to_the_primitive_when_the_model_fails(assets: SkuAssets):
+    import arms.sim.app as app
+
+    spec = build_scene_spec(planogram(), products(), assets=assets)
+    salsa = next(p for p in spec.product_prims() if p.slot_id == "s_salsa")
+    avo = next(p for p in spec.product_prims() if p.slot_id == "s_avo")
+    assert salsa.render == "asset" and avo.render == "primitive"
+    be = object.__new__(app.IsaacBackend)  # no Kit: only the fallback logic runs
+    be.assets, be.stage, be._units = assets, _Stage(), {}
+    calls: list[str] = []
+
+    def broken_model(spec_, prim, ua):
+        calls.append(prim.path)
+        be._units[(prim.store_id or "", prim.instance_id or "")] = ("half-built",)
+        raise RuntimeError("bad usd")
+
+    be._define_model_unit = broken_model
+    be._define_primitive_unit = lambda spec_, prim: f"primitive:{prim.path}"
+    assert be._define_unit(spec, salsa) == f"primitive:{salsa.path}"
+    assert calls == [salsa.path] and be.stage.removed == [salsa.path]  # the half-built model prim is removed
+    assert not be._units  # and forgotten, so set_instance_pose moves the primitive
+    assert be._define_unit(spec, avo) == f"primitive:{avo.path}" and calls == [salsa.path]
+    assert be._define_unit(None, salsa) == f"primitive:{salsa.path}"  # no scene spec (late add_instance)
+
+
+def test_isaac_rover_usd_without_so101_links_falls_back(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import sys
+    import types
+    from unittest.mock import MagicMock
+
+    import arms.sim.app as app
+
+    fake_pxr = types.SimpleNamespace(Gf=MagicMock(), Usd=MagicMock(), UsdGeom=MagicMock(), UsdPhysics=MagicMock())
+    monkeypatch.setitem(sys.modules, "pxr", fake_pxr)
+    usd = tmp_path / "picky_rover.usda"
+    usd.write_text("#usda 1.0\n")
+    rover = build_rover_spec(robots()[0], model_usd=str(usd))
+    be = object.__new__(app.IsaacBackend)
+    be.stage, be._puppet_geo = _Stage(children=("base_link", "wheel_0")), {}
+    assert be._spawn_puppet(rover) is None  # caller then draws rover.prims (the full primitive rover)
+    assert be.stage.removed == [f"{rover.root_path}/{puppet.MODEL_PRIM_NAME}"]  # nothing of the USD left behind
+    assert rover.prims and len(rover.prims) > len(rover.puppet_prims)

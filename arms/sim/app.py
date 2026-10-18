@@ -1248,6 +1248,21 @@ def _quiet_kit_logging() -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
 
+def visual_config(args: argparse.Namespace) -> tuple[SkuAssets, str | None]:
+    """(per-item models, rover USD) from the CLI flags (their defaults come from the env). Unset / missing files /
+    ``--no-assets`` / ``PICKY_SIM_ASSETS=off`` -> primitives; the rover USD only for the Isaac backend (the Pillow
+    sketch draws RoverSpec primitives only)."""
+    assets = SkuAssets.from_env(
+        {
+            ASSET_ROOT_ENV: args.asset_root,
+            SKU_ASSETS_ENV: args.sku_assets,
+            ASSETS_SWITCH_ENV: "off" if args.no_assets else os.environ.get(ASSETS_SWITCH_ENV, ""),
+        }
+    )
+    rover_usd = rover_usd_from_env({ROVER_USD_ENV: args.rover_usd}) if args.backend == "isaac" else None
+    return assets, rover_usd
+
+
 def make_backend(kind: str, args: argparse.Namespace, assets: SkuAssets | None = None) -> tuple[Any, SimBackend]:
     """(SimulationApp or None, backend). Raises IsaacUnavailable for 'isaac' without Isaac."""
     if kind == "isaac":
@@ -1287,15 +1302,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-seconds", type=float, default=None, help="exit after this long (smoke tests)")
     args = ap.parse_args(argv)
 
-    assets = SkuAssets.from_env(
-        {
-            ASSET_ROOT_ENV: args.asset_root,
-            SKU_ASSETS_ENV: args.sku_assets,
-            ASSETS_SWITCH_ENV: "off" if args.no_assets else os.environ.get(ASSETS_SWITCH_ENV, ""),
-        }
-    )
-    # the rover USD needs the Isaac backend (the Pillow sketch draws RoverSpec primitives only)
-    rover_usd = rover_usd_from_env({ROVER_USD_ENV: args.rover_usd}) if args.backend == "isaac" else None
+    assets, rover_usd = visual_config(args)
     log.info("%s; rover: %s", assets.describe, rover_usd or "primitive")
     try:
         sim_app, backend = make_backend(args.backend, args, assets)

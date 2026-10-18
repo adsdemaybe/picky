@@ -89,7 +89,9 @@ store out).
 
 **Credits (CC BY 4.0, required wherever the models are shown):** Product 3D models: NVIDIA SimReady Assets (CC BY
 4.0), RoboCasa (Nasiriany et al., RSS 2024; CC BY 4.0), Lightwheel/NVIDIA PhysicalAI Kitchen objects (CC BY 4.0);
-modified by the Picky team. Robot model: LeIsaac LeKiwi + SO-101 (LightwheelAI, Apache-2.0).
+modified by the Picky team. Robot model: LeIsaac LeKiwi + SO-101 (LightwheelAI, Apache-2.0; LeKiwi by SIGRobotics-UIUC,
+SO-101 by TheRobotStudio), with a lift overlay by the Picky team. Sources, license links and the per-model list:
+`ASSETS.md`.
 
 **In the pipeline:** start the gateway with `robot` real (`PICKY_REAL_ARMS=robot`), then start the worker. Stores whose hash
 matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop the worker and they continue on the 2D fake.

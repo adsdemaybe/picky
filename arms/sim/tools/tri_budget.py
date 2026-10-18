@@ -4,7 +4,7 @@
 import json, os, sys
 from pxr import Usd, UsdGeom
 
-root = os.environ.get("PICKY_ASSET_ROOT") or f"/data/{os.environ.get('USER', 'advaiv2')}/picky-assets/products"
+root = os.environ.get("PICKY_ASSET_ROOT") or f"/data/{os.environ.get('USER', 'user')}/picky-assets/products"
 inst = json.load(sys.stdin)
 tot = {}
 per = {}
