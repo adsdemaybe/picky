@@ -37,13 +37,13 @@ export default function LivePage() {
   const phase = useTrip((s) => s.phase);
   const approval = useTrip((s) => s.approval);
 
-  // restore this browser's saved connection settings, and start the simulated feed by default
+  // restore this browser's saved connection settings and start the feed (gateway when configured, else simulated)
   // (a followed gateway trip keeps the feed bound to its robot; see lib/gateway/tripSource.ts)
   useEffect(() => {
     useFeed.getState().hydrate();
     const t = useTrip.getState();
     if (t.source === "gateway" && t.tripId && t.robotId) useFeed.getState().bindTrip({ tripId: t.tripId, robotId: t.robotId, gatewayUrl: GATEWAY_URL });
-    else if (useFeed.getState().conn === "idle" && useFeed.getState().mode === "sim") useFeed.getState().connect();
+    else if (useFeed.getState().conn === "idle" && useFeed.getState().mode !== "stream") useFeed.getState().connect();
   }, []);
 
   const conn = CONN_STYLE[feed.conn];

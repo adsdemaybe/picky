@@ -73,9 +73,10 @@ const envStream = process.env.NEXT_PUBLIC_STREAM_URL ?? "";
 
 function defaults(): Config {
   return {
-    mode: envStream ? "stream" : "sim",
+    // a configured gateway means the real sim worker (Isaac / MuJoCo) is the camera source; the replay is the fallback
+    mode: envStream ? "stream" : envGateway ? "gateway" : "sim",
     gatewayUrl: envGateway || "http://localhost:8000",
-    tripId: "",
+    tripId: envGateway ? (process.env.NEXT_PUBLIC_FEED_ROBOT ?? "rover-ave-1") : "",
     streams: { head: envStream, wrist: "", basket: "", overview: "" },
   };
 }
@@ -147,6 +148,24 @@ export const useFeed = create<FeedStore>((set, get) => {
         log("info", `Gateway ${h.status}, contracts ${h.contracts_version}, sim ${h.sim_connected ? "connected" : "not connected"}`);
       })
       .catch((e) => log("warn", `Health check failed: ${String(e.message ?? e)}`));
+    // an idle robot sends no robot.state on /ws/frames: seed the panel from the fleet's last known state
+    if (/^rover-/.test(id))
+      fetch(`${httpBase}/api/fleet/robots/${encodeURIComponent(id)}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((r) => {
+          if (!r?.pose || get().telemetry) return;
+          set({
+            telemetry: {
+              pose: r.pose,
+              status: r.status,
+              holding: r.holding ?? null,
+              basket_skus: r.basket_skus ?? [],
+              error: r.error ?? null,
+              ts: r.updated_at ? Date.parse(r.updated_at) : Date.now(),
+            },
+          });
+        })
+        .catch(() => {});
 
     try {
       ws = new WebSocket(wsUrl);
