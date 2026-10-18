@@ -930,17 +930,20 @@ class IsaacBackend:
         except ValueError:
             light_scale = 1.0
         bodies = lights = 0
+        physics_scenes = []
         for p in Usd.PrimRange(scene.GetPrim()):
             if p.HasAPI(UsdPhysics.RigidBodyAPI):
                 UsdPhysics.RigidBodyAPI(p).CreateRigidBodyEnabledAttr(False)
                 bodies += 1
             if p.IsA(UsdPhysics.Scene):
-                p.SetActive(False)  # one physics scene per stage; nothing here is simulated anyway
+                physics_scenes.append(p)
             if light_scale != 1.0 and (p.HasAPI(UsdLux.LightAPI) or p.GetTypeName().endswith("Light")):
                 a = p.GetAttribute("inputs:intensity")
                 if a and a.Get() is not None:
                     a.Set(float(a.Get()) * light_scale)
                     lights += 1
+        for p in physics_scenes:  # after the traversal: deactivating changes the stage under the iterator
+            p.SetActive(False)  # one physics scene per stage; nothing here is simulated anyway
         for rel in spec.external_hidden:
             self._set_visible(f"{spec.external_root}/{rel}", False)
         log.info(
