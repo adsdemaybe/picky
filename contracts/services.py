@@ -861,7 +861,8 @@ class RobotBrainService(Protocol):
 #     evidence  EvidenceCameras  perception  create_evidence / _fake             CameraService.snapshot + retention
 #     (*) the runner is deterministic code: its "fake" is the same class wired to fakes.
 #
-# Kill switch (double): every loop field defaults to None AND PICKY_EXEC_MODE defaults to 'direct'. ``exec_mode``
+# Kill switch (double): every loop field defaults to None AND PICKY_EXEC_MODE=direct. Blank PICKY_EXEC_MODE = 'plan'
+# when vla + verifier are wired (the gateway wires every loop field), else 'direct'. ``exec_mode``
 # returns 'direct' unless the mode is 'plan' / 'tools' AND planner, runner, vla and verifier are all wired; 'direct'
 # is the exact v0.2 brain path (tools call RobotService directly). Factories never call services at construction; a
 # real factory that raises falls back to its fake (v0.2 registry rules); PICKY_REAL_ARMS=planner|vla|verifier selects
@@ -1351,7 +1352,8 @@ the arms export these factories only once they implement them. Gateway step: wir
 **LOOP_SERVICE_FACTORIES}`` and treat a missing loop factory as 'not wired' (None), never as an error."""
 
 LOOP_ENV_VARS: dict[str, str] = {
-    "PICKY_EXEC_MODE": "direct | plan | tools (default direct = exact v0.2 behaviour; the kill switch)",
+    "PICKY_EXEC_MODE": "direct | plan | tools (blank = plan when the VLA + verifier are wired, else direct; "
+    "direct = exact v0.2 behaviour, the kill switch)",
     "PICKY_VLA_TIERS": "tiers to offer, e.g. 't0_scripted,t1_pretrained' (default t0_scripted)",
     "PICKY_VLA_T1_MODEL": "e.g. lerobot/smolvla_base (advertised by the Isaac worker as 'vla:t1:<model>')",
     "PICKY_VERIFIER_MODE": "decide | shadow | gt_only (default: shadow on 2D-fake stores, decide on Isaac)",

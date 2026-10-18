@@ -2,8 +2,8 @@
 
 **Additive patch on v0.2.0.** Nothing in v0.2 changes shape. The release adds new modules, new OPTIONAL `Services`
 fields (default `None`), new event types in the `Event` union and new REST routes in `api.md`. `make check` and
-`make demo` stay green with every arm on its current fake, and the loop stays off until someone turns it on
-(`PICKY_EXEC_MODE` defaults to `direct`, the exact v0.2 brain path).
+`make demo` stay green with every arm on its current fake. Once the gateway wires the loop services, a blank
+`PICKY_EXEC_MODE` means `plan`; `PICKY_EXEC_MODE=direct` is the kill switch (the exact v0.2 brain path).
 
 **Affected arms:** agent (planner + runner), robot (VLA + truth + faults), perception (verifier + evidence +
 Perceptron provider), gateway (wiring, routes, events) and frontend (PlanPanel, VLA bar, "Verifier caught it" card).

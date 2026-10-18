@@ -32,7 +32,7 @@ Producers (``EVENT_PRODUCERS``; exactly one per type, so nothing is published tw
   events use ``plan_envelope(plan)`` (same keys as ``goal_envelope``), so the /ws filters work unchanged; the runner
   also mirrors one ``brain.step(kind='status')`` per step transition (``bridge.mirror_brain_step``), so a v0.2
   ThinkingLog keeps working, and the v0.2 execution events (robot.arrived, scan.result, pick.choices, item.picked,
-  basket.verified) keep firing from the same runs. PICKY_EXEC_MODE=direct (default) emits none of the loop events.
+  basket.verified) keep firing from the same runs. PICKY_EXEC_MODE=direct (kill switch) emits none of the loop events.
 
 Live-only events (``LIVE_ONLY_EVENT_TYPES`` = ``frame``, ``camera.frame``, ``camera.overlay``) never go through the
 sequenced bus/replay ring: they are sent latest-only with ``seq=0`` on ``/ws/frames?trip_id=|robot_id=``,

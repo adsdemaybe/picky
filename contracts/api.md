@@ -10,7 +10,7 @@ cents; all JSON uses the models' field names as-is, and derived values (`Cart.to
 fields. Errors: `{"detail": str}`; `KeyError` → 404, rule violation (`ValueError`, e.g. restock over capacity,
 invalid goal transition) → 409, invalid body / enum → 422.
 
-**0.2.1** adds the planner → VLA → verifier loop (plan / tools mode only; `PICKY_EXEC_MODE=direct`, the default, is
+**0.2.1** adds the planner → VLA → verifier loop (plan / tools mode; `PICKY_EXEC_MODE=direct`, the kill switch, is
 the exact v0.2 behaviour): REST routes, events and the "who writes what" table in
 [the loop section](#planner--vla--verifier-loop-new-in-021) at the end. Nothing above changes.
 
@@ -237,8 +237,10 @@ Additive. Every route is served by `arms/gateway` and backed by an OPTIONAL `Ser
 carry `evidence.FrameRef` (`url` = `/api/evidence/{frame_id}.jpg`, always face-blurred, retained ≥ 10 min). Design,
 sequence diagram and per-arm plan: `docs/vla-loop/` (`api.md`, `IMPLEMENTING.md`); what changed: `CHANGES-0.2.1.md`.
 
-**Kill switch.** `PICKY_EXEC_MODE` defaults to `direct`. `services.exec_mode(services, settings.picky_exec_mode)`
-returns `plan` / `tools` only when that mode is configured AND planner, runner, vla and verifier are all wired.
+**Kill switch.** `PICKY_EXEC_MODE` blank (the default) = `plan` when the VLA and the verifier are wired (the gateway
+wires every loop service from 0.2.1 on), else `direct`; `PICKY_EXEC_MODE=direct` is the kill switch.
+`services.exec_mode(services, mode)` returns `plan` / `tools` only when that mode is configured AND planner, runner,
+vla and verifier are all wired. `GET /health` reports it as `details.exec_mode`.
 
 | mode | who drives | what changes |
 |---|---|---|

@@ -94,10 +94,10 @@ robot) · `not_ready` · `disconnected` → raised once on Isaac loss; the robot
 `unknown_robot` (missing / unknown robot_id) · `battery_low` → return_to_dock · `internal` (incl. an unparsable
 command). Goals: `Goal.failure_code` (+ `no_robot`). Mandate: `MandateReason` (+ `MandateViolation.line_id`).
 
-## Planner → VLA → verifier loop (0.2.1, additive; off by default)
+## Planner → VLA → verifier loop (0.2.1, additive; `PICKY_EXEC_MODE=direct` turns it off)
 
-`PICKY_EXEC_MODE=direct` (default) = everything above, unchanged. `plan` (and `tools`) turn the loop on once the four
-core services are wired (`services.exec_mode`). The LLM proposes, code decides: Gemini drafts a `plan.PlanDraft`,
+`PICKY_EXEC_MODE=direct` (the kill switch) = everything above, unchanged. `plan` (and `tools`) run the loop once the
+four core services are wired (`services.exec_mode`); blank = `plan` when the gateway wired them (it does). The LLM proposes, code decides: Gemini drafts a `plan.PlanDraft`,
 deterministic code compiles it into a `plan.StepPlan` whose steps carry machine-checkable pre/post `Condition`s; the
 VLA's "succeeded" is only a claim until the verifier (Perceptron on blurred frames + robot state) passes the
 postcondition; recovery is data (`policy.RetryPolicy`) decided by code (`policy.decide_recovery`).
