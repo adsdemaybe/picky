@@ -1,0 +1,251 @@
+# Picky T-Mobile store: downloaded 3D models (tool input for arms/sim/tmobile/build_assets.py; see README.md there).
+# Every entry is no-login, permissive (CC-BY-4.0 or CC0) and was checked by the asset sweeps on 2026-10-17. Raw files
+# land in $TMO_ASSET_ROOT/raw/<model_id>/ on the GPU host; the normalized USDs in $TMO_ASSET_ROOT/items/dev_<model_id>/.
+# pose: extra rotations (axis, degrees; applied first to last after the glTF Y-up -> Z-up turn) so the model stands
+# upright with its screen / front toward -Y. Filled in after looking at the contact sheets (renders/sheet_*.jpg).
+schema: picky tmobile models v1
+models:
+  ov_iphone13promax_ds:
+    kind: phone
+    title: Apple iPhone 13 Pro Max
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/4328dea00e47497dbeac73c556121bc9
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-073/4328dea00e47497dbeac73c556121bc9.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 180]
+  ov_iphone13pro_ds:
+    kind: phone
+    title: iPhone 13 Pro
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/0c34a039d50e42f4b46738ec26929c15
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-140/0c34a039d50e42f4b46738ec26929c15.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 180]
+  ov_iphone13c_ds:
+    kind: phone
+    title: iPhone 13 Concept (dual camera)
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/d064458166e146779cb7bf802d2c0056
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-109/d064458166e146779cb7bf802d2c0056.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 180]
+  ov_iphonese3c_ds:
+    kind: phone
+    title: iPhone SE 3 2022 Concept (single camera)
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/75f86bb680f74a74bad782fbd7e96302
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-080/75f86bb680f74a74bad782fbd7e96302.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 180]
+  ov_pixel6pro_ds:
+    kind: phone
+    title: Google Pixel 6 Pro (camera bar)
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/b9b58ca40c254f8dafd8370869af74fb
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-115/b9b58ca40c254f8dafd8370869af74fb.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 180]
+  ov_galaxys21u_ds:
+    kind: phone
+    title: Samsung Galaxy S21 Ultra
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/cd962832be7744efb6b37fe0ee2027e7
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-085/cd962832be7744efb6b37fe0ee2027e7.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 180]
+  ov_galaxys22_ma:
+    kind: phone
+    title: Samsung Galaxy S22 Violet (free)
+    author: mohd.aldada2
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/c69e18b608bf46ea803fc63a4725edc4
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-142/c69e18b608bf46ea803fc63a4725edc4.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 90]
+  ov_zflip3_ds:
+    kind: phone
+    title: Samsung Galaxy Z Flip 3 (unfolded)
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/112947cbab7a4f708d0d01adb7d3fa3d
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-054/112947cbab7a4f708d0d01adb7d3fa3d.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 180]
+  ov_android_generic_sg:
+    kind: phone
+    title: Off-brand Android Smartphone (author-designed, no brand)
+    author: sabasgme
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/2a1c8666306e4116980daeb9406e7780
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-092/2a1c8666306e4116980daeb9406e7780.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [x, 90]
+    - [y, 90]
+  ov_ipadmini6_ds:
+    kind: tablet
+    title: iPad Mini 6 2021 (flat-edge, single camera)
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/f363c2b1c74a462588db184bd4fb024e
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-081/f363c2b1c74a462588db184bd4fb024e.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [z, 180]
+  ov_applewatch6_ss:
+    kind: watch
+    title: Apple Watch Series 6 (with band)
+    author: Serega_SHTOPOR
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/2b4e21a9ff194c089cb77086415a389a
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-128/2b4e21a9ff194c089cb77086415a389a.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose: []
+  ov_smartwatch_round_md:
+    kind: watch
+    title: Wrist watch (smartWatch), round face
+    author: mohitdx
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/c896964ab7274bff810ac5ae9165cf8c
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-002/c896964ab7274bff810ac5ae9165cf8c.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose: []
+  ov_smartwatch_rect_hm:
+    kind: watch
+    title: Smartwatch (rectangular, black)
+    author: harrimyl
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/66972651bde34b05a3f4fc2a2465d2c2
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-128/66972651bde34b05a3f4fc2a2465d2c2.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose: []
+  ov_jblclip3_wz:
+    kind: speaker
+    title: JBL Clip3 (red, carabiner)
+    author: wiatar22
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/7902d58295c54372915401057b3fc82d
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-118/7902d58295c54372915401057b3fc82d.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [x, 90]
+  gso_jbl_charge:
+    kind: speaker
+    title: JBL_Charge_Speaker_portable_wireless_wired_Green
+    author: Google LLC
+    license: CC-BY-4.0
+    page_url: https://app.gazebosim.org/GoogleResearch/fuel/models/JBL_Charge_Speaker_portable_wireless_wired_Green
+    download_url: https://huggingface.co/datasets/suvadityamuk/google-scanned-objects-raw/resolve/main/JBL_Charge_Speaker_portable_wireless_wired_Green.zip
+    format: gso_zip
+    source: Google Scanned Objects (Google LLC, 2020)
+    pose: []
+    up: z
+  ov_airpodcase_tj:
+    kind: earbuds
+    title: Airpod Case (case only)
+    author: tompkijo
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/f5773f739d5a4734962370ed753c07e9
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-094/f5773f739d5a4734962370ed753c07e9.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose: []
+  ov_galaxybudslive_ds:
+    kind: earbuds
+    title: Samsung Galaxy Buds Live (case)
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/7e4a0f2202144b91b4c47ffbfdf94584
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-009/7e4a0f2202144b91b4c47ffbfdf94584.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose:
+    - [x, 90]
+  ov_budscase_jj:
+    kind: earbuds
+    title: Galaxy Buds - Case Only (1:1 scale, white pill)
+    author: jbiju.john
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/f0cdf2d228494830825a6fe5804548bc
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-006/f0cdf2d228494830825a6fe5804548bc.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose: []
+  ov_beatsstudio_im:
+    kind: headphones
+    title: Beats Studio (headphones)
+    author: impactra
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/069a29ee35364846929b9ed03841d30c
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-100/069a29ee35364846929b9ed03841d30c.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose: []
+  ov_airtag_ds:
+    kind: tracker
+    title: Apple AirTag
+    author: DatSketch
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/9683be76f58d4e559f58437502489beb
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-014/9683be76f58d4e559f58437502489beb.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose: []
+  fx_headphone_stand:
+    kind: fixture
+    title: headphone stand
+    author: see page_url
+    license: CC-BY-4.0
+    page_url: https://sketchfab.com/3d-models/a7c9cfcc33064179b19e0396676f2104
+    download_url: https://huggingface.co/datasets/allenai/objaverse/resolve/main/glbs/000-087/a7c9cfcc33064179b19e0396676f2104.glb
+    format: glb
+    source: Objaverse 1.0 (Sketchfab upload, HF allenai/objaverse)
+    pose: []
+  ph_ceiling_lamp:
+    kind: fixture
+    title: modern_ceiling_lamp_01
+    author: Poly Haven
+    license: CC0-1.0
+    page_url: https://polyhaven.com/a/modern_ceiling_lamp_01
+    download_url: https://api.polyhaven.com/files/modern_ceiling_lamp_01
+    format: polyhaven_gltf
+    source: Poly Haven
+    pose: []
+  ph_potted_plant:
+    kind: fixture
+    title: potted_plant_02
+    author: Poly Haven
+    license: CC0-1.0
+    page_url: https://polyhaven.com/a/potted_plant_02
+    download_url: https://api.polyhaven.com/files/potted_plant_02
+    format: polyhaven_gltf
+    source: Poly Haven
+    pose: []
