@@ -226,6 +226,8 @@ class SuggestionEngine:
             if product is None:
                 continue
             bought = seen.get(d.sku)
+            if bought is not None and bought[1] < 3:
+                continue  # bought recently (same rule as the complement loop): a deal on it is not news yet
             tags = {t.lower() for t in product.tags} | {product.category.lower(), (product.subcategory or "").lower()}
             liked = sorted((likes & tags) - GENERIC_TAGS)
             if bought is None and not liked:

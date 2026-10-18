@@ -1,0 +1,79 @@
+# Visual-only dressing for the Isaac backend (arms/sim/visuals.py). Nothing here changes the planogram, slots, unit
+# positions or the wire: ground truth stays planogram-derived (CLAUDE.md rule 5). The Pillow sketch backend and the
+# robot fake ignore models and draw the plain boxes.
+#
+# assets:   3D models (glTF/GLB) downloaded + converted to USD by `python -m arms.sim.fetch_visuals` into
+#           PICKY_SIM_ASSET_DIR (default arms/sim/assets/build/visuals, gitignored). Never committed. Each model is
+#           scaled to fit the product's dims_m (uniform scale) and stood up (glTF is Y-up). `yaw_deg` turns the model
+#           so its front faces the shopper (the item's -y label face). Products without a model stay labeled boxes.
+#           Licenses: all CC-BY 4.0 (Sketchfab uploads via Objaverse 1.0); attribution = name + author + url below.
+# products: sku -> asset. `display: stand` puts a phone upright on a display puck, leaned back `tilt_deg`.
+# stores:   per-store colors, fixture styles (`table`: wood top on a white base, one layer of display units spaced
+#           `row_pitch_m` apart) and decor (panels, signs, props).
+schema_version: 1
+source_base: https://huggingface.co/datasets/allenai/objaverse/resolve/main/
+
+assets:
+  phone_iphone_blue: {glb: glbs/000-073/4328dea00e47497dbeac73c556121bc9.glb, name: Apple iPhone 13 Pro Max, author: DatSketch, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/4328dea00e47497dbeac73c556121bc9'}
+  phone_galaxy_ultra: {glb: glbs/000-102/fcfe3ca49ff243d4be1493c7fcc1c751.glb, name: Samsung Galaxy S22 Ultra, author: pewcus-tunbek-4Buvso, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/fcfe3ca49ff243d4be1493c7fcc1c751'}
+  phone_pixel_pro: {glb: glbs/000-115/b9b58ca40c254f8dafd8370869af74fb.glb, name: Google Pixel 6 Pro, author: DatSketch, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/b9b58ca40c254f8dafd8370869af74fb'}
+  phone_flip: {glb: glbs/000-054/112947cbab7a4f708d0d01adb7d3fa3d.glb, name: Samsung Galaxy Z Flip 3, author: DatSketch, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/112947cbab7a4f708d0d01adb7d3fa3d'}
+  earbuds_white: {glb: glbs/000-123/4478dddbfa244f6f9b93eebbd027a73b.glb, name: AirPods Pro, author: JY_JY_, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/4478dddbfa244f6f9b93eebbd027a73b'}
+  earbuds_black: {glb: glbs/000-009/7e4a0f2202144b91b4c47ffbfdf94584.glb, name: Samsung Galaxy Buds Live, author: DatSketch, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/7e4a0f2202144b91b4c47ffbfdf94584'}
+  watch_white: {glb: glbs/000-127/d3b35c5d18a1438cad708b6a97deea5b.glb, name: Apple Watch, author: bharathsrk13, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/d3b35c5d18a1438cad708b6a97deea5b'}
+  watch_dark: {glb: glbs/000-128/2b4e21a9ff194c089cb77086415a389a.glb, name: Apple Watch Series 6, author: Serega_SHTOPOR, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/2b4e21a9ff194c089cb77086415a389a'}
+  gateway: {glb: glbs/000-086/414a08f14d5745559e2238bb62a0aedc.glb, name: Wi-Fi Router, author: Gabriabel, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/414a08f14d5745559e2238bb62a0aedc'}
+  bar_stool: {glb: glbs/000-150/518fe01989904bf48a4a04980bc578af.glb, name: Bar Stool, author: commonspence, license: CC-BY-4.0, url: 'https://sketchfab.com/3d-models/518fe01989904bf48a4a04980bc578af'}
+
+products:
+  # One model per brand family: the display table shows recognizable devices; the price card names the exact model.
+  IP18PRO-256: {asset: phone_iphone_blue, display: stand}
+  IP17PRO-256: {asset: phone_iphone_blue, display: stand}
+  IP17-256: {asset: phone_iphone_blue, display: stand}
+  IP16-128: {asset: phone_iphone_blue, display: stand}
+  GS26U-256: {asset: phone_galaxy_ultra, display: stand}
+  GS26-256: {asset: phone_galaxy_ultra, display: stand}
+  GS25-128: {asset: phone_galaxy_ultra, display: stand}
+  REVVL8P-256: {asset: phone_galaxy_ultra, display: stand}
+  GZF8-256: {asset: phone_flip, display: stand}
+  PX11P-256: {asset: phone_pixel_pro, display: stand}
+  PX10-128: {asset: phone_pixel_pro, display: stand}
+  PX9-128: {asset: phone_pixel_pro, display: stand}
+  MOTOG26-128: {asset: phone_pixel_pro, display: stand}
+  APP3: {asset: earbuds_white, display: first, model_dims: [0.062, 0.025, 0.05]}
+  AP4: {asset: earbuds_white, display: first, model_dims: [0.055, 0.025, 0.05]}
+  BUDS-PRO: {asset: earbuds_white, display: first, model_dims: [0.063, 0.027, 0.05]}
+  GBUDS4PRO: {asset: earbuds_black, display: first, model_dims: [0.05, 0.027, 0.05]}
+  BUDS-RUN: {asset: earbuds_black, display: first, model_dims: [0.05, 0.027, 0.05]}
+  AW12-42: {asset: watch_white, display: first, model_dims: [0.045, 0.04, 0.12]}
+  AWSE3-40: {asset: watch_white, display: first, model_dims: [0.042, 0.04, 0.115]}
+  WATCH-PX3: {asset: watch_dark, display: first, model_dims: [0.045, 0.04, 0.12]}
+  GW8-40: {asset: watch_dark, display: first, model_dims: [0.045, 0.04, 0.12]}
+  GW-5G: {asset: gateway}
+  # chargers, power banks, cables, cases, glass, the iPad and the 5G antenna stay retail boxes with printed labels
+
+stores:
+  store_tmobile:
+    colors:
+      floor: '#cfcac3'
+      wall: '#f6f6f6'
+      ceiling: '#fbfbfb'
+      shelf: '#f3f3f3'
+      endcap: '#f3f3f3'
+      produce_bin: '#ffffff'
+      checkout: '#fafafa'
+    fixture_styles: {TABLE-A: table, TABLE-B: table}
+    table: {top_color: '#d8c3a2', base_color: '#ffffff', top_thickness_m: 0.04, base_inset_m: 0.1, row_pitch_m: 0.16}
+    decor:
+    # magenta brand wall behind the wearables endcap (north wall) and behind the counter (south wall)
+    - {kind: panel, name: accent_north, center: [5.0, 7.985, 1.5], size: [6.0, 0.02, 3.0], color: '#e20074'}
+    - {kind: sign, name: sign_north, center: [5.0, 7.96, 2.45], size: [2.4, 0.03, 0.6], text: T-Mobile, color: '#e20074', text_color: '#ffffff'}
+    - {kind: panel, name: accent_south, center: [8.4, 0.015, 1.5], size: [3.2, 0.02, 3.0], color: '#e20074'}
+    - {kind: sign, name: sign_south, center: [8.4, 0.04, 2.3], size: [1.8, 0.03, 0.45], yaw: 3.1416, text: T-Mobile, color: '#e20074', text_color: '#ffffff'}
+    # counter: magenta front band facing the sales floor, plus two stools at the wall end (out of the robot's counter approach)
+    - {kind: panel, name: counter_band, center: [8.4, 1.212, 0.5], size: [2.4, 0.02, 0.5], color: '#e20074'}
+    - {kind: asset, name: stool_west, asset: bar_stool, center: [9.35, 2.05, 0.0], size: [0.42, 0.42, 0.75]}
+    - {kind: asset, name: stool_east, asset: bar_stool, center: [9.35, 1.55, 0.0], size: [0.42, 0.42, 0.75]}
+    # wall signage over the two walls
+    - {kind: sign, name: sign_accessories, center: [0.04, 4.9, 2.35], size: [2.2, 0.03, 0.32], yaw: 1.5708, text: Accessories, color: '#ffffff', text_color: '#e20074'}
+    - {kind: sign, name: sign_audio, center: [9.96, 4.9, 2.35], size: [2.2, 0.03, 0.32], yaw: -1.5708, text: Audio & Power, color: '#ffffff', text_color: '#e20074'}

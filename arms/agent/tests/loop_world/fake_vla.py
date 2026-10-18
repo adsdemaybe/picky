@@ -75,6 +75,7 @@ class FakeVla:
                 step_kinds=list(T0_KINDS),
                 model_id="scripted",
                 place_back=overlay is not None,
+                basket_unload=callable(getattr(self.s.robot, "pick_from_basket", None)),
                 cancel_latency_ms=50.0,
             ),
             VlaCapabilities(
@@ -399,6 +400,25 @@ class FakeVla:
             await self._stage(ex, "lift_preposition", 0.6)
             await self._stage(ex, "aiming_camera", 0.9)
             return f"aligned to {step.slot_id}"
+        if step.kind == "grasp" and step.source == "basket":  # 0.2.4 checkout unload (CounterMiniRobot)
+            target = step.target
+            inst = (req.grounding.instance_id if req.grounding else None) or target.instance_id
+            await self._stage(ex, "reaching_into_basket", 0.3)
+            try:
+                held = await robot.pick_from_basket(rid, target.sku, inst)
+            except RobotError as exc:
+                if exc.code != "no_instance" or inst is None:
+                    raise
+                held = await robot.pick_from_basket(rid, target.sku, None)
+            await self._stage(ex, "lifting", 0.9)
+            return f"took {target.sku} out of the basket ({held.instance_id})"
+        if step.kind == "place" and step.destination == "counter":
+            if step.counter is None:
+                raise _Fail("precondition_failed", "place on the counter needs a counter spot")
+            await self._stage(ex, "moving_to_counter", 0.4)
+            await robot.place_on_counter(rid, step.counter.position, step.counter.yaw, step.counter.index)
+            await self._stage(ex, "releasing", 0.9)
+            return f"placed {step.sku} on counter spot {step.counter.index + 1}"
         if step.kind == "grasp":
             target = step.target
             inst = (req.grounding.instance_id if req.grounding else None) or target.instance_id

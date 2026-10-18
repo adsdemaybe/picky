@@ -168,3 +168,18 @@ categories:
   sort: 130
 - {category_id: beer, name: Beer, parent_id: alcohol, sort: 1}
 - {category_id: wine, name: Wine, parent_id: alcohol, sort: 2}
+- category_id: wireless
+  name: Phones & Wireless
+  description: Phones, cases, screen protection, chargers, audio, wearables, tablets and home internet (wireless store).
+  icon: smartphone
+  color: '#e20074'
+  aliases: [phones, wireless, cell phones, phone accessories, electronics]
+  sort: 140
+- {category_id: phones, name: Phones, parent_id: wireless, sort: 1}
+- {category_id: cases, name: Cases, parent_id: wireless, sort: 2}
+- {category_id: screen_protectors, name: Screen Protectors, parent_id: wireless, sort: 3}
+- {category_id: chargers, name: Chargers & Power, parent_id: wireless, sort: 4}
+- {category_id: audio, name: Audio, parent_id: wireless, sort: 5}
+- {category_id: wearables, name: Wearables, parent_id: wireless, sort: 6}
+- {category_id: tablets, name: Tablets, parent_id: wireless, sort: 7}
+- {category_id: home_internet, name: Home Internet, parent_id: wireless, sort: 8}

@@ -136,6 +136,13 @@ moment); other scenarios: `slow_vla`, `flaky_t1` (with `PICKY_VLA_TIERS=t0_scrip
 the utils step adds the Settings fields. Fallback: drop `vla` / `robot` from `PICKY_REAL_ARMS`, or
 `PICKY_EXEC_MODE=direct` (the exact v0.2 brain path).
 Isaac side: `make sim` on the GPU box (see arms/sim/README.md); `PICKY_SO101_DIR` = SO-ARM100 checkout for the URDF.
+Perceptron robotics VLA (`PICKY_VLA_T1=perceptron_vla`): the client, the one-command pipeline (`python -m arms.robot.perceptron_vla pipeline`), key setup and the in-sim test are in `docs/vla-loop/perceptron-vla.md` ("Runbook"); it needs the team key `PERCEPTRON_ROBOTICS_API_KEY`, not the Mk1.5 `PERCEPTRON_API_KEY`.
+
+## Real SO-101 bench rig (`so101/`)
+
+Natural-language pick & place on the physical SO-101: overhead camera -> Perceptron Mk1.5 grounding (product + basket
+boxes) -> table homography -> IK on the official URDF -> scripted grasp into the basket. Independent of the sim rover
+(`isaac/rover_so101.py`); see [so101/README.md](so101/README.md).
 
 ## Contributing to this arm
 

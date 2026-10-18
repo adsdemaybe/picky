@@ -40,6 +40,28 @@ robots:
   cameras: [front, wrist, basket]
   color: '#16a34a'
   notes: Capitol Hill rover. 'Hazel, go charge' -> return_to_dock; 'scan dairy at Hill' -> shelf_scan.
+- robot_id: rover-tmo-1
+  name: Magenta
+  kind: rover_so101
+  store_id: store_tmobile
+  dock: {x: 2.2, y: 1.0, theta: 1.571}
+  battery_pct: 92.0
+  basket_capacity: 8
+  max_speed_mps: 0.8
+  cameras: [front, wrist, basket]
+  color: '#e20074'
+  notes: T-Mobile store rover (T-Mobile side track). Dock = the planogram robot_home, by the entrance.
+- robot_id: rover-genie-1
+  name: Juniper
+  kind: rover_so101
+  store_id: store_genie
+  dock: {x: 6.8, y: 5.4, theta: -1.571}
+  battery_pct: 96.0
+  basket_capacity: 10
+  max_speed_mps: 0.8
+  cameras: [front, wrist, basket]
+  color: '#0d9488'
+  notes: Genie Sim supermarket rover (white SO-101 rover v3 in Isaac). Dock = the planogram robot_home, by the entrance.
 store_cameras:
 - camera_id: store_ave.ceiling-1
   store_id: store_ave
@@ -53,3 +75,11 @@ store_cameras:
   store_id: store_hill
   name: Hill ceiling 1 · whole store
   mount: {frame: world, x: 0.8, y: 1.8, z: 3.2, yaw: 0.9, pitch: -0.5, hfov_deg: 100.0, width: 640, height: 480}
+- camera_id: store_tmobile.ceiling-1
+  store_id: store_tmobile
+  name: T-Mobile ceiling 1 · whole floor
+  mount: {frame: world, x: 5.0, y: 0.5, z: 3.2, yaw: 1.571, pitch: -0.6, hfov_deg: 100.0, width: 640, height: 480}
+- camera_id: store_genie.ceiling-1
+  store_id: store_genie
+  name: Genie ceiling 1 · whole floor
+  mount: {frame: world, x: 0.6, y: 6.3, z: 2.7, yaw: -0.66, pitch: -0.55, hfov_deg: 100.0, width: 640, height: 480}

@@ -628,3 +628,51 @@ class MiniRobot:
 
     def states(self, robot_id: str | None = None) -> AsyncIterator[RobotState]:
         return _empty()
+
+
+class CounterMiniRobot(MiniRobot):
+    """MiniRobot + the 0.2.4 basket -> counter primitives (``pick_from_basket`` / ``place_on_counter``), so the fake VLA
+    advertises ``basket_unload`` and the checkout unload runs by arm. Counter units keep ``on_counter=True``."""
+
+    def __init__(self, services: Services, **kwargs: Any) -> None:
+        super().__init__(services, **kwargs)
+        self.counter: list[ItemInstance] = []
+
+    async def list_instances(self, robot_id: str, slot_id: str | None = None) -> list[ItemInstance]:
+        out = await super().list_instances(robot_id, slot_id)
+        return out if slot_id is not None else out + [u.model_copy() for u in self.counter]
+
+    async def pick_from_basket(
+        self, robot_id: str, sku: str | None = None, instance_id: str | None = None
+    ) -> ItemInstance:
+        self.calls["pick_from_basket"] += 1
+        rv = await self._rover(robot_id)
+        self._motion(rv)
+        if rv.holding is not None:
+            raise RobotError("grasp_failed", f"gripper already holds {rv.holding.instance_id}")
+        unit = next(
+            (
+                u
+                for u in rv.basket
+                if (instance_id is not None and u.instance_id == instance_id)
+                or (instance_id is None and sku is not None and u.sku == sku)
+            ),
+            None,
+        )
+        if unit is None:
+            raise RobotError("no_instance", f"no {instance_id or sku} in the basket")
+        rv.basket.remove(unit)
+        rv.holding = unit.model_copy(update={"in_basket": False})
+        return rv.holding.model_copy()
+
+    async def place_on_counter(
+        self, robot_id: str, position: Point3, yaw: float = 0.0, spot: int | None = None
+    ) -> RobotState:
+        self.calls["place_on_counter"] += 1
+        rv = await self._rover(robot_id)
+        self._motion(rv)
+        if rv.holding is None:
+            raise RobotError("no_instance", "gripper is empty")
+        self.counter.append(rv.holding.model_copy(update={"position": position, "on_counter": True}))
+        rv.holding = None
+        return self._snapshot(rv)

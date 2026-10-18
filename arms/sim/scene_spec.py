@@ -50,6 +50,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from arms.sim import rover_puppet as puppet
 from arms.sim.assets import SkuAssets
+from arms.sim.external import ExternalScene, ExternalUnit, item_dims
 from contracts.cameras import DEFAULT_ROBOT_CAMERA_MOUNTS, CameraInfo, CameraMount, robot_camera_id, store_camera_id
 from contracts.catalog import Lot, Product
 from contracts.common import ARM_MOUNT_X_M, ItemId, Point3, Pose2D, Rect2D, Sku
@@ -57,6 +58,8 @@ from contracts.planogram import Fixture, Planogram, RobotSpec, Slot, StoreCamera
 from contracts.sim import BASKET_OFFSET_LOCAL, UNIT_FRESHNESS_JITTER, ItemInstance, planogram_hash, unit_freshness
 from contracts.sim import BASKET_SIZE_M as _BASKET_SIZE_M
 from contracts.sim import instance_id as _instance_id
+
+from .visuals import TableStyle, fixture_style, product_visual, store_visuals
 
 PrimRole = Literal[
     "floor",
@@ -70,10 +73,12 @@ PrimRole = Literal[
     "marker",
     "light",
     "rover",
+    "decor",
+    "sign",
 ]
 PrimShape = Literal["box", "cylinder", "sphere"]
 RoverGroup = Literal["base", "lift", "arm"]
-UnitRender = Literal["primitive", "asset", "parts"]
+UnitRender = Literal["primitive", "asset", "parts", "external"]
 Vec3 = tuple[float, float, float]
 
 # ---- store geometry (meters)
@@ -166,8 +171,19 @@ class PrimSpec(BaseModel):
     price_cents: int | None = None
     store_id: str | None = None
     group: RoverGroup | None = Field(None, description="Rover prims: which moving part it rides.")
+    asset: str | None = Field(None, description="Visual model key (arms/sim/visuals.yaml); None = plain primitive.")
+    display: str | None = Field(None, description="Product display mode from visuals.yaml ('stand').")
+    tilt_deg: float = 0.0
+    model_dims: Vec3 | None = Field(None, description="Visual model size when it differs from the unit's box size.")
+    price_card: bool = Field(True, description="Model units: show the label as a price card in front.")
+    text_color: str | None = Field(None, description="Signs: text color on `color`.")
     render: UnitRender = Field(
-        "primitive", description="Product units: 'asset' / 'parts' = draw the SKU's model (arms.sim.assets)."
+        "primitive",
+        description="Product units: 'asset' / 'parts' = draw the SKU's model (arms.sim.assets); 'external' = an "
+        "existing prim of the store's external USD (``external_path``, arms.sim.external).",
+    )
+    external_path: str | None = Field(
+        None, description="render='external': the unit's prim path relative to the external USD's default prim."
     )
 
 
@@ -189,6 +205,10 @@ class SlotLayout(BaseModel):
     mass_kg: float | None = None
     render: UnitRender = "primitive"
     positions: list[Vec3] = Field(description="Grid positions (unit centers) that fit, front row first.")
+    external_paths: list[str] = Field(
+        default_factory=list,
+        description="External scenes: unit n of the slot (instance index, not rank) is the USD prim external_paths[n].",
+    )
 
     def position(self, rank: int) -> Vec3:
         """Center of the unit with this rank (0 = front). Overflow shares the back-row positions, nudged so the
@@ -223,6 +243,13 @@ class SceneSpec(BaseModel):
     slot_layouts: dict[str, SlotLayout] = Field(default_factory=dict)
     products: dict[Sku, Product] = Field(default_factory=dict, description="Products stocked here (label textures).")
     warnings: list[str] = Field(default_factory=list)
+    external_usd: str | None = Field(None, description="External scene USD (absolute path) referenced by the store.")
+    external_root: str | None = Field(None, description="'<root>/Scene': the prim that references external_usd.")
+    external_default_prim: str = "/World"
+    external_translate: Vec3 = Field((0.0, 0.0, 0.0), description="external_root translate: USD -> store frame.")
+    external_hidden: list[str] = Field(
+        default_factory=list, description="Mapped product prims with no unit (qty < mapped units): hidden at build."
+    )
 
     def by_role(self, role: PrimRole) -> list[PrimSpec]:
         return [p for p in self.prims if p.role == role]
@@ -374,9 +401,30 @@ def store_offsets(order: Sequence[str], sizes: dict[str, tuple[float, float]]) -
 # --------------------------------------------------------------------------------------------------------------------
 # Store builders
 # --------------------------------------------------------------------------------------------------------------------
+def _markers(plan: Planogram, root: str) -> list[PrimSpec]:
+    return [
+        PrimSpec(
+            path=f"{root}/Markers/{name}",
+            role="marker",
+            center=(pose.x, pose.y, 0.002),
+            size=(MARKER_SIZE_M, MARKER_SIZE_M, 0.004),
+            yaw=pose.theta,
+            color=color,
+            collider=False,
+            label_text=name.upper(),
+            store_id=plan.store_id,
+        )
+        for name, pose, color in (
+            ("entrance", plan.entrance, ENTRANCE_COLOR),
+            ("checkout", plan.checkout, CHECKOUT_COLOR),
+        )
+    ]
+
+
 def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
     b = plan.bounds
     sid = plan.store_id
+    colors = store_visuals(sid).colors
     cx, cy = b.x + b.w / 2, b.y + b.h / 2
     t, hh = WALL_THICKNESS_M, WALL_HEIGHT_M
     prims = [
@@ -385,7 +433,7 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
             role="floor",
             center=(cx, cy, -FLOOR_THICKNESS_M / 2),
             size=(b.w + 2 * t, b.h + 2 * t, FLOOR_THICKNESS_M),
-            color=FLOOR_COLOR,
+            color=colors.get("floor", FLOOR_COLOR),
             store_id=sid,
         ),
         PrimSpec(
@@ -393,7 +441,7 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
             role="ceiling",
             center=(cx, cy, CEILING_HEIGHT_M + CEILING_SLAB_GAP_M + 0.025),
             size=(b.w + 2 * t, b.h + 2 * t, 0.05),
-            color=CEILING_COLOR,
+            color=colors.get("ceiling", CEILING_COLOR),
             collider=False,
             store_id=sid,
         ),
@@ -406,7 +454,14 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
     }
     for name, (center, size) in walls.items():
         prims.append(
-            PrimSpec(path=f"{root}/Walls/{name}", role="wall", center=center, size=size, color=WALL_COLOR, store_id=sid)
+            PrimSpec(
+                path=f"{root}/Walls/{name}",
+                role="wall",
+                center=center,
+                size=size,
+                color=colors.get("wall", WALL_COLOR),
+                store_id=sid,
+            )
         )
     for i, ob in enumerate(plan.obstacles):
         prims.append(
@@ -419,20 +474,7 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
                 store_id=sid,
             )
         )
-    for name, pose, color in (("entrance", plan.entrance, ENTRANCE_COLOR), ("checkout", plan.checkout, CHECKOUT_COLOR)):
-        prims.append(
-            PrimSpec(
-                path=f"{root}/Markers/{name}",
-                role="marker",
-                center=(pose.x, pose.y, 0.002),
-                size=(MARKER_SIZE_M, MARKER_SIZE_M, 0.004),
-                yaw=pose.theta,
-                color=color,
-                collider=False,
-                label_text=name.upper(),
-                store_id=sid,
-            )
-        )
+    prims += _markers(plan, root)
     # ceiling light panels on a ~4 m grid (the Isaac backend adds a RectLight per panel)
     nx, ny = max(1, round(b.w / 4)), max(1, round(b.h / 4))
     for i in range(nx):
@@ -454,9 +496,12 @@ def _store_shell(plan: Planogram, root: str) -> list[PrimSpec]:
 def _fixture_prims(fx: Fixture, root: str, store_id: str) -> list[PrimSpec]:
     r = fx.rect
     froot = f"{root}/Fixtures/{usd_name(fx.fixture_id)}"
-    color = FIXTURE_COLORS.get(fx.kind, "#b8bcc4")
+    theme = store_visuals(store_id)
+    color = theme.colors.get(fx.kind, FIXTURE_COLORS.get(fx.kind, "#b8bcc4"))
     cx, cy = r.x + r.w / 2, r.y + r.h / 2
     common = {"fixture_id": fx.fixture_id, "color": color, "store_id": store_id}
+    if fixture_style(store_id, fx.fixture_id) == "table":
+        return _table_prims(fx, froot, store_id, theme.table)
     if fx.kind == "checkout":
         return [
             PrimSpec(
@@ -512,6 +557,33 @@ def _fixture_prims(fx: Fixture, root: str, store_id: str) -> list[PrimSpec]:
         )
     )
     return prims
+
+
+def _table_prims(fx: Fixture, froot: str, store_id: str, style: TableStyle) -> list[PrimSpec]:
+    """Display table: a wood top whose upper face is the slot board height, on an inset white base."""
+    r = fx.rect
+    cx, cy = r.x + r.w / 2, r.y + r.h / 2
+    top_z = level_heights(fx)[0]
+    t, inset = style.top_thickness_m, style.base_inset_m
+    common = {"fixture_id": fx.fixture_id, "store_id": store_id}
+    return [
+        PrimSpec(
+            path=f"{froot}/top",
+            role="board",
+            center=(cx, cy, top_z - t / 2),
+            size=(r.w, r.h, t),
+            color=style.top_color,
+            **common,
+        ),
+        PrimSpec(
+            path=f"{froot}/base",
+            role="base",
+            center=(cx, cy, (top_z - t) / 2),
+            size=(max(0.1, r.w - 2 * inset), max(0.1, r.h - 2 * inset), top_z - t),
+            color=style.base_color,
+            **common,
+        ),
+    ]
 
 
 def _available_depth(fx: Fixture, pick_dir: float) -> float:
@@ -572,6 +644,7 @@ def slot_layout(
     dims: Vec3 | None = None,
     render: UnitRender = "primitive",
     lateral_room_m: float | None = None,
+    store_id: str | None = None,
 ) -> SlotLayout:
     """Grid positions for the units of ``slot`` (store-local centers), front row first. ``dims`` overrides the
     products.yaml unit size (a per-item model's ``target_dims_m``). ``lateral_room_m`` (``slot_lateral_room``): shelf
@@ -579,20 +652,30 @@ def slot_layout(
     ``slot.facings``, at most what the slot's capacity / qty needs), each row ordered from the center out, so rank 0
     stays on the slot's tag (what a default pick takes) and a partly sold-out slot keeps a centered block."""
     asset = product.asset
+    table = fixture_style(store_id, fx.fixture_id) == "table"  # store style (visuals.yaml): one layer of display units
     w, d, h = dims or asset.dims_m
     pick_dir = pick_face_dir(slot)
     yaw = item_yaw_for(slot)
     inward = (-math.cos(pick_dir), -math.sin(pick_dir))  # into the fixture
     lateral = (math.cos(yaw), math.sin(yaw))  # item-local +x in world (left -> right when facing the shelf)
 
-    cols = max(slot.facings, 4) if fx.kind == "produce_bin" else slot.facings
+    pitch = d + ITEM_GAP_M
+    lat_pitch = w + ITEM_GAP_M
+    cols = max(slot.facings, 4) if fx.kind == "produce_bin" and not table else slot.facings
     if lateral_room_m is not None and fx.kind != "produce_bin":
         fit = int((lateral_room_m * SLOT_ROOM_FILL + ITEM_GAP_M) // (w + ITEM_GAP_M))
         cols = max(slot.facings, min(fit, max(slot.capacity, slot.qty, 1)))
-    rows = max(1, int(_available_depth(fx, pick_dir) // (d + ITEM_GAP_M)))
+    rows = max(1, int(_available_depth(fx, pick_dir) // pitch))
+    if table:  # display units side by side along the edge, a second row only when they don't fit
+        style = store_visuals(store_id or "").table
+        pitch = lat_pitch = max(pitch, style.row_pitch_m)
+        cols = max(slot.facings, min(slot.capacity or 1, style.max_cols))
+        rows = max(1, min(rows, -(-(slot.capacity or 1) // cols)))
     room = _vertical_room(fx, slot.level)
     layers = max(1, int(room // h)) if room > 0 else 1
-    if fx.kind == "produce_bin":
+    if table:
+        layers = 1  # display units stand side by side, never stacked
+    elif fx.kind == "produce_bin":
         layers = max(layers, 2)  # produce is piled
     # wide fill: one column sits ON the tag (rank 0, the default pick, straight ahead of the arm), the rest alternate
     # left / right of it; without a room the grid stays centered on the tag
@@ -605,8 +688,8 @@ def slot_layout(
             for col in order:
                 if len(positions) >= MAX_UNITS_PER_SLOT:
                     break
-                lat = (col - center) * (w + ITEM_GAP_M)
-                dep = d / 2 + row * (d + ITEM_GAP_M)
+                lat = (col - center) * lat_pitch
+                dep = d / 2 + row * pitch
                 x = base.x + lateral[0] * lat + inward[0] * dep
                 y = base.y + lateral[1] * lat + inward[1] * dep
                 z = base.z + h / 2 + layer * h
@@ -635,6 +718,36 @@ def unit_prim(
     store_id: str, layout: SlotLayout, iid: str, rank: int, lot_id: str | None, fresh: float | None
 ) -> PrimSpec:
     """The product prim of one unit at its layout rank."""
+    if layout.render == "external":
+        n = instance_index(iid)
+        path = layout.external_paths[n] if 0 <= n < len(layout.external_paths) else None
+        return PrimSpec(
+            path=f"{store_root(store_id)}/Products/{usd_name(layout.slot_id)}/{usd_name(iid)}",
+            role="product",
+            shape=layout.shape,
+            center=layout.position(rank),
+            size=layout.dims,
+            yaw=layout.yaw,
+            color=layout.color,
+            label_text=layout.label_text,
+            sku=layout.sku,
+            barcode=layout.barcode,
+            instance_id=iid,
+            slot_id=layout.slot_id,
+            lot_id=lot_id,
+            fixture_id=layout.fixture_id,
+            freshness=fresh,
+            mass_kg=layout.mass_kg,
+            price_cents=layout.price_cents,
+            collider=False,
+            store_id=store_id,
+            price_card=False,
+            render="external" if path else "primitive",  # more units than mapped prims: boxes behind them
+            external_path=path,
+        )
+    visual = product_visual(layout.sku)
+    if visual is not None and visual.display == "first" and rank != 0:
+        visual = None  # stock behind the display unit stays boxed
     return PrimSpec(
         path=f"{store_root(store_id)}/Products/{usd_name(layout.slot_id)}/{usd_name(iid)}",
         role="product",
@@ -655,8 +768,37 @@ def unit_prim(
         price_cents=layout.price_cents,
         collider=False,
         store_id=store_id,
+        asset=visual.asset if visual else None,
+        display=visual.display if visual else None,
+        tilt_deg=visual.tilt_deg if visual else 0.0,
+        model_dims=visual.model_dims if visual else None,
+        price_card=rank == 0,
         render=layout.render,
     )
+
+
+def _decor_prims(store_id: str, root: str) -> list[PrimSpec]:
+    """Visual-only props from visuals.yaml (brand panels, signs, models). Not colliders, not obstacles."""
+    prims: list[PrimSpec] = []
+    for d in store_visuals(store_id).decor:
+        cx, cy, cz = d.center
+        center = (cx, cy, cz + d.size[2] / 2) if d.kind == "asset" else d.center
+        prims.append(
+            PrimSpec(
+                path=f"{root}/Decor/{usd_name(d.name)}",
+                role="sign" if d.kind == "sign" else "decor",
+                center=center,
+                size=d.size,
+                yaw=d.yaw,
+                color=d.color,
+                collider=False,
+                label_text=d.text,
+                text_color=d.text_color if d.kind == "sign" else None,
+                asset=d.asset,
+                store_id=store_id,
+            )
+        )
+    return prims
 
 
 def layout_for(
@@ -665,12 +807,30 @@ def layout_for(
     product: Product,
     assets: SkuAssets | None = None,
     lateral_room_m: float | None = None,
+    store_id: str | None = None,
 ) -> SlotLayout:
     """``slot_layout`` with the SKU's per-item model (when ``assets`` resolves it): its dims + render mode."""
     ua = assets.resolve(product.sku) if assets is not None else None
     if ua is None:
-        return slot_layout(slot, fx, product, lateral_room_m=lateral_room_m)
-    return slot_layout(slot, fx, product, dims=ua.dims, render=ua.render, lateral_room_m=lateral_room_m)
+        return slot_layout(slot, fx, product, lateral_room_m=lateral_room_m, store_id=store_id)
+    return slot_layout(
+        slot, fx, product, dims=ua.dims, render=ua.render, lateral_room_m=lateral_room_m, store_id=store_id
+    )
+
+
+def external_layout(slot: Slot, fx: Fixture, product: Product, units: list[ExternalUnit]) -> SlotLayout:
+    """Slot layout of an external scene slot: the mapped prims' centers (front unit first) are the positions, the
+    front unit's box (item frame) is the unit size; restocks beyond the mapped prims share the back positions."""
+    base = slot_layout(slot, fx, product)
+    yaw = item_yaw_for(slot)
+    return base.model_copy(
+        update={
+            "dims": item_dims(units[0], yaw),
+            "render": "external",
+            "positions": [tuple(round(v, 4) for v in u.c) for u in units],
+            "external_paths": [u.path for u in units],
+        }
+    )
 
 
 def unit_instance(store_id: str, layout: SlotLayout, iid: str, rank: int, lot_id: str | None, fresh: float | None):
@@ -691,20 +851,34 @@ def build_scene_spec(
     products: dict[Sku, Product] | Iterable[Product],
     seed: int = 0,
     assets: SkuAssets | None = None,
+    external: ExternalScene | None = None,
 ) -> SceneSpec:
     """Planogram + products -> SceneSpec (store-local; fixtures as boxes, one product prim + ItemInstance per unit).
 
     Deterministic for the same inputs (ids and freshness do not depend on ``seed``). Problems that should not kill a
     demo (unknown sku, more stock than fits) become ``SceneSpec.warnings`` instead of exceptions. ``assets``: per-item
-    models (unit dims + render mode per SKU; None = primitives everywhere).
+    models (unit dims + render mode per SKU; None = primitives everywhere). ``external`` (an ACTIVE
+    ``arms.sim.external.ExternalScene``): the store's USD draws the building, shelves and products, so the spec keeps
+    only the markers, the fixtures the USD lacks (checkout counter) and, for mapped slots, units that point at the
+    USD's product prims (positions / sizes from the prim map); unmapped slots keep their primitive units.
     """
     by_sku = products if isinstance(products, dict) else {p.sku: p for p in products}
     sid = planogram.store_id
     root = store_root(sid)
     warnings: list[str] = []
-    prims = _store_shell(planogram, root)
-    for fx in planogram.fixtures:
-        prims += _fixture_prims(fx, root, sid)
+    ext = external if external is not None and external.active else None
+    hidden: list[str] = []
+    if ext is None:
+        prims = _store_shell(planogram, root)
+        for fx in planogram.fixtures:
+            prims += _fixture_prims(fx, root, sid)
+        prims += _decor_prims(sid, root)
+    else:
+        prims = _markers(planogram, root)
+        in_usd = set(ext.fixtures_in_usd)
+        for fx in planogram.fixtures:
+            if fx.fixture_id not in in_usd:
+                prims += _fixture_prims(fx, root, sid)
 
     instances: list[ItemInstance] = []
     dims: dict[str, Vec3] = {}
@@ -720,7 +894,12 @@ def build_scene_spec(
         if fx is None:  # unreachable with a validated Planogram, kept for safety
             warnings.append(f"{slot.slot_id}: unknown fixture {slot.fixture_id!r}")
             continue
-        layout = layout_for(slot, fx, product, assets, slot_lateral_room(planogram, slot, fx))
+        units = ext.units(slot.slot_id) if ext is not None else []
+        if units:
+            layout = external_layout(slot, fx, product, units)
+            hidden += layout.external_paths[min(slot.qty, len(units)) :]
+        else:
+            layout = layout_for(slot, fx, product, assets, slot_lateral_room(planogram, slot, fx), sid)
         layouts[slot.slot_id] = layout
         stocked[product.sku] = product
         n = min(slot.qty, MAX_UNITS_PER_SLOT)
@@ -733,7 +912,7 @@ def build_scene_spec(
             fresh = unit_freshness(lot_fresh, iid)
             prims.append(unit_prim(sid, layout, iid, k, lot_id, fresh))
             instances.append(unit_instance(sid, layout, iid, k, lot_id, fresh))
-            dims[iid] = layout.dims
+            dims[iid] = item_dims(units[k], layout.yaw) if k < len(units) else layout.dims
             yaws[iid] = layout.yaw
 
     return SceneSpec(
@@ -753,6 +932,11 @@ def build_scene_spec(
         slot_layouts=layouts,
         products=stocked,
         warnings=warnings,
+        external_usd=ext.usd_file if ext is not None else None,
+        external_root=f"{root}/Scene" if ext is not None else None,
+        external_default_prim=ext.usd.default_prim if ext is not None else "/World",
+        external_translate=ext.usd.translate if ext is not None else (0.0, 0.0, 0.0),
+        external_hidden=hidden,
     )
 
 
@@ -854,7 +1038,9 @@ def build_rover_spec(robot: RobotSpec, model_usd: str | None = None) -> RoverSpe
     prims.append(prim("so101_jaw_fixed", "arm", (x - 0.02, 0.018, z), (0.05, 0.008, 0.04), "#f59e0b"))
     prims.append(prim("so101_jaw_moving", "arm", (x - 0.02, -0.018, z), (0.05, 0.008, 0.04), "#f59e0b"))
     prims.append(prim("so101_wrist_cam", "arm", (x - 0.05, 0.0, z + 0.035), (0.03, 0.03, 0.02), "#111111"))
-    puppet_prims = _puppet_prims(prims, prim, color) if model_usd else []
+    rm = puppet.rover_model_for(model_usd)
+    # robot v3 brings its own riser, camera housings and basket: nothing primitive is drawn next to it
+    puppet_prims = _puppet_prims(prims, prim, color) if model_usd and rm.primitives else []
     return RoverSpec(
         robot_id=robot.robot_id,
         store_id=sid,
@@ -868,7 +1054,7 @@ def build_rover_spec(robot: RobotSpec, model_usd: str | None = None) -> RoverSpe
         camera_ids=[robot_camera_id(robot.robot_id, k) for k in robot.cameras],
         prims=prims,
         model_usd=model_usd,
-        model_path=f"{root}/{puppet.MODEL_PRIM_NAME}/{puppet.MODEL_REF_NAME}" if model_usd else None,
+        model_path=f"{root}/{puppet.MODEL_PRIM_NAME}/{rm.ref_name}" if model_usd else None,
         puppet_prims=puppet_prims,
     )
 

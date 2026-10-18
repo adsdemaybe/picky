@@ -1,0 +1,389 @@
+{
+ "command": "pick up the oreo bag and put it on the plate",
+ "success": true,
+ "label_source": "human",
+ "camera_verdict": null,
+ "q_grasp_after": {
+  "base": 0.26006481219785893,
+  "x+1cm": 0.26965716274210005,
+  "x-1cm": 0.23510200000000003,
+  "y+1cm": 0.251955998203,
+  "y-1cm": 0.25186000000000003,
+  "deeper": 0.3597711987421,
+  "higher": 0.33586000000000005,
+  "roll+15": 0.319102,
+  "roll-15": 0.32926852
+ },
+ "q_drop_after": {
+  "base": 0.12101040000000002,
+  "x+2cm": 0.43743578506,
+  "x-2cm": 0.196,
+  "y+2cm": 0.13720000000000002,
+  "y-2cm": 0.196
+ },
+ "duration_s": 148.2,
+ "attempts": [
+  {
+   "actions": {
+    "grasp": "x-1cm",
+    "drop": "x+2cm"
+   },
+   "held": false,
+   "placed": null,
+   "note": "missed the grasp",
+   "checks": [
+    "holding: no (The Oreo bag is resting on the table and not held by the gripper, which is open and not in contact with the bag. | The Oreo bag is resting on the table, and the gripper is open and not in contact with the bag.)"
+   ],
+   "target_xy": [
+    0.3354219103052311,
+    -0.15739580451357071
+   ],
+   "dest_xy": [
+    0.3542881917506065,
+    0.06292328354379711
+   ],
+   "roll": 80.0,
+   "waypoints": [
+    {
+     "name": "hover over target",
+     "xyz": [
+      0.3354219103052311,
+      -0.15739580451357071,
+      0.062
+     ],
+     "gripper": 98.0
+    },
+    {
+     "name": "straddle",
+     "xyz": [
+      0.3354219103052311,
+      -0.15739580451357071,
+      0.030000000000000002
+     ],
+     "gripper": 98.0
+    },
+    {
+     "name": "close",
+     "xyz": null,
+     "gripper": 5.0
+    },
+    {
+     "name": "lift straight up",
+     "xyz": [
+      0.3354219103052311,
+      -0.15739580451357071,
+      0.08
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "lift high",
+     "xyz": [
+      0.3354219103052311,
+      -0.15739580451357071,
+      0.16
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "transit",
+     "xyz": [
+      0.293126793373731,
+      -0.0472362604848868,
+      0.16
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "over destination",
+     "xyz": [
+      0.3542881917506065,
+      0.06292328354379711,
+      0.16
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "lower",
+     "xyz": [
+      0.3542881917506065,
+      0.06292328354379711,
+      0.05
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "release",
+     "xyz": null,
+     "gripper": 98.0
+    },
+    {
+     "name": "retreat",
+     "xyz": [
+      0.3542881917506065,
+      0.06292328354379711,
+      0.16
+     ],
+     "gripper": 98.0
+    }
+   ],
+   "trajectory": [
+    {
+     "name": "hover over target",
+     "joints": {
+      "shoulder_pan": 25.59,
+      "shoulder_lift": 37.66,
+      "elbow_flex": -40.24,
+      "wrist_flex": 62.59,
+      "wrist_roll": 80.0
+     },
+     "gripper": 98.0
+    },
+    {
+     "name": "straddle",
+     "joints": {
+      "shoulder_pan": 25.59,
+      "shoulder_lift": 38.41,
+      "elbow_flex": -27.9,
+      "wrist_flex": 49.48,
+      "wrist_roll": 80.0
+     },
+     "gripper": 98.0
+    },
+    {
+     "name": "close",
+     "joints": null,
+     "gripper": 5.0
+    },
+    {
+     "name": "lift straight up",
+     "joints": {
+      "shoulder_pan": 25.59,
+      "shoulder_lift": 41.03,
+      "elbow_flex": -53.73,
+      "wrist_flex": 72.71,
+      "wrist_roll": 80.0
+     },
+     "gripper": 5.0
+    },
+    {
+     "name": "lift high",
+     "joints": {
+      "shoulder_pan": 25.4,
+      "shoulder_lift": 27.0,
+      "elbow_flex": -55.24,
+      "wrist_flex": 73.24,
+      "wrist_roll": 80.0
+     },
+     "gripper": 5.0
+    }
+   ]
+  },
+  {
+   "actions": {
+    "grasp": "deeper",
+    "drop": "x+2cm"
+   },
+   "held": true,
+   "placed": null,
+   "note": "",
+   "checks": [
+    "holding: yes (0.95): The Oreo bag is visibly held between the gripper's fingers and is not resting on the table or plate.",
+    "holding: yes (0.95): The Oreo bag is visibly suspended in the air, held securely between the gripper's fingers, with no contact to the table or plate."
+   ],
+   "target_xy": [
+    0.34061919361709975,
+    -0.16056675437665632
+   ],
+   "dest_xy": [
+    0.3531170753347741,
+    0.06325548786857976
+   ],
+   "roll": -97.5,
+   "waypoints": [
+    {
+     "name": "hover over target",
+     "xyz": [
+      0.34061919361709975,
+      -0.16056675437665632,
+      0.062
+     ],
+     "gripper": 98.0
+    },
+    {
+     "name": "straddle",
+     "xyz": [
+      0.34061919361709975,
+      -0.16056675437665632,
+      0.022000000000000002
+     ],
+     "gripper": 98.0
+    },
+    {
+     "name": "close",
+     "xyz": null,
+     "gripper": 5.0
+    },
+    {
+     "name": "lift straight up",
+     "xyz": [
+      0.34061919361709975,
+      -0.16056675437665632,
+      0.08
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "lift high",
+     "xyz": [
+      0.34061919361709975,
+      -0.16056675437665632,
+      0.16
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "transit",
+     "xyz": [
+      0.29483791430454637,
+      -0.04865563325403828,
+      0.16
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "over destination",
+     "xyz": [
+      0.3531170753347741,
+      0.06325548786857976,
+      0.16
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "lower",
+     "xyz": [
+      0.3531170753347741,
+      0.06325548786857976,
+      0.05
+     ],
+     "gripper": 5.0
+    },
+    {
+     "name": "release",
+     "xyz": null,
+     "gripper": 98.0
+    },
+    {
+     "name": "retreat",
+     "xyz": [
+      0.3531170753347741,
+      0.06325548786857976,
+      0.16
+     ],
+     "gripper": 98.0
+    }
+   ],
+   "trajectory": [
+    {
+     "name": "hover over target",
+     "joints": {
+      "shoulder_pan": 25.69,
+      "shoulder_lift": 43.97,
+      "elbow_flex": -51.02,
+      "wrist_flex": 67.05,
+      "wrist_roll": -97.5
+     },
+     "gripper": 98.0
+    },
+    {
+     "name": "straddle",
+     "joints": {
+      "shoulder_pan": 25.69,
+      "shoulder_lift": 43.58,
+      "elbow_flex": -33.3,
+      "wrist_flex": 49.72,
+      "wrist_roll": -97.5
+     },
+     "gripper": 98.0
+    },
+    {
+     "name": "close",
+     "joints": null,
+     "gripper": 5.0
+    },
+    {
+     "name": "lift straight up",
+     "joints": {
+      "shoulder_pan": 25.69,
+      "shoulder_lift": 52.43,
+      "elbow_flex": -73.82,
+      "wrist_flex": 81.39,
+      "wrist_roll": -97.5
+     },
+     "gripper": 5.0
+    },
+    {
+     "name": "lift high",
+     "joints": {
+      "shoulder_pan": 25.51,
+      "shoulder_lift": 37.89,
+      "elbow_flex": -73.82,
+      "wrist_flex": 80.92,
+      "wrist_roll": -97.5
+     },
+     "gripper": 5.0
+    },
+    {
+     "name": "transit",
+     "joints": {
+      "shoulder_pan": 9.37,
+      "shoulder_lift": 0.33,
+      "elbow_flex": -27.58,
+      "wrist_flex": 87.26,
+      "wrist_roll": -97.5
+     },
+     "gripper": 5.0
+    },
+    {
+     "name": "over destination",
+     "joints": {
+      "shoulder_pan": -10.16,
+      "shoulder_lift": 10.95,
+      "elbow_flex": -29.68,
+      "wrist_flex": 63.73,
+      "wrist_roll": -97.5
+     },
+     "gripper": 5.0
+    },
+    {
+     "name": "lower",
+     "joints": {
+      "shoulder_pan": -10.16,
+      "shoulder_lift": 25.57,
+      "elbow_flex": -14.86,
+      "wrist_flex": 49.29,
+      "wrist_roll": -97.5
+     },
+     "gripper": 5.0
+    },
+    {
+     "name": "release",
+     "joints": null,
+     "gripper": 98.0
+    },
+    {
+     "name": "retreat",
+     "joints": {
+      "shoulder_pan": -10.16,
+      "shoulder_lift": 10.95,
+      "elbow_flex": -29.68,
+      "wrist_flex": 63.73,
+      "wrist_roll": -97.5
+     },
+     "gripper": 98.0
+    }
+   ]
+  }
+ ]
+}

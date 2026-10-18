@@ -29,6 +29,8 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 - [x] **P0** Isaac backend run on vhagar (`IsaacBackend`, Isaac Sim 6.0.0-rc.59, RTX 5090): both stores + 3 rovers + all 12 cameras render (labelled products, shelves, rovers); the taco request ran end to end on Isaac. Synchronous `rep.orchestrator.step` per changed capture (plain `app.update()` gave stale frames). Steps + measured timings are in `DEPLOY.md`
 - [x] **P1** Per-item grocery models (`PICKY_ASSET_ROOT`, `data/sim/sku_assets.yaml`, `assets.py`, `ASSETS.md`). Every stocked unit is its own kinematic prim that references its model (117 of 125 SKUs; gap and missing SKUs fall back to the primitive), sized to the model, with our label decal and shelf tags for loose produce. Shelves fill wide first, from the tag outwards. Live on the vhagar worker: the taco request and a staff shelf scan ran on Isaac with 1,248 + 536 model units
 - [x] **P1** LeKiwi + SO-101 + lift rover USD as a kinematic puppet (`PICKY_ROVER_USD`, `rover_puppet.py`): IK puts the jaws on the held unit, and the primitive rover is the fallback. Live on the vhagar worker for all 3 rovers (wrist camera shows the jaws holding the labelled unit)
+- [ ] **P1** White SO-101 rover v3 (`picky_so101_rover.usd` from `supermarket/robot/build_so101_rover.py`) as the puppet: set `PICKY_ROVER_USD` to it (detected by name or its `.kin.json`; `RoverModel` in `rover_puppet.py`). Flat `/Picky` links mapped onto the canonical SO-101 links, arm turned to face forward at pan 0 (same joint degrees on the wire), no lift (fixed riser: the reach table covers 0.2..1.2 m as drops below 1.2 m), no primitive mast / basket next to it. Chain + reach table checked offline with pxr; not yet run on the Isaac worker. `picky_rover.usda` stays the default / fallback
+- [x] **P1** External scenes (`external.py`): a store drawn by its own USD instead of planogram primitives (first user: `store_genie`, the AgiBot Genie Sim `supermarket_06` market). `data/sim/<store>_prims.yaml` (generated with the planogram) maps unit n of each slot to a product prim of the USD + its box in the store frame. When the USD exists on the host (`$PICKY_GENIESIM_ROOT/<path>` or `PICKY_EXTERNAL_USD_<STORE>`), `IsaacBackend` references it under `<store>/Scene` (translate = USD -> store frame), freezes its rigid bodies, binds every unit to its prim (picks / basket / unload move it with a matrix op, unload / stock-down hide it, restock shows it again) and draws only what the USD lacks (checkout counter, markers). Ids, counts and the data hash are host-independent; without the USD the store is built from primitives. `PICKY_EXTERNAL_SCENES=0` turns it off, `PICKY_EXTERNAL_LIGHT_SCALE` dims the scene's own lights. Live on a vhagar test stack (gateway + one Isaac worker hosting only store_genie, white SO-101 rover v3): 678 units bound to Genie prims, a 3-item request ran end to end (Perceptron T1 grasps on Genie products, counter unload, payment)
 - [ ] **P1** Real SO-101 URDF on the lift (`--so101-urdf`, experimental importer path; joints stay at zero)
 - [ ] **P2** Physics grasp (FixedJoint), animated SO-101 joints, VLA (LeRobot / LeIsaac) later, per CLAUDE.md "Later"
 
@@ -55,12 +57,16 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 | `worker.py` | Isaac-free `WorkerCore` (stores, rovers, actions, cameras, streams, resets, set_slot_stock), the `SimBackend` seam, `NullBackend` |
 | `sketch.py` | `SketchBackend`: Pillow 3D raster (no Isaac) |
 | `assets.py` | PURE: `SkuAssets` (SKU -> per-item model plan + why it falls back), label decal geometry, `PICKY_ROVER_USD` lookup |
+| `external.py` | PURE: external scenes (`ExternalScene`, `load_external_scene`): a store's USD + slot -> product prim map from `data/sim/<store>_prims.yaml`, resolved per host |
 | `rover_puppet.py` | PURE (stdlib): forward kinematics + DLS IK + reach table that pose the LeKiwi/SO-101 USD kinematically |
 | `ASSETS.md` | Asset sources, licenses + credit line, exact rebuild commands for vhagar, fallbacks |
 | `tools/` | Asset pipeline scripts (download, normalize, SKU map generator / validator, rover overlay composer); not imported |
 | `labels.py` | EAN-13 modules + label PNG (Pillow) |
 | `app.py` | `GatewayLink` (WS thread), `IsaacBackend` (pxr/replicator), `run()` main loop, CLI |
 | `DEPLOY.md` | exact vhagar steps |
+| `director.py` | dev-only chase camera + frame tee for demo videos (`PICKY_SIM_DIRECTOR`, off by default); `tools/director/record.py` records a run through the gateway, `tools/director/render.py` composites the video |
+| `visuals.yaml` / `visuals.py` | Visual-only store dressing for Isaac: 3D models per SKU (CC-BY, Objaverse), per-store colors, fixture styles (`table`), decor (brand panels, signs, props). Pure loader, no Isaac |
+| `fetch_visuals.py` | Downloads the models in `visuals.yaml` and converts them to USD (Kit asset converter) into `PICKY_SIM_ASSET_DIR`; writes `ATTRIBUTION.md` |
 | `tests/` | scene spec (multi-store, rovers), pure pursuit + cameras + labels, worker protocol (two stores, three robots), WS round-trip, sketch frames, asset mapping / fallbacks / rover puppet (`test_assets.py`) |
 
 ## How to run
@@ -78,13 +84,17 @@ Flags / env: `--stores` / `PICKY_SIM_STORES` (comma list, default all planograms
 `--asset-root` / `PICKY_ASSET_ROOT` (per-item models; unset = primitives), `--sku-assets` / `PICKY_SKU_ASSETS`,
 `--no-assets` / `PICKY_SIM_ASSETS=off`, `--rover-usd` / `PICKY_ROVER_USD` (Isaac backend only). `PICKY_SIM_AMBIENT`
 (default 0.1): RTX ambient fill so the shelf interiors are not dark grey (0 = Isaac's default; 0.6 already washes the
-store out).
+store out). External scenes (`external.py`): `PICKY_GENIESIM_ROOT` (Genie Sim asset root, e.g.
+`/data/$USER/picky-suraj/geniesim`) or `PICKY_EXTERNAL_USD_<STORE_ID>` (full path), `PICKY_EXTERNAL_SCENES=0` (off),
+`PICKY_EXTERNAL_LIGHT_SCALE` (scene lights multiplier, default 1).
 
 **Credits (CC BY 4.0, required wherever the models are shown):** Product 3D models: NVIDIA SimReady Assets (CC BY
 4.0), RoboCasa (Nasiriany et al., RSS 2024; CC BY 4.0), Lightwheel/NVIDIA PhysicalAI Kitchen objects (CC BY 4.0);
 modified by the Picky team. Robot model: LeIsaac LeKiwi + SO-101 (LightwheelAI, Apache-2.0; LeKiwi by SIGRobotics-UIUC,
 SO-101 by TheRobotStudio), with a lift overlay by the Picky team. Sources, license links and the per-model list:
 `ASSETS.md`.
+
+**Perceptron VLA test (feat/perceptron-vla):** T1 grasps driven joint by joint on Isaac (`PICKY_VLA_T1`, `DEPLOY.md` §8), the whole loop on vhagar's test stack with the catalog on Postgres plus the director video (`DEPLOY.md` §9), the sim LeRobot dataset for Perceptron's robotics VLA (`docs/vla-loop/dataset.md`), and the key + one-command runbook (`docs/vla-loop/perceptron-vla.md`).
 
 **In the pipeline:** start the gateway with `robot` real (`PICKY_REAL_ARMS=robot`), then start the worker. Stores whose hash
 matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop the worker and they continue on the 2D fake.
@@ -105,7 +115,43 @@ matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop t
   (non-level reach into the basket at lift 0.32 m, level place on the counter), the unit attached to the gripper at
   the close keyframe and laid on the counter at the open keyframe; capability `basket_unload`. Redeploy: DEPLOY.md §10.
 
+## Store visuals (T-Mobile store)
+
+`arms/sim/visuals.yaml` dresses `store_tmobile` for the Isaac backend without touching ground truth (slot ids, unit
+counts, positions on the wire): white fixtures, magenta brand walls and counter band, lit "T-Mobile" / "Accessories" /
+"Audio & Power" signs, bar stools, wood-top phone tables (`fixture_styles: table`: one layer of display units side by
+side), phones on display pucks with one price card per model, and boxed audio / watch stock with the device in front.
+Products without a model stay labeled retail boxes (chargers, cables, cases, glass, iPad).
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES python -m arms.sim.fetch_visuals        # once per sim host, Isaac's Python; ~40 MB
+export PICKY_SIM_ASSET_DIR=/data/$USER/picky-sim-assets           # optional (default arms/sim/assets/build/visuals)
+```
+Without the fetch step everything still works and renders as boxes. Model credits: `ATTRIBUTION.md` next to the models
+(all CC-BY 4.0; author + Sketchfab URL per model in `visuals.yaml`).
+
+Wireless accessory boxes use retail package art (`labels.package_image`: brand, a product window drawn per kind, name,
+small price sticker and a still-decodable EAN-13) on the whole front face; grocery labels are unchanged.
+
+### Physics demo (standalone, opt-in)
+
+`arms/sim/tools/live_physics_demo.py` runs `store_tmobile` under PhysX with the #19 LeKiwi + SO-101 rover as a real
+articulation: it drives on its base joints along the routing visibility-graph paths, picks phones out of static U-slot
+holders top-down (`tools/physics_ik.py`; a FixedJoint locks the phone to the gripper only once the closed jaws are on
+it), lowers them into a 32 x 24 x 16 cm basket (front-left of the deck, where the folded arm reaches at pan -110 deg)
+and lets go softly; checkout empties the basket. Other units get static colliders. It is not wired into the worker /
+gateway (picks there stay the magic grasp); low render quality: `tools/low_quality.py`.
+
+```bash
+PICKY_ROVER_USD=.../picky_rover.usda PYTHONPATH=.:arms/sim/tools python arms/sim/tools/live_physics_demo.py  # Isaac python
+```
+
 ## Known limitations
+
+- Store visuals: the phone models are close stand-ins from Objaverse (iPhone 13 Pro Max for every iPhone, Galaxy S22
+  Ultra for Galaxy / REVVL, Pixel 6 Pro for Pixel / moto, Z Flip 3 for the Z Flip8); the price card names the exact
+  model. Phone tables are `produce_bin` in the planogram until a `display_table` FixtureKind exists (contracts PR);
+  the `table` style keeps them from piling units like produce. The sketch backend ignores models, decor and signs.
 
 - Isaac frames cost one synchronous replicator step whenever the camera or the scene changed (~60-135 ms with 1-3 enabled
   render products on vhagar): fine for 2 fps streams + snapshots, not for many high-fps live views. Idle render products
@@ -134,6 +180,12 @@ matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop t
 - Per-item models: the folded SO-101 can't reach units on the lowest shelf while the lift is at its bottom, so a held
   unit can float up to ~10 cm ahead of the jaws there. Clear film and clamshell wrappers are not drawn. The 2D fake
   still uses `products.yaml` dims for the 18 SKUs whose models changed size. See `ASSETS.md`.
+
+## Supermarket teleop scene (`supermarket/`)
+
+Standalone, keyboard-drivable Isaac Sim 6.x scene: AgiBot Genie Sim stocked supermarket (~500 pickable products) +
+DISCOVERSE rm2_car / AIRBOT Play robot with a basket, grab-to-basket, headless `--smoke` test and `--livestream`.
+Independent of the worker above; see [supermarket/README.md](supermarket/README.md).
 
 ## Contributing to this arm
 

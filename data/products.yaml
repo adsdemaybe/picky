@@ -2479,3 +2479,1476 @@ products:
     dims_m: [0.05, 0.05, 0.12]
     label_color: '#d84315'
     mass_kg: 0.15
+# ---- T-Mobile store (store_tmobile): T-Mobile's lineup, full retail prices from t-mobile.com (2026-10-17)
+- sku: IP18PRO-256
+  name: 'Apple iPhone 18 Pro 256GB'
+  brand: Apple
+  category: wireless
+  subcategory: phones
+  description: 'iPhone 18 Pro, 256 GB.'
+  tags: [phone, ios, iphone, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 119999
+  unit: each
+  size: '256 GB'
+  barcode: '2000000300009'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0716, 0.0083, 0.1496]
+    label_color: '#c9c2b8'
+    mass_kg: 0.2
+- sku: IP17PRO-256
+  name: 'Apple iPhone 17 Pro 256GB'
+  brand: Apple
+  category: wireless
+  subcategory: phones
+  description: 'iPhone 17 Pro, 256 GB.'
+  tags: [phone, ios, iphone, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 109999
+  unit: each
+  size: '256 GB'
+  barcode: '2000000300078'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0716, 0.0083, 0.1496]
+    label_color: '#e0773a'
+    mass_kg: 0.2
+- sku: IP17-256
+  name: 'Apple iPhone 17 256GB'
+  brand: Apple
+  category: wireless
+  subcategory: phones
+  description: 'iPhone 17, 256 GB.'
+  tags: [phone, ios, iphone, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 92999
+  unit: each
+  size: '256 GB'
+  barcode: '2000000300146'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0716, 0.008, 0.1496]
+    label_color: '#b9c7d8'
+    mass_kg: 0.18
+- sku: IP16-128
+  name: 'Apple iPhone 16 128GB'
+  brand: Apple
+  category: wireless
+  subcategory: phones
+  description: 'iPhone 16, 128 GB.'
+  tags: [phone, ios, iphone, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 82999
+  unit: each
+  size: '128 GB'
+  barcode: '2000000300214'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0716, 0.0078, 0.1476]
+    label_color: '#d8d8d8'
+    mass_kg: 0.17
+- sku: GS26U-256
+  name: 'Samsung Galaxy S26 Ultra 256GB'
+  brand: Samsung
+  category: wireless
+  subcategory: phones
+  description: 'Galaxy S26 Ultra with S Pen, 256 GB.'
+  tags: [phone, android, galaxy, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 139999
+  unit: each
+  size: '256 GB'
+  barcode: '2000000300283'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0786, 0.0082, 0.1624]
+    label_color: '#2f3337'
+    mass_kg: 0.22
+- sku: GS26-256
+  name: 'Samsung Galaxy S26 256GB'
+  brand: Samsung
+  category: wireless
+  subcategory: phones
+  description: 'Galaxy S26, 256 GB.'
+  tags: [phone, android, galaxy, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 99999
+  unit: each
+  size: '256 GB'
+  barcode: '2000000300351'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0709, 0.0072, 0.1468]
+    label_color: '#8f7fd1'
+    mass_kg: 0.17
+- sku: GS25-128
+  name: 'Samsung Galaxy S25 128GB'
+  brand: Samsung
+  category: wireless
+  subcategory: phones
+  description: 'Galaxy S25, 128 GB.'
+  tags: [phone, android, galaxy, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 79999
+  unit: each
+  size: '128 GB'
+  barcode: '2000000300429'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0706, 0.0072, 0.1462]
+    label_color: '#4a5a7a'
+    mass_kg: 0.16
+- sku: GZF8-256
+  name: 'Samsung Galaxy Z Flip8 256GB'
+  brand: Samsung
+  category: wireless
+  subcategory: phones
+  description: 'Galaxy Z Flip8 foldable, 256 GB.'
+  tags: [phone, android, galaxy, foldable, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 119999
+  unit: each
+  size: '256 GB'
+  barcode: '2000000300498'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0719, 0.0068, 0.1659]
+    label_color: '#20242a'
+    mass_kg: 0.19
+- sku: PX11P-256
+  name: 'Google Pixel 11 Pro 256GB'
+  brand: Google
+  category: wireless
+  subcategory: phones
+  description: 'Pixel 11 Pro, 256 GB.'
+  tags: [phone, android, pixel, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 109999
+  unit: each
+  size: '256 GB'
+  barcode: '2000000300566'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.072, 0.0086, 0.152]
+    label_color: '#2b2f33'
+    mass_kg: 0.2
+- sku: PX10-128
+  name: 'Google Pixel 10 128GB'
+  brand: Google
+  category: wireless
+  subcategory: phones
+  description: 'Pixel 10, 128 GB.'
+  tags: [phone, android, pixel, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 69999
+  unit: each
+  size: '128 GB'
+  barcode: '2000000300634'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.073, 0.0086, 0.1527]
+    label_color: '#9fb4a1'
+    mass_kg: 0.2
+- sku: PX9-128
+  name: 'Google Pixel 9 128GB'
+  brand: Google
+  category: wireless
+  subcategory: phones
+  description: 'Pixel 9, 128 GB.'
+  tags: [phone, android, pixel, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 79999
+  unit: each
+  size: '128 GB'
+  barcode: '2000000300702'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.0723, 0.0085, 0.1523]
+    label_color: '#2b2f33'
+    mass_kg: 0.2
+- sku: REVVL8P-256
+  name: 'T-Mobile REVVL 8 Pro 256GB'
+  brand: T-Mobile
+  category: wireless
+  subcategory: phones
+  description: 'T-Mobile REVVL 8 Pro, 256 GB.'
+  tags: [phone, android, revvl, 5g, value]
+  dietary: []
+  allergens: []
+  price_cents: 24999
+  unit: each
+  size: '256 GB'
+  barcode: '2000000300771'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.076, 0.009, 0.168]
+    label_color: '#3b3f46'
+    mass_kg: 0.21
+- sku: MOTOG26-128
+  name: 'Motorola moto g 2026 128GB'
+  brand: Motorola
+  category: wireless
+  subcategory: phones
+  description: 'moto g 2026, 128 GB.'
+  tags: [phone, android, moto, 5g, value]
+  dietary: []
+  allergens: []
+  price_cents: 22999
+  unit: each
+  size: '128 GB'
+  barcode: '2000000300849'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.075, 0.0085, 0.166]
+    label_color: '#3d4f6e'
+    mass_kg: 0.19
+- sku: CASE-IP16-MAG
+  name: 'Apple iPhone 16 Clear Case with MagSafe'
+  brand: Apple
+  category: wireless
+  subcategory: cases
+  description: 'Clear MagSafe case for iPhone 16.'
+  tags: [case, ios, magsafe]
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300917'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.19]
+    label_color: '#e9eef2'
+    mass_kg: 0.12
+- sku: CASE-IP17P-PEL
+  name: 'Pelican Protector Case with MagSafe for Apple iPhone 17 Pro'
+  brand: Pelican
+  category: wireless
+  subcategory: cases
+  description: 'Drop-tested MagSafe case for iPhone 17 Pro.'
+  tags: [case, ios, magsafe, rugged]
+  dietary: []
+  allergens: []
+  price_cents: 4999
+  unit: each
+  barcode: '2000000300986'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.03, 0.19]
+    label_color: '#f2c200'
+    mass_kg: 0.14
+- sku: CASE-IP17-ZAG
+  name: 'ZAGG Rainier Case with Kickstand and MagSafe for Apple iPhone 17'
+  brand: ZAGG
+  category: wireless
+  subcategory: cases
+  description: 'Kickstand MagSafe case for iPhone 17.'
+  tags: [case, ios, magsafe, kickstand]
+  dietary: []
+  allergens: []
+  price_cents: 6999
+  unit: each
+  barcode: '2000000301051'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.03, 0.19]
+    label_color: '#1d1f22'
+    mass_kg: 0.15
+- sku: CASE-GS26-CM
+  name: 'Case-Mate Magnetic Case for Samsung Galaxy S26'
+  brand: Case-Mate
+  category: wireless
+  subcategory: cases
+  description: 'Magnetic case for Galaxy S26.'
+  tags: [case, android, galaxy]
+  dietary: []
+  allergens: []
+  price_cents: 5499
+  unit: each
+  barcode: '2000000301129'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.19]
+    label_color: '#f5d0dc'
+    mass_kg: 0.12
+- sku: CASE-GS26-GOTO
+  name: 'GoTo Flex Magnet Case for Samsung Galaxy S26'
+  brand: GoTo
+  category: wireless
+  subcategory: cases
+  description: 'Flexible magnetic case for Galaxy S26.'
+  tags: [case, android, galaxy]
+  dietary: []
+  allergens: []
+  price_cents: 2499
+  unit: each
+  barcode: '2000000301198'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.025, 0.19]
+    label_color: '#e20074'
+    mass_kg: 0.1
+- sku: CASE-PX9-CLR
+  name: 'GoTo Clear Case for Google Pixel 9'
+  brand: GoTo
+  category: wireless
+  subcategory: cases
+  description: 'Slim clear case for Pixel 9.'
+  tags: [case, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 2499
+  unit: each
+  barcode: '2000000301266'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.02, 0.19]
+    label_color: '#cfe3ea'
+    mass_kg: 0.08
+- sku: CASE-PX9-RUG
+  name: 'GoTo Rugged Case for Google Pixel 9'
+  brand: GoTo
+  category: wireless
+  subcategory: cases
+  description: 'Drop-rated rugged case for Pixel 9.'
+  tags: [case, pixel, rugged]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000301334'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.03, 0.19]
+    label_color: '#3c3f3a'
+    mass_kg: 0.12
+- sku: CASE-PX7-BLK
+  name: 'GoTo Slim Case for Google Pixel 7'
+  brand: GoTo
+  category: wireless
+  subcategory: cases
+  description: 'Black slim case for Pixel 7 (last generation).'
+  tags: [case, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 1999
+  unit: each
+  barcode: '2000000301402'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.02, 0.19]
+    label_color: '#1f2326'
+    mass_kg: 0.08
+- sku: GLASS-IP18P-ZAG
+  name: 'ZAGG Glass XTR6 Screen Protector for Apple iPhone 18 Pro/17 Pro'
+  brand: ZAGG
+  category: wireless
+  subcategory: screen_protectors
+  description: 'Tempered glass for iPhone 18 Pro and 17 Pro.'
+  tags: [screen, ios]
+  dietary: []
+  allergens: []
+  price_cents: 5999
+  unit: each
+  barcode: '2000000301471'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.015, 0.19]
+    label_color: '#1b4f8a'
+    mass_kg: 0.06
+- sku: GLASS-GS25-GOTO
+  name: 'GoTo Tempered Glass Screen Protector for Samsung Galaxy S25'
+  brand: GoTo
+  category: wireless
+  subcategory: screen_protectors
+  description: 'Tempered glass for Galaxy S25.'
+  tags: [screen, galaxy]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000301549'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.015, 0.19]
+    label_color: '#f3e6ee'
+    mass_kg: 0.06
+- sku: GLASS-PX9
+  name: 'GoTo Tempered Glass Screen Protector for Google Pixel 9'
+  brand: GoTo
+  category: wireless
+  subcategory: screen_protectors
+  description: 'Tempered glass for Pixel 9.'
+  tags: [screen, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000301617'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.095, 0.015, 0.19]
+    label_color: '#e7f0f4'
+    mass_kg: 0.06
+- sku: CHG-20W
+  name: 'Samsung 25W Power Adapter'
+  brand: Samsung
+  category: wireless
+  subcategory: chargers
+  description: '25 W USB-C Super Fast Charging wall adapter.'
+  tags: [charger, usb-c, fast]
+  dietary: []
+  allergens: []
+  price_cents: 1999
+  unit: each
+  size: '25 W'
+  barcode: '2000000301686'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.08, 0.05, 0.12]
+    label_color: '#f4f4f2'
+    mass_kg: 0.12
+- sku: CHG-45W
+  name: 'Belkin 67W Wall Adapter with Retractable Cable'
+  brand: Belkin
+  category: wireless
+  subcategory: chargers
+  description: '67 W USB-C wall charger with built-in retractable cable.'
+  tags: [charger, usb-c, fast]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  size: '67 W'
+  barcode: '2000000301754'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.05, 0.14]
+    label_color: '#202020'
+    mass_kg: 0.18
+- sku: CHG-PXSNAP
+  name: 'Google Pixelsnap Charger'
+  brand: Google
+  category: wireless
+  subcategory: chargers
+  description: 'Magnetic wireless charger for Pixel.'
+  tags: [charger, wireless, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  barcode: '2000000301822'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.04, 0.12]
+    label_color: '#e9e6df'
+    mass_kg: 0.14
+- sku: CHG-AW
+  name: 'Apple Watch Magnetic Fast Charger to USB-C Cable (1 m)'
+  brand: Apple
+  category: wireless
+  subcategory: chargers
+  description: 'Fast charger for Apple Watch.'
+  tags: [charger, watch, apple]
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  size: '1 m'
+  barcode: '2000000301891'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.09, 0.03, 0.12]
+    label_color: '#f7f7f7'
+    mass_kg: 0.08
+- sku: CBL-USBC-2M
+  name: 'Apple 240W USB-C Charge Cable (2 m)'
+  brand: Apple
+  category: wireless
+  subcategory: chargers
+  description: 'Woven USB-C charge cable, 2 m.'
+  tags: [cable, usb-c]
+  dietary: []
+  allergens: []
+  price_cents: 2999
+  unit: each
+  size: '2 m'
+  barcode: '2000000301969'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.04, 0.15]
+    label_color: '#f7f7f7'
+    mass_kg: 0.1
+- sku: CBL-APPLE-1M
+  name: 'Apple USB-C Woven Charge Cable (1 m)'
+  brand: Apple
+  category: wireless
+  subcategory: chargers
+  description: 'Woven USB-C charge cable, 1 m.'
+  tags: [cable, usb-c]
+  dietary: []
+  allergens: []
+  price_cents: 1999
+  unit: each
+  size: '1 m'
+  barcode: '2000000302034'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.04, 0.15]
+    label_color: '#f7f7f7'
+    mass_kg: 0.08
+- sku: CBL-USBC-GOTO
+  name: 'GoTo USB-C to USB-C Cable (4 ft)'
+  brand: GoTo
+  category: wireless
+  subcategory: chargers
+  description: 'USB-C to USB-C cable, 4 ft.'
+  tags: [cable, usb-c]
+  dietary: []
+  allergens: []
+  price_cents: 1499
+  unit: each
+  size: '4 ft'
+  barcode: '2000000302102'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.04, 0.15]
+    label_color: '#e20074'
+    mass_kg: 0.08
+- sku: PB-10K
+  name: 'Belkin 10K 20W Battery with USB-C Cable'
+  brand: Belkin
+  category: wireless
+  subcategory: chargers
+  description: '10,000 mAh power bank with USB-C cable.'
+  tags: [battery, travel]
+  dietary: []
+  allergens: []
+  price_cents: 3999
+  unit: each
+  size: '10,000 mAh'
+  barcode: '2000000302171'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.07, 0.016, 0.14]
+    label_color: '#2a2a2a'
+    mass_kg: 0.22
+- sku: PB-MOPHIE
+  name: 'mophie Powerstation Mini 5K with Stand'
+  brand: mophie
+  category: wireless
+  subcategory: chargers
+  description: '5,000 mAh mini power bank with stand.'
+  tags: [battery, travel]
+  dietary: []
+  allergens: []
+  price_cents: 6999
+  unit: each
+  size: '5,000 mAh'
+  barcode: '2000000302249'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.07, 0.016, 0.12]
+    label_color: '#26282b'
+    mass_kg: 0.15
+- sku: APP3
+  name: 'Apple AirPods Pro 3'
+  brand: Apple
+  category: wireless
+  subcategory: audio
+  description: 'Active noise cancelling earbuds.'
+  tags: [earbuds, anc, apple]
+  dietary: []
+  allergens: []
+  price_cents: 24999
+  unit: each
+  barcode: '2000000302317'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.045, 0.11]
+    label_color: '#f7f7f7'
+    mass_kg: 0.06
+- sku: AP4
+  name: 'Apple AirPods 4'
+  brand: Apple
+  category: wireless
+  subcategory: audio
+  description: 'Open-fit wireless earbuds.'
+  tags: [earbuds, apple]
+  dietary: []
+  allergens: []
+  price_cents: 12999
+  unit: each
+  barcode: '2000000302386'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.045, 0.1]
+    label_color: '#f7f7f7'
+    mass_kg: 0.05
+- sku: GBUDS4PRO
+  name: 'Samsung Galaxy Buds4 Pro'
+  brand: Samsung
+  category: wireless
+  subcategory: audio
+  description: 'Noise-cancelling earbuds.'
+  tags: [earbuds, anc, galaxy]
+  dietary: []
+  allergens: []
+  price_cents: 24999
+  unit: each
+  barcode: '2000000302454'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.045, 0.1]
+    label_color: '#2b2d31'
+    mass_kg: 0.2
+- sku: BUDS-RUN
+  name: 'Samsung Galaxy Buds4'
+  brand: Samsung
+  category: wireless
+  subcategory: audio
+  description: 'Wireless earbuds.'
+  tags: [earbuds, galaxy]
+  dietary: []
+  allergens: []
+  price_cents: 17999
+  unit: each
+  barcode: '2000000302522'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.045, 0.1]
+    label_color: '#d9dbe0'
+    mass_kg: 0.05
+- sku: BUDS-PRO
+  name: 'Google Pixel Buds Pro 2'
+  brand: Google
+  category: wireless
+  subcategory: audio
+  description: 'Noise-cancelling earbuds.'
+  tags: [earbuds, anc, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 22999
+  unit: each
+  barcode: '2000000302591'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.1, 0.045, 0.1]
+    label_color: '#e9dfcf'
+    mass_kg: 0.06
+- sku: AW12-42
+  name: 'Apple Watch Series 12 42mm'
+  brand: Apple
+  category: wireless
+  subcategory: wearables
+  description: 'Apple Watch Series 12, 42 mm, GPS + Cellular.'
+  tags: [watch, lte, apple]
+  dietary: []
+  allergens: []
+  price_cents: 49999
+  unit: each
+  size: '42 mm'
+  barcode: '2000000302669'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.09, 0.13]
+    label_color: '#e6e6e6'
+    mass_kg: 0.05
+- sku: AWSE3-40
+  name: 'Apple Watch SE 3 40mm'
+  brand: Apple
+  category: wireless
+  subcategory: wearables
+  description: 'Apple Watch SE 3, 40 mm, GPS + Cellular.'
+  tags: [watch, lte, apple]
+  dietary: []
+  allergens: []
+  price_cents: 29999
+  unit: each
+  size: '40 mm'
+  barcode: '2000000302737'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.09, 0.13]
+    label_color: '#d9d4cc'
+    mass_kg: 0.04
+- sku: WATCH-PX3
+  name: 'Google Pixel Watch 5 (41mm)'
+  brand: Google
+  category: wireless
+  subcategory: wearables
+  description: 'Pixel Watch 5, 41 mm, LTE.'
+  tags: [watch, lte, pixel]
+  dietary: []
+  allergens: []
+  price_cents: 49999
+  unit: each
+  size: '41 mm'
+  barcode: '2000000302805'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.09, 0.13]
+    label_color: '#3a3d40'
+    mass_kg: 0.05
+- sku: GW8-40
+  name: 'Samsung Galaxy Watch8 40mm'
+  brand: Samsung
+  category: wireless
+  subcategory: wearables
+  description: 'Galaxy Watch8, 40 mm, LTE.'
+  tags: [watch, lte, galaxy]
+  dietary: []
+  allergens: []
+  price_cents: 39999
+  unit: each
+  size: '40 mm'
+  barcode: '2000000302874'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.11, 0.09, 0.13]
+    label_color: '#2c2f35'
+    mass_kg: 0.05
+- sku: IPAD-A16
+  name: 'Apple iPad (A16)'
+  brand: Apple
+  category: wireless
+  subcategory: tablets
+  description: '11-inch iPad with A16, 5G.'
+  tags: [tablet, ios, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 59999
+  unit: each
+  size: '11 in'
+  barcode: '2000000302942'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.179, 0.007, 0.248]
+    label_color: '#c8ccd2'
+    mass_kg: 0.48
+- sku: GW-5G
+  name: 'T-Mobile 5G Home Internet Gateway'
+  brand: T-Mobile
+  category: wireless
+  subcategory: home_internet
+  description: '5G home internet gateway (included with service).'
+  tags: [home, internet, 5g]
+  dietary: []
+  allergens: []
+  price_cents: 0
+  unit: each
+  barcode: '2000000303017'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.12, 0.12, 0.22]
+    label_color: '#f4f4f4'
+    mass_kg: 1.2
+- sku: ANT-5G
+  name: 'T-Mobile Internet 5G Antenna'
+  brand: T-Mobile
+  category: wireless
+  subcategory: home_internet
+  description: 'Window-mount 5G antenna for home internet.'
+  tags: [home, internet, 5g, antenna]
+  dietary: []
+  allergens: []
+  price_cents: 9999
+  unit: each
+  barcode: '2000000303086'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.12, 0.06, 0.2]
+    label_color: '#e20074'
+    mass_kg: 0.6
+# --- BEGIN generated: store_genie (scripts/genie_to_planogram.py; do not hand-edit) ---
+- sku: GN-DEGREASER-2PK
+  name: Kitchen Degreaser Spray Twin Pack
+  brand: Sparkhome
+  category: household
+  subcategory: cleaning
+  description: A twin-pack of red plastic spray bottles with yellow liquid contents, sealed in transparent shrink-wrap with
+    printed text and a yellow band across the top.
+  tags: [cleaning, kitchen, spray, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 799
+  unit: pack
+  size: 2 x 16 oz
+  barcode: '2000009000016'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.056, 0.214, 0.26]
+    label_color: '#d62828'
+    mass_kg: 0.4
+- sku: GN-TOILET-CLEANER
+  name: Toilet Bowl Cleaner
+  brand: Sparkhome
+  category: household
+  subcategory: cleaning
+  description: A white plastic bottle with a blue cap and angled neck, featuring a blue-and-white label with red printed text
+    and graphic elements.
+  tags: [cleaning, bathroom, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 449
+  unit: each
+  size: 24 oz
+  barcode: '2000009000023'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.057, 0.113, 0.27]
+    label_color: '#1d4ed8'
+    mass_kg: 0.4
+- sku: GN-PAPER-CUPS-50
+  name: Paper Party Cups 9 oz 50 ct
+  brand: Party Stack
+  category: household
+  subcategory: paper
+  description: Party Stack paper party cups 9 oz 50 ct, 50 ct.
+  tags: [party, disposable, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 549
+  unit: pack
+  size: 50 ct
+  barcode: '2000009000030'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.079, 0.301, 0.216]
+    label_color: '#ef4444'
+    mass_kg: 0.4
+- sku: GN-CLEAR-CUPS-100
+  name: Clear Plastic Cups 8 oz 100 ct
+  brand: Party Stack
+  category: household
+  subcategory: kitchen
+  description: A transparent plastic bag with blue and white printed branding, containing 100 stacked clear 240ml plastic
+    cups, sealed at the top and bottom.
+  tags: [party, disposable, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 699
+  unit: pack
+  size: 100 ct
+  barcode: '2000009000047'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.089, 0.301, 0.284]
+    label_color: '#60a5fa'
+    mass_kg: 0.4
+- sku: GN-CINNAMON-SWIRL
+  name: Cinnamon Swirl Bread 6 ct
+  brand: Golden Crumb
+  category: bakery
+  subcategory: pastry
+  description: A rectangular transparent plastic-wrapped package containing six golden-brown sliced cinnamon roll breads with
+    visible swirls of dark cinnamon filling.
+  tags: [breakfast, sweet, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 449
+  unit: pack
+  size: 6 ct
+  barcode: '2000009000054'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.132, 0.232, 0.086]
+    label_color: '#b45309'
+    mass_kg: 0.4
+- sku: GN-CHOCO-SWIRL-LOAF
+  name: Chocolate Swirl Bread Loaf
+  brand: Golden Crumb
+  category: bakery
+  subcategory: bread
+  description: A rectangular loaf of sliced bread wrapped in transparent plastic, featuring golden-brown crust and visible
+    dark chocolate swirls in each slice.
+  tags: [breakfast, sweet, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 429
+  unit: each
+  size: 16 oz
+  barcode: '2000009000061'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.132, 0.231, 0.088]
+    label_color: '#78350f'
+    mass_kg: 0.4
+- sku: GN-BUTTER-COOKIES
+  name: Butter Cookies Jar
+  brand: Crumb & Co
+  category: snacks
+  subcategory: cookies
+  description: A transparent cylindrical plastic jar with a yellow label, filled with stacked golden-brown oval-shaped cookies
+    and sealed with a clear lid showing powdered topping.
+  tags: [sweet, snack, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 549
+  unit: each
+  size: 12 oz
+  barcode: '2000009000078'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.112, 0.112, 0.156]
+    label_color: '#facc15'
+    mass_kg: 0.4
+- sku: GN-SWIRL-ROLLS-8
+  name: Red Bean Swirl Rolls 8 ct
+  brand: Golden Crumb
+  category: bakery
+  subcategory: pastry
+  description: A transparent plastic package containing multiple golden-brown cylindrical roll breads with visible dark swirl
+    fillings, sealed with a green label featuring printed text.
+  tags: [breakfast, sweet, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 499
+  unit: pack
+  size: 8 ct
+  barcode: '2000009000085'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.166, 0.29, 0.106]
+    label_color: '#16a34a'
+    mass_kg: 0.4
+- sku: GN-RICE-CRISPS
+  name: Puffed Rice Crisps
+  brand: Crunch Lab
+  category: snacks
+  subcategory: crackers
+  description: A packaged snack in a transparent plastic bag with red printed printed text, containing white irregularly shaped
+    pieces and a solid red base section.
+  tags: [snack, crunchy, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: []
+  price_cents: 379
+  unit: bag
+  size: 6 oz
+  barcode: '2000009000092'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.141, 0.204, 0.28]
+    label_color: '#dc2626'
+    mass_kg: 0.4
+- sku: GN-MINI-CROISSANT
+  name: Mini Croissant Tub
+  brand: Golden Crumb
+  category: bakery
+  subcategory: pastry
+  description: A clear plastic round container holding golden-brown, crescent-shaped baked snacks arranged in a circle under
+    a red-labeled lid.
+  tags: [breakfast, snack, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 599
+  unit: each
+  size: 10 oz
+  barcode: '2000009000108'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: cylinder
+    dims_m: [0.242, 0.242, 0.082]
+    label_color: '#f59e0b'
+    mass_kg: 0.4
+- sku: GN-SESAME-RICE-CAKE
+  name: Sesame Rice Cakes 6 ct
+  brand: Crunch Lab
+  category: snacks
+  subcategory: crackers
+  description: A rectangular packaged snack featuring a white, sesame-coated rice cake with visible brown filling, enclosed
+    in transparent plastic with a circular label bearing gold printed text.
+  tags: [snack, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [sesame]
+  price_cents: 349
+  unit: pack
+  size: 6 ct
+  barcode: '2000009000115'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.111, 0.202, 0.07]
+    label_color: '#e5e7eb'
+    mass_kg: 0.4
+- sku: GN-MATCHA-ROLL
+  name: Matcha Swiss Rolls 2 ct
+  brand: Golden Crumb
+  category: bakery
+  subcategory: pastry
+  description: A rectangular transparent plastic package containing two light green, spiral-cut Swiss rolls with a visible
+    cream filling, sealed with a labeled lid featuring blue and green branding.
+  tags: [sweet, dessert, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk, egg]
+  price_cents: 399
+  unit: pack
+  size: 2 ct
+  barcode: '2000009000122'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.091, 0.213, 0.07]
+    label_color: '#84cc16'
+    mass_kg: 0.4
+- sku: GN-SANDWICH-BREAD
+  name: Soft Sandwich Bread
+  brand: Golden Crumb
+  category: bakery
+  subcategory: bread
+  description: Golden Crumb soft sandwich bread, 20 oz.
+  tags: [breakfast, sandwich, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [wheat, milk]
+  price_cents: 349
+  unit: each
+  size: 20 oz
+  barcode: '2000009000139'
+  perishable: true
+  shelf_life_days: 7
+  asset:
+    shape: box
+    dims_m: [0.121, 0.291, 0.162]
+    label_color: '#2563eb'
+    mass_kg: 0.4
+- sku: GN-BLACK-TEA-100
+  name: Classic Black Tea 100 ct
+  brand: Teahouse Lane
+  category: pantry
+  subcategory: coffee
+  description: A rectangular Lipton tea box with a white front featuring the brand logo and green sides with text and barcodes.
+  tags: [tea, breakfast, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 649
+  unit: box
+  size: 100 ct
+  barcode: '2000009000146'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.094, 0.338, 0.143]
+    label_color: '#15803d'
+    mass_kg: 0.4
+- sku: GN-DRINK-YOGURT-12
+  name: Drinkable Yogurt 12-Pack
+  brand: Meadow Moo
+  category: dairy
+  subcategory: yogurt
+  description: Meadow Moo drinkable yogurt 12-pack, 12 x 7 oz.
+  tags: [breakfast, kid_friendly, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 899
+  unit: pack
+  size: 12 x 7 oz
+  barcode: '2000009000153'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: box
+    dims_m: [0.109, 0.284, 0.3]
+    label_color: '#1e40af'
+    mass_kg: 0.4
+- sku: GN-AP-FLOUR-5LB
+  name: All-Purpose Flour
+  brand: Mill Creek
+  category: pantry
+  subcategory: baking
+  description: A white plastic bag with green and red branding featuring a fish logo and printed text.
+  tags: [baking, vegan, genie_store]
+  dietary: [vegan]
+  allergens: [wheat]
+  price_cents: 429
+  unit: bag
+  size: 5 lb
+  barcode: '2000009000160'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.112, 0.163, 0.237]
+    label_color: '#16a34a'
+    mass_kg: 0.4
+- sku: GN-COCONUT-JUICE
+  name: Fresh Coconut Juice
+  brand: Coco Bay
+  category: beverages
+  subcategory: juice
+  description: Coco Bay fresh coconut juice, 11 fl oz.
+  tags: [coconut, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 279
+  unit: each
+  size: 11 fl oz
+  barcode: '2000009000177'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.05, 0.05, 0.155]
+    label_color: '#f8fafc'
+    mass_kg: 0.4
+- sku: GN-COLD-BREW
+  name: Cold Brew Iced Coffee
+  brand: Stripe Roast
+  category: beverages
+  subcategory: drinks
+  description: A brown plastic bottle with a black cap and a white label featuring yellow and blue diagonal stripes.
+  tags: [coffee, caffeine, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 349
+  unit: each
+  size: 10 fl oz
+  barcode: '2000009000184'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.055, 0.056, 0.153]
+    label_color: '#713f12'
+    mass_kg: 0.4
+- sku: GN-COLD-BREW-LATTE
+  name: Cold Brew Coffee Latte
+  brand: Stripe Roast
+  category: beverages
+  subcategory: drinks
+  description: A brown plastic beverage bottle with a black cap and a white label featuring yellow diagonal stripes and text.
+  tags: [coffee, caffeine, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 379
+  unit: each
+  size: 10 fl oz
+  barcode: '2000009000191'
+  perishable: true
+  shelf_life_days: 120
+  asset:
+    shape: cylinder
+    dims_m: [0.055, 0.056, 0.153]
+    label_color: '#92400e'
+    mass_kg: 0.4
+- sku: GN-CHOCOLATE-MILK
+  name: Chocolate Milk
+  brand: Meadow Moo
+  category: dairy
+  subcategory: milk
+  description: Meadow Moo chocolate milk, 10 fl oz.
+  tags: [kid_friendly, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 229
+  unit: each
+  size: 10 fl oz
+  barcode: '2000009000207'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: cylinder
+    dims_m: [0.055, 0.055, 0.13]
+    label_color: '#a16207'
+    mass_kg: 0.4
+- sku: GN-COCONUT-WATER
+  name: Coconut Water
+  brand: Island Palm
+  category: beverages
+  subcategory: water
+  description: A plastic beverage bottle with a green cap and white label featuring coconut imagery and 'Coco Royal' branding.
+  tags: [coconut, hydration, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 299
+  unit: each
+  size: 12 fl oz
+  barcode: '2000009000214'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.053, 0.053, 0.184]
+    label_color: '#22c55e'
+    mass_kg: 0.4
+- sku: GN-GRAPE-JUICE
+  name: Concord Grape Juice Drink
+  brand: Orchard Lane
+  category: beverages
+  subcategory: juice
+  description: A black plastic beverage bottle with a white cap and a label featuring red grapes and printed text.
+  tags: [fruit, kid_friendly, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 249
+  unit: each
+  size: 12 fl oz
+  barcode: '2000009000221'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.049, 0.06, 0.167]
+    label_color: '#581c87'
+    mass_kg: 0.4
+- sku: GN-GREEN-TEA
+  name: Unsweetened Green Tea
+  brand: Kumo Tea
+  category: beverages
+  subcategory: drinks
+  description: A white plastic beverage bottle with green and blue printed text and branding, featuring a white cap with a
+    green logo.
+  tags: [tea, unsweetened, vegan, genie_store]
+  dietary: [vegan]
+  allergens: []
+  price_cents: 229
+  unit: each
+  size: 16.9 fl oz
+  barcode: '2000009000238'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.06, 0.06, 0.158]
+    label_color: '#15803d'
+    mass_kg: 0.4
+- sku: GN-PROBIOTIC-MILK
+  name: Probiotic Milk Drink
+  brand: Kiddo Cultures
+  category: dairy
+  subcategory: cultured
+  description: A white plastic bottle with a green and red label featuring 'AD' text.
+  tags: [kid_friendly, probiotic, vegetarian, genie_store]
+  dietary: [vegetarian]
+  allergens: [milk]
+  price_cents: 199
+  unit: each
+  size: 7.4 fl oz
+  barcode: '2000009000245'
+  perishable: true
+  shelf_life_days: 21
+  asset:
+    shape: cylinder
+    dims_m: [0.047, 0.047, 0.149]
+    label_color: '#ef4444'
+    mass_kg: 0.4
+- sku: GN-BABY-POWDER
+  name: Baby Powder
+  brand: Little Lily
+  category: personal_care
+  subcategory: bath_body
+  description: A white cylindrical bottle with a green and blue label featuring the Johnson's brand name and logo.
+  tags: [baby, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 499
+  unit: each
+  size: 7 oz
+  barcode: '2000009000252'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.052, 0.06, 0.159]
+    label_color: '#22c55e'
+    mass_kg: 0.4
+- sku: GN-PEACH-BODY-WASH
+  name: Peach Leaf Baby Body Wash
+  brand: Little Lily
+  category: personal_care
+  subcategory: bath_body
+  description: A white and pink rectangular box with 'Pigeon' branding and peach imagery, labeled as a 200ml body wash.
+  tags: [baby, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 899
+  unit: each
+  size: 6.8 fl oz
+  barcode: '2000009000269'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.056, 0.056, 0.162]
+    label_color: '#f9a8d4'
+    mass_kg: 0.4
+- sku: GN-KIDS-FACE-WASH
+  name: Kids Gentle Face Wash
+  brand: Froggy Fresh
+  category: personal_care
+  subcategory: bath_body
+  description: A small, cone-shaped tube with a yellow body featuring a cartoon frog face and a light green cap.
+  tags: [kid_friendly, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 599
+  unit: each
+  size: 2.8 fl oz
+  barcode: '2000009000276'
+  perishable: false
+  asset:
+    shape: box
+    dims_m: [0.034, 0.052, 0.094]
+    label_color: '#facc15'
+    mass_kg: 0.4
+- sku: GN-KIDS-BODY-WASH
+  name: Kids 2-in-1 Body Wash
+  brand: Froggy Fresh
+  category: personal_care
+  subcategory: bath_body
+  description: A light blue plastic bottle with a green pump dispenser and base, featuring a cartoon frog on its label.
+  tags: [kid_friendly, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 699
+  unit: each
+  size: 13.5 fl oz
+  barcode: '2000009000283'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.094, 0.093, 0.236]
+    label_color: '#7dd3fc'
+    mass_kg: 0.4
+- sku: GN-HAND-SANITIZER
+  name: Hand Sanitizer Gel
+  brand: Sparkhome
+  category: personal_care
+  subcategory: bath_body
+  description: A white plastic bottle with a bright yellow cap and green labeling, featuring printed text and a '99%' efficacy
+    claim.
+  tags: [hygiene, hands, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 399
+  unit: each
+  size: 8 fl oz
+  barcode: '2000009000290'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.034, 0.053, 0.115]
+    label_color: '#facc15'
+    mass_kg: 0.4
+- sku: GN-VITAMIN-E-LOTION
+  name: Vitamin E Body Lotion
+  brand: Bloom & Dew
+  category: personal_care
+  subcategory: bath_body
+  description: Bloom & Dew vitamin e body lotion, 6.8 fl oz.
+  tags: [skincare, body, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 849
+  unit: each
+  size: 6.8 fl oz
+  barcode: '2000009000306'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.03, 0.058, 0.13]
+    label_color: '#dc2626'
+    mass_kg: 0.4
+- sku: GN-BABY-LOTION
+  name: Baby Lotion
+  brand: Little Lily
+  category: personal_care
+  subcategory: bath_body
+  description: A small white plastic bottle with a light blue cap and a green-and-white label featuring printed text and leaf
+    imagery.
+  tags: [baby, gentle, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 699
+  unit: each
+  size: 6.8 fl oz
+  barcode: '2000009000313'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.042, 0.064, 0.126]
+    label_color: '#93c5fd'
+    mass_kg: 0.4
+- sku: GN-KIDS-SHAMPOO
+  name: Kids Detangling Shampoo
+  brand: Froggy Fresh
+  category: personal_care
+  subcategory: hair_care
+  description: A white bottle with a lime-green mushroom-shaped cap featuring white spots and a cute frog design on its front.
+  tags: [kid_friendly, hair, genie_store]
+  dietary: []
+  allergens: []
+  price_cents: 649
+  unit: each
+  size: 8 fl oz
+  barcode: '2000009000320'
+  perishable: false
+  asset:
+    shape: cylinder
+    dims_m: [0.045, 0.073, 0.129]
+    label_color: '#a3e635'
+    mass_kg: 0.4
+# --- END generated: store_genie ---

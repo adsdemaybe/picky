@@ -4,6 +4,7 @@ They implement the CONTRACT Protocols the runner needs, so the agent tests never
 Ported from the API draft (docs/vla-loop, ``fakes/``); the robot / perception arms ship their own real fakes.
 
 world.MiniCatalog / MiniRobot      v0.2 CatalogService / RobotService over a one-aisle mini store
+world.CounterMiniRobot             MiniRobot + the 0.2.4 basket -> counter primitives (checkout unload by arm)
 fake_vla.FakeVla                   VlaService: T0 over RobotService, status streams, faults, simulated T1
 fake_camera.FakeEvidenceCameras    EvidenceCameras + TruthSource: deterministic frames + ground-truth sidecar
 fake_verifier.FakeVerifier         VerifierService: exact verdicts from the sidecar, fault-driven degrade
@@ -22,7 +23,7 @@ from arms.agent.tests.loop_world.fake_camera import FakeEvidenceCameras
 from arms.agent.tests.loop_world.fake_verifier import FakeVerifier
 from arms.agent.tests.loop_world.fake_vla import FakeVla
 from arms.agent.tests.loop_world.faults import InMemoryFaultInjector
-from arms.agent.tests.loop_world.world import MiniCatalog, MiniRobot
+from arms.agent.tests.loop_world.world import CounterMiniRobot, MiniCatalog, MiniRobot
 from contracts.policy import DEFAULT_RETRY_POLICY, RetryPolicy
 from contracts.services import Services
 
@@ -38,9 +39,11 @@ def build_loop_services(
     policy: RetryPolicy | None = None,
     use_camera_service: bool = False,
     planner_cls: type[ScriptedPlanner] = ScriptedPlanner,
+    basket_unload: bool = False,
 ) -> Services:
     """Wire every stub + the agent's planner and runner. ``base`` = existing v0.2 services to run over instead of the
-    mini world. ``services.runner`` is the PlanLoop, ``services.events`` a MemoryBus."""
+    mini world. ``services.runner`` is the PlanLoop, ``services.events`` a MemoryBus. ``basket_unload`` = a robot with
+    the 0.2.4 basket -> counter primitives (CounterMiniRobot): the checkout unload runs by arm."""
     s = Services()
     if base is not None:
         for name in Services.field_names():
@@ -48,7 +51,7 @@ def build_loop_services(
     if s.catalog is None:
         s.catalog = MiniCatalog(s)
     if s.robot is None:
-        s.robot = MiniRobot(s, motion_s=motion_s)
+        s.robot = (CounterMiniRobot if basket_unload else MiniRobot)(s, motion_s=motion_s)
     bus = s.events if s.events is not None else MemoryBus()
     s.events = bus
     s.faults = InMemoryFaultInjector(scenario, publisher=bus)
@@ -64,6 +67,7 @@ def build_loop_services(
 
 
 __all__ = [
+    "CounterMiniRobot",
     "FakeEvidenceCameras",
     "FakeVerifier",
     "FakeVla",

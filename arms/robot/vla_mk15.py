@@ -73,6 +73,8 @@ MAX_REACH_FROM_TCP_M = 0.6
 Z_ABOVE_BOARD_M = (0.015, 0.40)
 """A grasp target is clamped to this height band above the slot's shelf board (planogram)."""
 HISTORY = 6
+CLOSED = "closed the gripper"
+MISSED = "closed the gripper on NOTHING (missed)"
 
 SYSTEM_PROMPT = (
     "You control a small robot arm (SO-101, parallel-jaw gripper) on a store robot that is parked facing a shelf. "
@@ -441,6 +443,15 @@ class Mk15Policy:
     def set_context(self, ctx: Any) -> None:
         self.ctx = ctx
 
+    def _missed_here(self) -> bool:
+        """A close MISSED since the jaws last moved to a new point (reach_point / move_ee / lift)."""
+        for h in reversed(self.history):
+            if h.endswith(MISSED):
+                return True
+            if h.startswith(("reach_point", "move_ee", "lift")):
+                return False
+        return False
+
     # ---- prompt ----------------------------------------------------------------------------------------------------
     def _state_text(self, state: Sequence[float]) -> str:
         ctx = self.ctx
@@ -456,6 +467,11 @@ class Mk15Policy:
             parts.append("something is held in the gripper")
         elif grip == "closed" and any(h.startswith("set_gripper(state=close)") for h in self.history[-2:]):
             parts.append("the gripper closed on NOTHING (missed): open it and reach_point at the product again")
+        elif self._missed_here():
+            parts.append(
+                "the last close at this spot MISSED: call reach_point on the middle of a product unit (pick a "
+                "different point) before closing again"
+            )
         return "; ".join(parts)
 
     def _messages(self, state: Sequence[float], side: bytes, wrist: bytes) -> list[dict[str, Any]]:
@@ -492,6 +508,8 @@ class Mk15Policy:
             raise PolicyBackendError(
                 "policy_unavailable", "Mk1.5 policy needs worker-side IK (Isaac worker with arm_ik)"
             )
+        if self.history and self.history[-1].endswith(CLOSED) and not ctx.attached:
+            self.history[-1] = self.history[-1][: -len(CLOSED)] + MISSED  # the close's result is known now
         key = getattr(ctx, "budget_key", None) or ctx.robot_id
         t0 = time.monotonic()
         call = None
@@ -548,6 +566,10 @@ class Mk15Policy:
             return hold, f"done ({'success' if ok else 'gave up'}{note})", True
         if name == "set_gripper":
             close = str(args.get("state", "")).lower().startswith("c")
+            if close and state[5] >= 10.0 and self._missed_here():
+                # Measured on Isaac: after a missed close Mk1.5 alternated open / close at the same spot until the
+                # T1 budget ran out. Closing where it just missed cannot work; make it re-aim first.
+                return hold, "refused: the close at this spot missed; reach_point at a product unit first", False
             if close and state[5] < 10.0 and not (ctx is not None and ctx.attached):
                 # Closing an already-closed, EMPTY gripper again cannot help (measured: Mk1.5 repeated it 8 times
                 # after a missed close until the T1 budget ran out); open it so the next call can re-aim.
@@ -558,7 +580,7 @@ class Mk15Policy:
                 return rows, "gripper was already closed on nothing: opened it again (re-aim with reach_point)", False
             target = GRIPPER_CLOSED_DEG if close else GRIPPER_OPEN_DEG
             rows = [[*state[:5], state[5] + (target - state[5]) * (i + 1) / GRIPPER_ROWS] for i in range(GRIPPER_ROWS)]
-            return rows, "closed the gripper" if close else "opened the gripper", False
+            return rows, CLOSED if close else "opened the gripper", False
         if name in ("move_ee", "lift"):
             if ctx.tcp is None or ctx.robot_pose is None:
                 return hold, "ignored (no TCP / pose)", False

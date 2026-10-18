@@ -213,6 +213,7 @@ Needs [uv](https://docs.astral.sh/uv/) (Python 3.12) and `make`. Docker only for
 gh repo clone adsdemaybe/picky && cd picky
 make setup               # uv sync --locked (base deps + dev tools)
 cp .env.example .env     # every key is optional; blank = fakes
+make secret NAME=ANTHROPIC_API_KEY   # optional: API keys live in your OS keychain (docs/secrets.md)
 make check               # lint, format check, rules check, tests (what CI runs)
 make demo                # headless trip 1 → follow-up → trip 2, all arms fake; ends with "DEMO OK" + "LOOP OK"
 make dev                 # gateway on http://localhost:8000
@@ -240,7 +241,9 @@ PICKY_REAL_ARMS=routing,trust make demo         # a real arm that can't start fa
 make db-up && make seed                         # local Postgres + pgvector, seeded from data/ (catalog extra)
 ```
 
-Keys go in `.env` (see [`.env.example`](.env.example)): `GEMINI_API_KEY` switches the agent and robot brains to
+Keys go in the team key vault: `make secret NAME=...` stores one in your OS keychain, `make secrets` lists them
+(masked), `make secrets-pull` fetches the team's age-encrypted bundle ([`docs/secrets.md`](docs/secrets.md)); `.env`
+(see [`.env.example`](.env.example)) still works as the lowest-priority fallback. `GEMINI_API_KEY` switches the agent and robot brains to
 Gemini (needs `uv sync --extra agent`; `PICKY_LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` for Claude; blank =
 deterministic fakes); `PERCEPTRON_API_KEY` switches the loop verifier's vision to Perceptron Mk1.5 with
 `PICKY_REAL_ARMS=perception` (needs `uv sync --extra perception`; blank = the ground-truth fake verifier); also
@@ -248,6 +251,8 @@ deterministic fakes); `PERCEPTRON_API_KEY` switches the loop verifier's vision t
 verifier panel real camera thumbnails instead of the fakes' flat frames. The web app reads its own
 `arms/frontend/.env.local`.
 `make setup` removes extras, so re-run `uv sync --extra <arm>` after it.
+
+**Perceptron VLA (learned grasp tier).** `PICKY_VLA_T1=perceptron` makes the Isaac rover's grasps a policy that runs joint by joint, with Perceptron Mk1.5 as the stand-in. `perceptron_vla` uses Perceptron's robotics VLA, trained on our sim dataset, and needs the team key `PERCEPTRON_ROBOTICS_API_KEY` from Perceptron staff. The runbook (key, one-command pipeline, in-sim test) is [`docs/vla-loop/perceptron-vla.md`](docs/vla-loop/perceptron-vla.md); the dataset is described in [`docs/vla-loop/dataset.md`](docs/vla-loop/dataset.md), and the vhagar test stack and its measured runs are in [`arms/sim/DEPLOY.md`](arms/sim/DEPLOY.md) §8–9.
 
 ## API at a glance (for the web app)
 
@@ -341,8 +346,9 @@ contracts/   locked interfaces: pydantic models, service Protocols, events, LLM 
 utils/       shared helpers: config, logging, db, LLM client, money, geometry, ids, event bus, data loaders
 arms/<arm>/  one folder per feature arm: README.md, __init__.py (create / create_fake), service.py, fake.py, tests/
 data/        source of truth: products, planograms per store, online store, categories, fixtures (users, robots)
-docs/        research.md, architecture.md, demo-script.md, cart-whisperer.md, frontend-backend-map.md, pitch/ (slides,
-             Devpost text); team-plan.md (team master plan) is on arm/frontend until #12 merges
+docs/        research.md, architecture.md, demo-script.md, cart-whisperer.md, frontend-backend-map.md, secrets.md,
+             pitch/ (slides, Devpost text); team-plan.md (team master plan) is on arm/frontend until #12 merges
+secrets/     team key vault bundle: team.age (age-encrypted keys) + recipients.txt (public keys); docs/secrets.md
 scripts/     repo tooling (sync_agent_rules.py)
 ```
 

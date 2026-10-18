@@ -103,13 +103,23 @@ Timing on vhagar: startup takes ~22 s (store + rover). Rendering runs at ~13–1
 - `/data/$USER/picky-vla/datasets/picky_shelf_pick_v1`: 60 episodes (54 train `0:54`, 6 validation `54:60`),
   13,885 frames (7.7 s mean), 37 SKUs and 37 slots, 321 MB (AV1 videos). The raw episodes in
   `raw_shelf_pick_v1` take 1.8 GB.
-- `convert_lerobot.py validate`: every check passes (`meta/picky_validation.json`).
+- `convert_lerobot.py validate`: every check passes (`meta/picky_validation.json`). It was re-run on
+  2026-10-18: `ALL OK`, exit 0. The raw folder holds 61 entries: the 60 episodes plus `candidates.json`.
 - Previews are in `/data/$USER/picky-vla/datasets/previews_v1`. `ds_ep*.jpg` sheets are decoded from the LeRobot
   videos. `ep_*.mp4` / `.gif` are made from the raw frames.
 
 ## Upload to Perceptron (once the team key exists)
 
-Direct upload: `POST /v1/datasets {"name": "picky_shelf_pick_v1", "source_kind": "upload"}`, then
+One command on vhagar does upload, validation, training, deployment and a predict check. Key setup and the in-sim
+test that follows are in `perceptron-vla.md` ("Runbook"):
+
+```bash
+cd /data/$USER/picky/repo-pvla
+uv run --frozen python -m arms.robot.perceptron_vla pipeline /data/$USER/picky-vla/datasets/picky_shelf_pick_v1 \
+  --steps 1000 --instruction "pick up the mild chunky salsa 16 oz and put it in the basket"
+```
+
+What it sends, step by step. Direct upload: `POST /v1/datasets {"name": "picky_shelf_pick_v1", "source_kind": "upload"}`, then
 `POST /v1/datasets/{id}/uploads` with every file under the dataset root, as relative path + size + sha256, in
 batches of ≤ 500. PUT each file to its signed URL, then `POST /v1/datasets/{id}/finalize` and poll
 `GET /v1/datasets/{id}/validation`. Our extra `meta/picky_*.json` files are plain `.json`, an allowed extension. To

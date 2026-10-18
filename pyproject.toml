@@ -16,6 +16,7 @@ dependencies = [
   "websockets>=13",
   "anthropic>=0.60",
   "pillow>=10.4",  # synthetic camera frames (robot fake) + JPEG snapshots/MJPEG (cameras API)
+  "keyring>=25.0",  # utils.secrets: OS keychain (macOS Keychain / Secret Service); file fallback when unusable
 ]
 
 [project.optional-dependencies]
@@ -40,6 +41,8 @@ agent = ["deepgram-sdk>=7.13", "google-genai>=2.31,<3"]
 recommender = ["sentence-transformers>=6.1", "pgvector>=0.5.1"]
 trust = ["stripe>=10.0"]
 messaging = ["photonhq-api==0.5.0"]
+# utils.secrets team bundle (age encryption of secrets/team.age); `make secrets-pull/-push` pull it in for you.
+secrets = ["pyrage>=1.4"]
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pytest>=8.3", "pytest-asyncio>=0.24"]

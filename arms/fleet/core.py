@@ -84,6 +84,8 @@ DEFAULT_ROBOTS: tuple[tuple[str, str, str, str, int], ...] = (
 """Fallback fleet when data/fixtures/robots.yaml is missing (robot_id, name, store, color, dock slot)."""
 
 _GENERIC_LIST_TITLES = frozenset({"", "shopping", "shopping list", "shopping trip", "groceries", "list"})
+_COUNT_SUFFIX = re.compile(r"\s*\(\d+ items?\)$")
+"""A list title that already carries its count ('Your order (3 items)'): replaced, so the count is said once."""
 
 
 def plural(n: int, word: str) -> str:
@@ -100,6 +102,7 @@ def shop_goal_title(list_title: str | None, n_items: int, store_name: str, store
             title = title[: -len(f"({name})")].rstrip()
     if title.lower().startswith("shop "):
         title = title[5:].strip()
+    title = _COUNT_SUFFIX.sub("", title)
     if title.lower() in _GENERIC_LIST_TITLES:
         return f"Shop {plural(n_items, 'item')} at {store_name}"
     return f"Shop {title} ({plural(n_items, 'item')}) at {store_name}"

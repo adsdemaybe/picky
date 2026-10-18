@@ -112,6 +112,32 @@ def test_checkout_moves_the_clock() -> None:
     assert rows[0].purchase_id == "p1" and rows[0].name  # the name was filled from the catalog
 
 
+def test_deal_skips_an_item_bought_minutes_ago() -> None:
+    """Live Isaac trip trip_10qstaik: deal cards offered GUAC-KIT / CHIPS-TORTILLA right after that checkout
+    (last_bought_days 0); the deal loop now has the complement loop's 'bought recently' filter."""
+    rec = _rec()
+    before = asyncio.run(rec.replenish_suggestions("maya", "store_ave", 10))
+    assert any(c.sku == "GUAC-KIT" and c.kind == "deal" for c in before)
+    asyncio.run(
+        rec.record_purchase(
+            [
+                PurchaseRecord(
+                    purchase_id="p2",
+                    user_id="maya",
+                    sku="GUAC-KIT",
+                    qty=1,
+                    unit_price_cents=499,
+                    ts=utcnow(),
+                    store_id="store_ave",
+                )
+            ]
+        )
+    )
+    cards = asyncio.run(rec.replenish_suggestions("maya", "store_ave", 10))
+    assert "GUAC-KIT" not in {c.sku for c in cards}
+    assert all(c.last_bought_days is None or c.last_bought_days >= 3 for c in cards if c.kind == "deal")
+
+
 def test_unknown_user() -> None:
     with pytest.raises(KeyError):
         asyncio.run(_rec().replenish_suggestions("nobody", "store_ave"))

@@ -41,6 +41,7 @@ from typing import Any, Protocol
 
 from arms.sim import arm_joints as aj
 from arms.sim.assets import SkuAssets
+from arms.sim.external import ExternalScene, load_external_scene
 from arms.sim.geometry import (
     ARM_FULL_EXT_M,
     ARM_STOW_EXT_M,
@@ -904,12 +905,21 @@ _ACTIONS: dict[str, type[_Action]] = {
 
 SceneLoader = Callable[[str], tuple[Planogram, list[Product]]]
 RobotsLoader = Callable[[], tuple[list[RobotSpec], list[StoreCameraSpec]]]
+ExternalLoader = Callable[[str], ExternalScene | None]
 
 
 def default_scene_loader(store_id: str) -> tuple[Planogram, list[Product]]:
     from utils.data import load_planogram, load_products
 
     return load_planogram(store_id), list(load_products().values())
+
+
+def default_external_loader(store_id: str) -> ExternalScene | None:
+    """data/sim/<store_id>_prims.yaml (arms.sim.external); None when the store has none or it is unreadable."""
+    try:
+        return load_external_scene(store_id)
+    except Exception:  # noqa: BLE001 - a broken prim map must not cost the store: primitives instead
+        return None
 
 
 def default_robots_loader() -> tuple[list[RobotSpec], list[StoreCameraSpec]]:
@@ -940,9 +950,12 @@ class WorkerCore:
         default_store: str | None = None,
         assets: SkuAssets | None = None,
         rover_usd: str | None = None,
+        external_loader: ExternalLoader | None = default_external_loader,
     ) -> None:
         self.backend, self.emit, self.clock = backend, emit, clock
         self.loader, self.robots_loader = loader, robots_loader
+        self.external_loader = external_loader
+        """Store id -> its external scene (arms.sim.external; None / inactive = the planogram's primitives)."""
         self.default_store = default_store
         self.assets = assets
         """Per-item grocery models (None / inactive = primitives; see arms.sim.assets)."""
@@ -1000,7 +1013,25 @@ class WorkerCore:
             cameras = (old.cameras if old else None) or [c for c in file_cams if c.store_id == sid]
         cameras = [c for c in cameras if c.store_id == sid] or default_store_cameras(planogram)
 
-        spec = build_scene_spec(planogram, products, seed=seed or 0, assets=self.assets)
+        external = self.external_loader(sid) if self.external_loader is not None else None
+        spec = build_scene_spec(planogram, products, seed=seed or 0, assets=self.assets, external=external)
+        if spec.external_usd:
+            mapped = sum(1 for p in spec.product_prims() if p.render == "external")
+            self.emit(
+                SimLog(
+                    level="info",
+                    message=f"{sid} scene: external USD {spec.external_usd} ({mapped} of {len(spec.instances)} units "
+                    f"are its product prims, {len(spec.external_hidden)} spare prims hidden)",
+                )
+            )
+        elif external is not None:
+            self.emit(
+                SimLog(
+                    level="info",
+                    message=f"{sid} scene: external USD {external.usd.path} not found on this host "
+                    f"(${external.usd.root_env or 'PICKY_EXTERNAL_USD_' + sid.upper()}); primitive shelves instead",
+                )
+            )
         for w in spec.warnings:
             self.emit(SimLog(level="warning", message=f"{sid} scene: {w}"))
         if self.assets is not None and self.assets.active:
@@ -1839,8 +1870,10 @@ class WorkerCore:
             fx = scene.planogram.fixture(slot.fixture_id)
             if fx is None:
                 raise _Fail("unknown_slot", f"slot {cmd.slot_id} has no fixture")
-            # same dims / model / width as the build (restocks match)
-            layout = layout_for(slot, fx, product, self.assets, slot_lateral_room(scene.planogram, slot, fx))
+            # same dims / model / width / store style as the build (restocks match)
+            layout = layout_for(
+                slot, fx, product, self.assets, slot_lateral_room(scene.planogram, slot, fx), cmd.store_id
+            )
             scene.spec.slot_layouts[cmd.slot_id] = layout
             if product.sku not in scene.spec.products:
                 scene.spec.products[product.sku] = product

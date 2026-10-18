@@ -31,8 +31,26 @@ def test_wrong_salsa_is_put_back_and_the_right_one_taken() -> None:
         e.step for e in s.events.of("step.started") if isinstance(e.step, PlaceStep) and e.step.destination == "shelf"
     ]
     assert len(back) == 1 and back[0].origin == "recovery"
+    assert back[0].title == "Put the wrong item back"  # words, never the raw SKU ('Put the SALSA-HOT back')
     skus = [sku for _, sku, _ in s.catalog.picks]
     assert skus.count("SALSA-MILD") == 1 and "SALSA-HOT" not in skus
+    done = s.events.of("plan.completed")[-1]
+    n = done.stats.verifier_catches
+    assert n >= 1 and f" · {n} verifier {'catch' if n == 1 else 'catches'} · " in done.summary
+    assert "catch(es)" not in done.summary
+
+
+def test_target_description_says_the_size_once() -> None:
+    """Live Isaac trip: 'Casa Verde Black Beans 15 oz, 15 oz' (the product name already carries the size)."""
+    from types import SimpleNamespace
+
+    from arms.agent.planner_fake import target_description
+
+    beans = SimpleNamespace(brand="Casa Verde", name="Black Beans 15 oz", size="15 oz")
+    assert target_description(beans, "Black Beans") == "Casa Verde Black Beans 15 oz"
+    salsa = SimpleNamespace(brand="Sol de Casa", name="Mild Chunky Salsa", size="16 oz")
+    assert target_description(salsa, "salsa") == "Sol de Casa Mild Chunky Salsa, 16 oz"
+    assert target_description(None, "limes") == "limes"
 
 
 def test_flaky_t1_opens_the_breaker_and_finishes_on_t0() -> None:
