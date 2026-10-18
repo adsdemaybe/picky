@@ -3,8 +3,9 @@
 Picky's API keys (Claude, Gemini, Perceptron, Stripe test, Photon, ...) live in a small **key vault** (`utils/secrets.py`)
 instead of being pasted into `.env` files, chat or PRs.
 
-- **Each machine** keeps its keys in the OS keychain (the macOS Keychain on our Macs). On headless Linux (the GPU host
-  "vhagar") it uses a private file, `~/.config/picky/secrets.env` (mode 600, dir 700), automatically.
+- **Each machine** keeps its keys in a private file, `~/.config/picky/secrets.env` (mode 600, dir 700). The OS
+  keychain is opt-in (`PICKY_SECRETS_BACKEND=keyring`): on macOS it asks for your login password once per Python
+  binary, i.e. every venv and worktree, which got old fast.
 - **The team** shares one encrypted bundle, `secrets/team.age`, committed to the repo. It is encrypted with
   [age](https://age-encryption.org) to every public key listed in `secrets/recipients.txt`, so only teammates (and
   machines) on that list can decrypt it. A leaked or public repo leaks nothing usable.
@@ -16,7 +17,7 @@ instead of being pasted into `.env` files, chat or PRs.
 
 ```bash
 make secret NAME=PERCEPTRON_ROBOTICS_API_KEY   # paste at the hidden prompt, Enter (repeat for each key you hold)
-make secrets                                   # SET=yes  SOURCE=keychain  VALUE=••••last4
+make secrets                                   # SET=yes  SOURCE=file  VALUE=••••last4
 make secrets-identity                          # prints your age1... public key
 #   add it to secrets/recipients.txt as:  age1...  # lead, macbook
 make secrets-push                              # writes secrets/team.age (lists who can read it)
@@ -36,7 +37,7 @@ change to a `chore/secrets-<you>` branch. You don't have to wait for the PR to m
 
 ```bash
 git fetch origin && git show origin/chore/secrets-<you>:secrets/team.age | make secrets-pull ARGS="--bundle -"
-make secrets              # every key: SET=yes, SOURCE=keychain (vhagar: file)
+make secrets              # every key: SET=yes, SOURCE=file
 ```
 
 After the merge, `git pull && make secrets-pull` is all you need.
@@ -50,7 +51,7 @@ The hosted vision key for the verifier (`api.perceptron.inc`) is a different nam
 
 1. Store it on your Mac: `make secret NAME=PERCEPTRON_ROBOTICS_API_KEY`. Paste the key at the hidden prompt and press
    Enter. Nothing is echoed, and nothing lands in your shell history.
-2. Check it: `make secrets` shows `PERCEPTRON_ROBOTICS_API_KEY  yes  keychain  ••••xxxx` (the last 4 characters only).
+2. Check it: `make secrets` shows `PERCEPTRON_ROBOTICS_API_KEY  yes  file  ••••xxxx` (the last 4 characters only).
 3. Verify it against the API without ever showing it. The key travels through a pipe, not the screen or `argv`. That
    matters on the shared vhagar, where other users can read `ps`. The `( ... )` subshell keeps the variable out of
    your shell afterwards.
@@ -101,8 +102,7 @@ process env  >  OS keychain (service "picky")  >  ~/.config/picky/secrets.env  >
 - A broken vault (unreadable file, locked keychain) never stops the gateway. Those keys fall through to env / `.env`,
   and a warning names the key, never the value.
 - Process-env knob (not read from `.env`): `PICKY_SECRETS_BACKEND=auto|keyring|file|off`. `auto` (default) = the
-  keychain when a usable one exists and a desktop session is present, otherwise the file. `file` forces the file,
-  `keyring` forces the keychain (Linux desktop), `off` disables the vault (env + `.env` only). A plaintext keyring
+  private file. `file` is the same, `keyring` opts into the OS keychain (macOS Keychain / Linux desktop), `off` disables the vault (env + `.env` only). A plaintext keyring
   (`keyrings.alt`) is never used, even if installed.
 
 ## Known secrets

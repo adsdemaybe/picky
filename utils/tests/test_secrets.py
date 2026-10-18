@@ -209,9 +209,12 @@ def test_auto_detection_and_backend_knob(home, repo, monkeypatch):
         return sv.Vault(home=home, repo_root=repo)
 
     monkeypatch.setattr(sys, "platform", "darwin")
-    assert fresh().mode == "keyring"  # usable backend (the pinned in-memory one)
+    assert fresh().mode == "file"  # auto = the chmod-600 file, even with a usable keychain (no password prompts)
+    monkeypatch.setenv(sv.BACKEND_ENV, "keyring")
+    assert fresh().mode == "keyring"  # keychain only on request (the pinned in-memory one)
     monkeypatch.setattr(keyring, "get_keyring", lambda: keyring.backends.fail.Keyring())
     assert fresh().mode == "file"  # keyring's "no backend" -> the file fallback
+    monkeypatch.delenv(sv.BACKEND_ENV)
     monkeypatch.setattr(keyring, "get_keyring", lambda: MemoryKeyring())
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.delenv("DISPLAY", raising=False)

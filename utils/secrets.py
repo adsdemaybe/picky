@@ -3,11 +3,11 @@
 Every secret picky knows is in :data:`REGISTRY` (fixed list; unknown names are rejected). Each name resolves, first
 hit wins::
 
-    process env  >  OS keychain (keyring, service "picky")  >  ~/.config/picky/secrets.env  >  repo .env (legacy)
+    process env  >  OS keychain (opt-in)  >  ~/.config/picky/secrets.env  >  repo .env (legacy)
 
-The keychain is the macOS Keychain on Macs (Secret Service on a Linux desktop). Where no usable keychain exists
-(headless Linux such as the GPU host), the per-user file ``~/.config/picky/secrets.env`` (dir 700, file 600) is
-used instead, automatically. ``utils.config.Settings`` reads the vault through :func:`settings_sources`, so
+By default (``PICKY_SECRETS_BACKEND=auto``) keys live in the per-user file ``~/.config/picky/secrets.env`` (dir 700,
+file 600) on every machine: an OS keychain asks for the login password once per Python binary, i.e. every venv and
+worktree. ``PICKY_SECRETS_BACKEND=keyring`` opts into the macOS Keychain (Secret Service on a Linux desktop). ``utils.config.Settings`` reads the vault through :func:`settings_sources`, so
 ``settings.anthropic_api_key`` just works; ``Settings(_env_file=None)`` stays hermetic (env + defaults only).
 
 CLI (values are never logged or printed, except by ``env``, which exists to feed ``eval``)::
@@ -425,7 +425,9 @@ class Vault:
             return self._kr_arg
         if self._kr_cache is _AUTO:
             kr = None
-            if wanted == "keyring" or not _headless_linux():
+            # Keychain only on request: an OS keychain prompts for the login password once per Python binary
+            # (every venv/worktree), so the default is the chmod-600 file (lead decision, 2026-10-18).
+            if wanted == "keyring":
                 try:
                     import keyring
 
