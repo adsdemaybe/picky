@@ -44,7 +44,7 @@ Click the markers in the same order. It prints the reprojection error and writes
 **Chat window (recommended)** — run in Terminal on the Mac that's plugged into the arm:
 
 ```bash
-cd ~/picky && export PERCEPTRON_API_KEY=sk_live_...
+cd ~/picky   # PERCEPTRON_API_KEY from the env, or a KEY=value line in ~/.config/picky/env (chmod 600, never commit)
 ~/lerobot/.venv/bin/python -m arms.robot.so101.chat          # asks "execute? [y/N]" before every motion
 ~/lerobot/.venv/bin/python -m arms.robot.so101.chat --dry    # plan only, no arm connection
 ```

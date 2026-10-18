@@ -14,6 +14,21 @@ HERE = Path(__file__).resolve().parent
 ASSETS = HERE / "assets"
 
 
+SECRETS_FILE = Path.home() / ".config" / "picky" / "env"
+
+
+def _load_secrets(path: Path = SECRETS_FILE) -> None:
+    """KEY=value lines from a private, untracked file (e.g. PERCEPTRON_API_KEY); real env vars take precedence."""
+    if path.exists():
+        for line in path.read_text().splitlines():
+            key, _, value = line.strip().partition("=")
+            if key and not key.startswith("#"):
+                os.environ.setdefault(key, value)
+
+
+_load_secrets()
+
+
 def _env(name: str, default: str) -> str:
     return os.environ.get(f"SO101_{name}", default)
 
