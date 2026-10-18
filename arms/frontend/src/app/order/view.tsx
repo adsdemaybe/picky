@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { STORES, maya, productBySku, slotsOf, type StoreId } from "@/lib/data";
+import { STORES, STORE_IDS, maya, productBySku, slotsOf, type StoreId } from "@/lib/data";
 import { startGatewayOrder } from "@/lib/gateway/tripSource";
 import { useGateway } from "@/lib/gateway/useGateway";
 import { fmt } from "@/lib/money";
@@ -121,7 +121,7 @@ function OrderBuilder() {
         <p className="mt-2 text-[16px] text-muted-foreground">Pick a store, say what you need, and it plans the shortest route past everything.</p>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Store">
-          {(Object.keys(STORES) as StoreId[]).map((id) => {
+          {STORE_IDS.map((id) => {
             const on = storeId === id;
             const grocery = STORES[id].kind === "grocery";
             return (

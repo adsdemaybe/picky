@@ -2,7 +2,7 @@
 // Typed REST client for the Picky gateway (contracts/api.md). The browser talks to FastAPI directly (the gateway
 // allows CORS from any origin): no Next proxy, no Server Actions. Types are generated (api-types.ts / events.ts).
 import type { components } from "./api-types";
-import type { ApprovalRequest, ApprovalResponse, BrainStep, ProfileUpdate, RequestPlan, RobotInfo, Trip } from "./events";
+import type { ApprovalResponse, BrainStep, ProfileUpdate, RequestPlan, RobotInfo, Trip } from "./events";
 
 export type S = components["schemas"];
 
@@ -65,7 +65,6 @@ export const gw = {
   health: () => req<S["HealthStatus"]>("/health", undefined, 2500),
   createRequest: (b: S["FleetRequest"]) => req<RequestPlan>("/api/requests", { method: "POST", body: b }, 30_000),
   trip: (id: string) => req<Trip>(`/api/trips/${enc(id)}`),
-  approvals: (tripId: string) => req<ApprovalRequest[]>(`/api/approvals${qs({ trip_id: tripId })}`),
   answer: (id: string, b: S["ApprovalDecisionRequest"]) => req<ApprovalResponse>(`/api/approvals/${enc(id)}`, { method: "POST", body: b }),
   /** start (or restart) checkout; the checkout approval arrives as approval.requested */
   checkout: (tripId: string) => req<S["CheckoutStatus"]>(`/api/trips/${enc(tripId)}/checkout`, { method: "POST" }),

@@ -5,7 +5,7 @@ import { useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { GATEWAY_URL } from "@/lib/gateway/client";
-import { useGateway } from "@/lib/gateway/useGateway";
+import { isReconnecting, useGateway } from "@/lib/gateway/useGateway";
 import { useTrip } from "@/lib/trip";
 
 export function GatewayChip() {
@@ -13,7 +13,7 @@ export function GatewayChip() {
   const following = useTrip((s) => s.source === "gateway");
   useEffect(() => useGateway.getState().startPolling(), []);
 
-  const reconnecting = following && (socket === "reconnecting" || status === "down");
+  const reconnecting = following && isReconnecting({ socket, status });
   const live = status === "live";
   const tip = live
     ? `Picky gateway ${url} · contracts ${health?.contracts_version ?? "?"} · ${health?.sim_connected ? "Isaac sim connected" : "2D robot fake"} · real arms: ${health?.real_arms.length ? health.real_arms.join(", ") : "none (all fakes)"}`

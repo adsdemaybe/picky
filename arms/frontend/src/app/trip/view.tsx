@@ -37,7 +37,8 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { STORES, maya, productBySku } from "@/lib/data";
 import { errorText, gw } from "@/lib/gateway/client";
-import { useGateway } from "@/lib/gateway/useGateway";
+import { TRIP_END_TOAST, toastLearned } from "@/lib/gateway/tripSource";
+import { isReconnecting, useGateway } from "@/lib/gateway/useGateway";
 import { fmt } from "@/lib/money";
 import { cartTotal, useTrip, type Approval, type ThinkStep } from "@/lib/trip";
 import { cn } from "@/lib/utils";
@@ -45,6 +46,7 @@ import { cn } from "@/lib/utils";
 export default function TripPage() {
   const t = useTrip();
   const router = useRouter();
+  const reconnecting = useGateway(isReconnecting);
   // /trip?trip=<id> follows that gateway trip (reload, shared link)
   const bind = (
     <Suspense fallback={null}>
@@ -56,7 +58,7 @@ export default function TripPage() {
     return (
       <>
         {bind}
-        <Planning name={t.robotName} error={t.error} onRestart={() => (t.reset(), router.push("/order"))} />
+        <Planning name={t.robotName} error={t.error} reconnecting={reconnecting} onRestart={() => (t.reset(), router.push("/order"))} />
       </>
     );
   }
@@ -146,14 +148,19 @@ function Stat({ label, value, note, tone }: { label: string; value: string; note
   );
 }
 
-/** Gateway trip, before the list and route arrive. */
-function Planning({ name, error, onRestart }: { name: string | null; error: string | null; onRestart: () => void }) {
+/** Gateway trip, before the list and route arrive (or while the gateway is out of reach). */
+function Planning({ name, error, reconnecting, onRestart }: { name: string | null; error: string | null; reconnecting: boolean; onRestart: () => void }) {
   return (
     <div className="mx-auto flex max-w-[560px] animate-rise flex-col items-center py-16 text-center">
       <LottieSlot slot="robotIdle" className="aspect-[8/7] w-[300px]" fallback={<RobotArt />} />
-      <h1 className="mt-6 text-[34px] leading-tight font-bold">{error ? "The trip couldn't start" : `${name ?? "The robot"} is planning your route`}</h1>
+      <h1 className="mt-6 text-[34px] leading-tight font-bold">
+        {error ? "The trip couldn't start" : reconnecting ? "Reconnecting to the robot" : `${name ?? "The robot"} is planning your route`}
+      </h1>
       <p className="mt-2 text-[16px] text-muted-foreground">
-        {error ?? "Reading your list, checking what's on the shelves right now, and working out the shortest way past everything."}
+        {error ??
+          (reconnecting
+            ? "The Picky gateway isn't answering right now. The trip picks up where it is as soon as it's back."
+            : "Reading your list, checking what's on the shelves right now, and working out the shortest way past everything.")}
       </p>
       {error ? (
         <Button size="lg" className="mt-6" onClick={onRestart}>
@@ -200,7 +207,7 @@ function Controls({ onRestart }: { onRestart: () => void }) {
 /** A real robot: no pause / speed / auto-answer (checkout always waits for the shopper). */
 function GatewayControls({ onRestart }: { onRestart: () => void }) {
   const { robotName, robotId, phase } = useTrip();
-  const socket = useGateway((s) => s.socket);
+  const reconnecting = useGateway(isReconnecting);
   const [stopping, setStopping] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const name = robotName ?? "the robot";
@@ -210,7 +217,7 @@ function GatewayControls({ onRestart }: { onRestart: () => void }) {
     setStopping(true);
     try {
       await gw.stopRobot(robotId);
-      toast(`${robotName ?? "The robot"} stopped`);
+      toast(`${robotName ?? "The robot"} stopped`, { id: TRIP_END_TOAST }); // the trip's failure notice replaces this
     } catch (e) {
       toast.error(`Couldn't stop ${name}: ${errorText(e)}`);
     } finally {
@@ -219,8 +226,8 @@ function GatewayControls({ onRestart }: { onRestart: () => void }) {
   };
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-2xl bg-card px-3 py-2 ring-1 ring-foreground/[0.07]">
-      <Badge variant={socket === "reconnecting" ? "amber" : "leaf"}>
-        <span className="live-dot size-1.5 rounded-full bg-current" /> {socket === "reconnecting" ? "Reconnecting" : "Live"}
+      <Badge variant={reconnecting ? "amber" : "leaf"}>
+        <span className="live-dot size-1.5 rounded-full bg-current" /> {reconnecting ? "Reconnecting" : "Live"}
       </Badge>
       <span className="text-[13.5px]">
         Live from the Picky gateway{robotName ? ` · ${robotName}` : ""}
@@ -558,7 +565,7 @@ function FollowUp({ text, sku, quick }: { text: string; sku?: string; quick: str
         channel: "web",
         tags: [],
       });
-      toast(data.changes.length ? `Picky learned: ${data.summary || data.changes[0].reason}` : "Thanks, noted for next time");
+      toastLearned(data);
     } catch (e) {
       setSent(null);
       toast.error(`Couldn't send that: ${errorText(e)}`);
@@ -696,7 +703,6 @@ function Basket() {
 }
 
 const STEP_ICON = { thought: Sparkles, tool_call: Wrench, observation: Eye, message: MessageSquare } as const;
-const CAM_NAME: Record<string, string> = { front: "front", wrist: "wrist", basket: "basket", ceiling: "ceiling" };
 
 /** The robot brain's thinking log: REST history + live brain.step (gateway trips). */
 function RobotThinking() {
@@ -726,7 +732,7 @@ function ThinkRow({ st }: { st: ThinkStep }) {
   const bad = !st.ok || st.kind === "error";
   const Icon = bad ? TriangleAlert : (STEP_ICON[st.kind as keyof typeof STEP_ICON] ?? Sparkles);
   const text = st.kind === "tool_call" && st.tool && st.text.startsWith(`${st.tool}(`) ? st.text.slice(st.tool.length + 1, -1) : st.text;
-  const cam = st.camera ? CAM_NAME[st.camera.split(".").pop() ?? ""] : undefined;
+  const cam = st.camera?.split(".").pop(); // "rover-ave-1.front" → "front"
   return (
     <motion.li
       layout

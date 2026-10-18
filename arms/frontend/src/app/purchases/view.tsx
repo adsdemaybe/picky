@@ -1,13 +1,13 @@
 "use client";
 import { ChevronDown, Star } from "lucide-react";
 import { useMemo, useState } from "react";
-import { toast } from "sonner";
 import { Money, Panel, ProductTile, SectionTitle } from "@/components/picky";
 import { SpendChart } from "@/components/SpendChart";
 import { Badge } from "@/components/ui/badge";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { MONTHLY_BUDGET_CENTS, fmtDate, maya, mostBought, productBySku, storeName, weeklyByCategory, type Purchase } from "@/lib/data";
 import { gw } from "@/lib/gateway/client";
+import { toastLearned } from "@/lib/gateway/tripSource";
 import { isLive } from "@/lib/gateway/useGateway";
 import { fmt } from "@/lib/money";
 import { usePurchases } from "@/lib/usePurchases";
@@ -187,8 +187,6 @@ function sendRating(l: Purchase, rating: number) {
   // only trips from this gateway carry a trip id it knows (see purchasesFromReceipt)
   const tripId = l.purchase_id.startsWith("pur_gw_") ? l.trip_id.replace(/^trip_maya_1017_/, "") : null;
   gw.feedback(user, { feedback_id: crypto.randomUUID(), user_id: user, sku: l.sku, trip_id: tripId, rating, text: "", channel: "web", tags: [] })
-    .then(({ data }) => {
-      if (data.changes.length) toast(`Picky learned: ${data.summary || data.changes[0].reason}`);
-    })
+    .then(({ data }) => toastLearned(data))
     .catch(() => {});
 }

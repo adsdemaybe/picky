@@ -70,3 +70,5 @@ export const useGateway = create<GatewayStore>((set, get) => ({
 }));
 
 export const isLive = () => useGateway.getState().status === "live";
+/** Selector: the followed trip's socket is retrying, or GET /health stopped answering. */
+export const isReconnecting = (s: Pick<GatewayStore, "socket" | "status">) => s.socket === "reconnecting" || s.status === "down";

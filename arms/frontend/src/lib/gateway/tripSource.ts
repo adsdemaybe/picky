@@ -35,7 +35,7 @@ import {
 } from "./adapt";
 import { GATEWAY_URL, GatewayError, errorText, gw, type S } from "./client";
 import { openEventSocket } from "./eventSocket";
-import type { ApprovalRequest, BasketCheck, BrainStep, GatewayEvent, MandateDecision, PickChoice, Pose2D, Receipt, RequestPlan, Route, Trip } from "./events";
+import type { ApprovalRequest, BasketCheck, BrainStep, GatewayEvent, MandateDecision, PickChoice, Pose2D, ProfileUpdate, Receipt, RequestPlan, Route, Trip } from "./events";
 import { useGateway } from "./useGateway";
 
 type TripApi = UseBoundStore<StoreApi<TripStore>>;
@@ -46,6 +46,8 @@ type ProductHint = { sku: string | null | undefined; name?: string | null; categ
 const NOISY = new Set(["robot.state", "brain.step", "camera.frame", "frame"]);
 const LOG_CAP = 300;
 const STEP_CAP = 300;
+/** One toast for the end of a trip: Stop robot, trip.state_changed → failed and goal.failed replace each other. */
+export const TRIP_END_TOAST = "trip-end";
 
 // ---- per-trip module state (reset by startGateway); `token` drops late results from a previous trip
 let token = 0;
@@ -106,9 +108,8 @@ export function startGateway(store: TripApi, o: FollowOptions) {
         store.getState().reset();
         return;
       }
-      // the socket keeps retrying; its snapshot hydrates the trip (and clears this) once the gateway is back
+      // the socket keeps retrying (the chip and the planning screen say "Reconnecting"); its snapshot hydrates the trip
       toast.error(`Couldn't load the trip: ${errorText(e)}`);
-      if (!store.getState().draft) store.setState({ error: `The Picky gateway didn't answer (${errorText(e)}). It keeps trying in the background.` });
     }
     if (!alive()) return;
     closeSocket = openEventSocket({
@@ -171,6 +172,12 @@ export async function startGatewayOrder(store: TripApi, o: { text: string; store
   store.getState().followGateway({ tripId, requestId: plan.request_id, robotId, mode: o.mode, title: o.title });
   const split = plan.trip_ids.length > 1 ? ` Split across ${plan.trip_ids.length} stores; following the first.` : "";
   return { kind: "following", url: `/trip?trip=${encodeURIComponent(tripId)}&request=${encodeURIComponent(plan.request_id)}&mode=${o.mode}`, reply: plan.reply + split };
+}
+
+/** "Picky learned …" once per profile change: a POST /feedback answer and the profile.updated event it triggers on
+ *  the trip socket carry the same update, so they share a toast id. */
+export function toastLearned(u: ProfileUpdate) {
+  if (u.changes.length) toast(`Picky learned: ${u.summary || u.changes[0].reason}`, { id: `learned:${u.user_id}:${u.version_after}` });
 }
 
 // ------------------------------------------------------------------------------------------------ approvals
@@ -305,7 +312,7 @@ async function apply(store: TripApi, ev: GatewayEvent) {
       if (ev.to_state === "failed") {
         patch.error = ev.reason || "The trip failed";
         patch.activeStop = null; // nothing is in progress any more (Stop robot, cancelled goal)
-        toast.error(`Trip failed: ${patch.error}`);
+        toast.error(`Trip failed: ${patch.error}`, { id: TRIP_END_TOAST });
       }
       if (atCheckout(ev.to_state) && s.stops.end) Object.assign(patch, { activeStop: "end", stopStatus: { ...s.stopStatus, end: "done" } });
       store.setState(patch);
@@ -366,7 +373,8 @@ async function apply(store: TripApi, ev: GatewayEvent) {
       if (s.robotId && rid && rid !== s.robotId) return;
       gotRobotState = true;
       moveRobot(store, st.pose, robotStatusFor(st.status, s.tripState) ?? s.robot.status, st.status === "navigating" ? 0.5 : 0);
-      if (st.error && st.error !== lastRobotError) toast.error(`${s.robotName ?? "Robot"}: ${st.error}`);
+      // once the trip is over (paid, failed, stopped) the robot's own errors aren't the shopper's business
+      if (st.error && st.error !== lastRobotError && s.phase !== "done") toast.error(`${s.robotName ?? "Robot"}: ${st.error}`);
       lastRobotError = st.error;
       return;
     }
@@ -437,7 +445,7 @@ async function apply(store: TripApi, ev: GatewayEvent) {
       return;
 
     case "profile.updated":
-      if (ev.update.changes.length) toast(`Picky learned: ${ev.update.summary || ev.update.changes[0].reason}`);
+      toastLearned(ev.update);
       return;
 
     case "goal.created":
@@ -450,7 +458,7 @@ async function apply(store: TripApi, ev: GatewayEvent) {
 
     case "goal.failed":
       store.setState({ error: ev.reason });
-      toast.error(`The robot couldn't finish: ${ev.reason}`);
+      toast.error(`The robot couldn't finish: ${ev.reason}`, { id: TRIP_END_TOAST });
       return;
 
     case "error": {
