@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Heavy, arm-specific deps: `uv sync --extra <arm>` (or `--all-extras`). Add yours here in your arm PR.
-catalog = ["psycopg[binary]>=3.2", "sqlalchemy>=2.0", "pgvector>=0.3", "duckdb>=1.0"]
+catalog = ["psycopg[binary]>=3.2", "sqlalchemy[asyncio]>=2.0", "pgvector>=0.3", "duckdb>=1.0"]  # asyncio = greenlet (SQLAlchemy 2.1 no longer pulls it in)
 perception = [
   "opencv-python-headless>=4.10,<5",
   "pillow>=10.4",
