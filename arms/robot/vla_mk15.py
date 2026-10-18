@@ -454,6 +454,8 @@ class Mk15Policy:
             parts.append(f"jaw center {ahead * 100:.0f} cm in front of the shelf face, {above:.0f} cm above the board")
         if ctx is not None and ctx.attached:
             parts.append("something is held in the gripper")
+        elif grip == "closed" and any(h.startswith("set_gripper(state=close)") for h in self.history[-2:]):
+            parts.append("the gripper closed on NOTHING (missed): open it and reach_point at the product again")
         return "; ".join(parts)
 
     def _messages(self, state: Sequence[float], side: bytes, wrist: bytes) -> list[dict[str, Any]]:
@@ -546,6 +548,14 @@ class Mk15Policy:
             return hold, f"done ({'success' if ok else 'gave up'}{note})", True
         if name == "set_gripper":
             close = str(args.get("state", "")).lower().startswith("c")
+            if close and state[5] < 10.0 and not (ctx is not None and ctx.attached):
+                # Closing an already-closed, EMPTY gripper again cannot help (measured: Mk1.5 repeated it 8 times
+                # after a missed close until the T1 budget ran out); open it so the next call can re-aim.
+                rows = [
+                    [*state[:5], state[5] + (GRIPPER_OPEN_DEG - state[5]) * (i + 1) / GRIPPER_ROWS]
+                    for i in range(GRIPPER_ROWS)
+                ]
+                return rows, "gripper was already closed on nothing: opened it again (re-aim with reach_point)", False
             target = GRIPPER_CLOSED_DEG if close else GRIPPER_OPEN_DEG
             rows = [[*state[:5], state[5] + (target - state[5]) * (i + 1) / GRIPPER_ROWS] for i in range(GRIPPER_ROWS)]
             return rows, "closed the gripper" if close else "opened the gripper", False

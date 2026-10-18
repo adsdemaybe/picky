@@ -528,3 +528,18 @@ async def test_sim_robot_routes_live_policy_pictures_and_holds_the_worker_stream
     assert [f.frame_id for f in got] == [got[0].frame_id, "w2"] and "policy-side" in got[0].frame_id
     assert all(not f.blurred and f.camera_id == f"{R1}.front" for f in got)
     await it.aclose()
+
+
+async def test_mk15_reopens_an_empty_closed_gripper_instead_of_closing_again():
+    from types import SimpleNamespace
+
+    from arms.robot.vla_mk15 import GRIPPER_OPEN_DEG
+
+    pol = Mk15Policy(client=Mk15Client(key=""), budget=CallBudget(limit=5))
+    pol.ctx = SimpleNamespace(attached=False, tcp=None)
+    pol.history = ["set_gripper(state=close) -> closed the gripper"]
+    closed = [0.0, -100.0, 90.0, 50.0, 90.0, -5.0]
+    assert "NOTHING" in pol._state_text(closed)
+    rows, outcome, done = await pol._execute("set_gripper", {"state": "close"}, closed)
+    assert not done and "opened it again" in outcome
+    assert rows[-1][5] == GRIPPER_OPEN_DEG
