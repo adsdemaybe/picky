@@ -22,6 +22,13 @@ Step kinds (``PlanStep``, discriminated on ``kind``):
     ask_user       runner    v0.2 ask path (trips.ask / approvals.request)          ask_user
     handoff        vla       unload the basket at checkout                          finish_goal (end_at checkout)
 
+Checkout unload by the arm (0.2.4): at the counter the compiler emits, PER UNIT in the basket, ground_target
+(camera='basket', ``TargetSpec.slot_id`` None) -> grasp(source='basket') -> place(destination='counter', ``counter``
+= a ``planogram.CounterSpot`` laid out left -> right) -> verify(item_on_counter + gripper empty), group
+'unload:<n>'; the final handoff then only confirms the basket is empty (BasketContains({}, exact)) before the
+payment agent runs. Backends without the primitive (``VlaCapabilities.basket_unload`` False: an Isaac worker older
+than 0.2.4) skip the unload groups and the handoff unloads the basket at once, as before.
+
 Conditions are a tiny three-valued language (atoms + all / any / not, discriminated on ``op``), evaluated by the
 verifier (``contracts.verify``): state atoms from RobotState (free), camera atoms from blurred frames (Perceptron
 in the real verifier, ground truth in the fake). ``advisory`` atoms (label_matches) fail on a confident mismatch but
@@ -61,6 +68,7 @@ from contracts.common import (
 from contracts.evidence import FrameRef
 from contracts.fleet import Goal, GoalEndAt, GoalItem
 from contracts.grounding import GroundedTarget, SlotLocation, TargetSpec
+from contracts.planogram import CounterSpot
 from contracts.tools import AskKind, NavTarget
 
 # ====================================================================================================================
@@ -221,6 +229,16 @@ class LabelMatches(_Atom):
     binding: BindingKey | None = None
 
 
+class ItemOnCounter(_Atom):
+    """0.2.4: at least ``min_count`` units of ``sku`` lie on the checkout counter (``ItemInstance.on_counter``), i.e.
+    out of the gripper and out of the basket. Camera: the front camera aimed at the counter; state: the robot's
+    counter ground truth (``StateFacts.counter_counts``)."""
+
+    op: Literal["item_on_counter"] = "item_on_counter"
+    sku: Sku
+    min_count: int = Field(1, ge=1)
+
+
 class ShelfTagReads(_Atom):
     op: Literal["shelf_tag_reads"] = "shelf_tag_reads"
     slot_id: SlotId
@@ -261,6 +279,7 @@ Atom = (
     | LabelMatches
     | ShelfTagReads
     | ApprovalGranted
+    | ItemOnCounter
 )
 Condition = Annotated[Atom | AllOf | AnyOf | NotCond, Field(discriminator="op")]
 AllOf.model_rebuild()
@@ -278,6 +297,7 @@ ATOM_SOURCES: dict[str, tuple[AtomSource, ...]] = {
     "gripper_empty": ("camera", "state"),
     "basket_delta": ("camera", "state"),
     "basket_contains": ("camera", "state"),
+    "item_on_counter": ("camera", "state"),
     "slot_visible": ("camera",),
     "item_on_shelf": ("camera",),
     "label_matches": ("camera",),
@@ -295,6 +315,7 @@ ATOM_DEFAULT_CAMERAS: dict[str, tuple[RobotCameraKind, ...]] = {
     "gripper_empty": ("wrist", "front"),
     "basket_delta": ("basket",),
     "basket_contains": ("basket",),
+    "item_on_counter": ("front",),
     "label_matches": ("wrist",),
     "shelf_tag_reads": ("front",),
 }
@@ -487,6 +508,11 @@ class GroundTargetStep(_StepBase):
 
 class GraspStep(_StepBase):
     kind: Literal["grasp"] = "grasp"
+    source: Literal["shelf", "basket"] = Field(
+        "shelf",
+        description="0.2.4: 'basket' = take a unit OUT of the robot's own basket at the checkout counter (unload); "
+        "nothing commits on it and no mandate / drop-off gate runs. Needs VlaCapabilities.basket_unload.",
+    )
     target: TargetSpec
     binding: BindingKey | None = Field(None, description="Grounding to aim with (T1 needs it; T0 uses the slot).")
     instruction: str = Field(description="Language instruction for T1/T2: 'pick up the mild salsa jar'.")
@@ -497,12 +523,14 @@ class GraspStep(_StepBase):
 class PlaceStep(_StepBase):
     kind: Literal["place"] = "place"
     sku: Sku
-    destination: Literal["basket", "shelf"] = Field(
+    destination: Literal["basket", "shelf", "counter"] = Field(
         "basket",
         description="'shelf' = put a wrong unit back (needs VlaCapabilities.place_back; v0.2 RobotService has no "
-        "place-back primitive, so only the 2D fake's fault overlay supports it tonight).",
+        "place-back primitive, so only the 2D fake's fault overlay supports it tonight). 'counter' (0.2.4) = put the "
+        "held unit on the checkout counter at ``counter`` (unload; commits 'unload_to_counter' only).",
     )
     slot_id: SlotId | None = Field(None, description="destination='shelf': where to put it back.")
+    counter: CounterSpot | None = Field(None, description="destination='counter' (0.2.4): the free spot to use.")
     instruction: str = "put the item in the basket"
     tier: VlaTierPref = "auto"
 
@@ -572,13 +600,19 @@ def default_conditions(
     expect_text: str | None = None,
     goal_pose: Pose2D | None = None,
     basket_counts: dict[Sku, int] | None = None,
+    source: Literal["shelf", "basket"] = "shelf",
+    destination: Literal["basket", "shelf", "counter"] = "basket",
+    counter_count: int = 1,
 ) -> tuple[Condition | None, Condition | None]:
     """THE default (pre, post) per step kind. The planner's compiler attaches these; the LLM never writes conditions.
     Camera-only sanity checks (shelf in view after align, item on the shelf before grounding) are ADVISORY: a confident
     camera 'no' fails the step, but a check that cannot be made (verifier down, camera blocked) never blocks it.
 
     Place posts list ``gripper_empty`` BEFORE ``basket_delta``: a place that never released is diagnosed
-    'place_not_released' (retry the place), not 'dropped' (which would re-pick while still holding)."""
+    'place_not_released' (retry the place), not 'dropped' (which would re-pick while still holding).
+
+    0.2.4 checkout unload: ``source='basket'`` grasp = (gripper free) -> (holding sku + basket -1 sku);
+    ``destination='counter'`` place = (holding sku) -> (released + ``counter_count`` x sku on the counter)."""
     at: list[Any] = [RobotAt(pose=approach_pose, note="at the shelf")] if approach_pose is not None else []
     if kind == "navigate_to":
         post = RobotAt(pose=goal_pose, note="arrived") if goal_pose is not None else None
@@ -592,6 +626,20 @@ def default_conditions(
             ItemOnShelf(slot_id=slot_id, sku=sku, advisory=True, note="item on the shelf") if slot_id and sku else None
         )
         return pre, TargetGrounded(binding=binding, note="target located")
+    if kind == "grasp" and sku and source == "basket":
+        return GripperEmpty(note="gripper free"), AllOf(
+            of=[
+                GripperHolding(sku=sku, note=f"holding {sku}"),
+                BasketDelta(sku=sku, delta=-1, note=f"-1 {sku} out of the basket"),
+            ]
+        )
+    if kind == "place" and sku and destination == "counter":
+        return GripperHolding(sku=sku, note=f"holding {sku}"), AllOf(
+            of=[
+                GripperEmpty(note="released"),
+                ItemOnCounter(sku=sku, min_count=max(1, counter_count), note=f"{sku} on the counter"),
+            ]
+        )
     if kind == "grasp" and sku:
         pre_parts: list[Any] = [*at, GripperEmpty(note="gripper free")]
         if slot_id:
@@ -718,7 +766,8 @@ class DraftStep(Model):
         description="fetch_item = drive to the item, look, pick every remaining unit, put them in the basket (needs "
         "item_id) · scan_shelf = look at a shelf without picking (needs slot_id) · ask_user = ask the shopper (needs "
         "question; item_id when it is about an item) · navigate_to = drive somewhere (target checkout/dock/entrance) "
-        "· checkout = basket audit + drive to checkout + hand off (always last) · verify_basket = basket audit only."
+        "· checkout = basket audit + drive to checkout + the arm unloads every unit onto the counter (find it in the "
+        "basket, grasp, place on the counter, verify) + hand off (always last) · verify_basket = basket audit only."
     )
     item_id: ItemId | None = Field(None, description="A goal item id copied EXACTLY from the item list.")
     slot_id: SlotId | None = Field(None, description="scan_shelf only: a slot id from the item list.")
@@ -741,6 +790,9 @@ DRAFT_MACROS: dict[str, tuple[StepKind, ...]] = {
     "checkout": ("verify", "navigate_to", "handoff"),
     "verify_basket": ("verify",),
 }
+UNLOAD_UNIT_MACRO: tuple[StepKind, ...] = ("ground_target", "grasp", "place", "verify")
+"""0.2.4: per unit at the checkout counter, between the checkout navigate_to and the handoff: ground the unit in the
+basket (basket camera) -> grasp(source='basket') -> place(destination='counter') -> verify it is on the counter."""
 """Compile templates. fetch_item: optional item -> ask_user(recommendation) first; produce -> ask_user(pick_choice)
 after scan_shelf; units = qty - picked_qty, each extra unit repeats EXTRA_UNIT_MACRO."""
 EXTRA_UNIT_MACRO: tuple[StepKind, ...] = ("ground_target", "grasp", "place")

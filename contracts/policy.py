@@ -600,6 +600,7 @@ EffectKind = Literal[
     "online_line",  # mark_unavailable: trips.add_line(source='online')
     "return_to_shelf",  # a wrong unit put back: nothing but a log (it never left the store count)
     "unload_basket",  # robot.unload_basket at checkout (the VLA handoff did it)
+    "unload_to_counter",  # 0.2.4: one unit taken out of the basket and verified on the checkout counter
 ]
 COMMIT_ON_VERIFIED: dict[str, tuple[EffectKind, ...]] = {
     "navigate_to": ("stop_arrived",),
@@ -611,7 +612,8 @@ COMMIT_ON_VERIFIED: dict[str, tuple[EffectKind, ...]] = {
 """Per step kind, committed only after the postcondition PASSED (or was accepted provisionally). Holding is not buying:
 nothing commits on grasp. place(destination='shelf') commits only 'return_to_shelf'. add_cart_line fires once per
 item (when its last unit is verified in the basket). Plan mode only: in tools mode the v0.2 brain executor applies its
-own v0.2 side effects after a VERIFIED tool outcome."""
+own v0.2 side effects after a VERIFIED tool outcome. 0.2.4: place(destination='counter') commits only
+'unload_to_counter' (the unit was bought already; nothing touches stock or the cart)."""
 
 
 class EffectRecord(Model):

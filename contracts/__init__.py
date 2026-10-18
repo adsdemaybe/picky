@@ -109,7 +109,10 @@ from contracts.events import (
     LOOP_P0_EVENT_TYPES,
     THROTTLED_EVENT_TYPES,
     WS_FILTER_KEYS,
+    CheckoutUnload,
     Event,
+    ItemVerificationEvent,
+    PaymentAgentStepEvent,
     event_matches,
     goal_envelope,
     make_event,
@@ -190,6 +193,7 @@ from contracts.plan import (
     STEP_EXECUTORS,
     STEP_KIND_ALIASES,
     TIER_PREFERENCE,
+    UNLOAD_UNIT_MACRO,
     VLA_STEP_KINDS,
     AlignStep,
     AllOf,
@@ -207,6 +211,7 @@ from contracts.plan import (
     GripperHolding,
     GroundTargetStep,
     HandoffStep,
+    ItemOnCounter,
     ItemOnShelf,
     LabelMatches,
     NavigateToStep,
@@ -244,6 +249,7 @@ from contracts.planogram import (
     Aisle,
     CategoriesFile,
     CategoryDef,
+    CounterSpot,
     Fixture,
     FixturesFile,
     OnlineCatalog,
@@ -253,6 +259,7 @@ from contracts.planogram import (
     RobotSpec,
     Slot,
     StoreCameraSpec,
+    counter_spots,
 )
 from contracts.policy import (
     ACTION_INSERTS,
@@ -318,6 +325,7 @@ from contracts.sim import (
     ARM_IK_CAPABILITY,
     ARM_JOINTS_CAPABILITY,
     ARM_JOINTS_MAX_STEPS,
+    BASKET_UNLOAD_CAPABILITY,
     POLICY_CAMERAS,
     ArmIkCmd,
     ArmJointsCmd,
@@ -327,6 +335,8 @@ from contracts.sim import (
     IkSolution,
     IkTarget,
     ItemInstance,
+    PickFromBasketCmd,
+    PlaceOnCounterCmd,
     PolicyFrame,
     RobotError,
     RobotState,
@@ -365,6 +375,7 @@ from contracts.tools import (
 )
 from contracts.trip import Trip
 from contracts.trust import (
+    PAYMENT_SANDBOX_LABEL,
     ApprovalKind,
     ApprovalRequest,
     ApprovalResponse,
@@ -372,10 +383,12 @@ from contracts.trust import (
     CartMandate,
     CheckoutRequest,
     IntentMandate,
+    ItemVerification,
     MandateDecision,
     MandateReason,
     MandateVerdict,
     MandateViolation,
+    PaymentAgentStep,
     Receipt,
     TransparencyEntry,
     TrustLedger,
@@ -420,7 +433,7 @@ from contracts.vla import (
     resolve_tier,
 )
 
-CONTRACTS_VERSION = "0.2.3"
+CONTRACTS_VERSION = "0.2.4"
 
 __all__ = [
     "ACTION_INSERTS",
@@ -428,6 +441,19 @@ __all__ = [
     "APPROACH_DIST_MIN_M",
     "ARM_IK_CAPABILITY",
     "ARM_JOINTS_CAPABILITY",
+    "BASKET_UNLOAD_CAPABILITY",
+    "PAYMENT_SANDBOX_LABEL",
+    "UNLOAD_UNIT_MACRO",
+    "CheckoutUnload",
+    "CounterSpot",
+    "ItemOnCounter",
+    "ItemVerification",
+    "ItemVerificationEvent",
+    "PaymentAgentStep",
+    "PaymentAgentStepEvent",
+    "PickFromBasketCmd",
+    "PlaceOnCounterCmd",
+    "counter_spots",
     "ARM_JOINTS_MAX_STEPS",
     "ARM_MOUNT_X_M",
     "ARM_NAMES",

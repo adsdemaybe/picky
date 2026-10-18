@@ -21,7 +21,7 @@ from contracts.skill_server import SO101_JOINT_NAMES
 
 
 def test_version_is_a_patch_so_0_2_workers_still_connect():
-    assert contracts.CONTRACTS_VERSION == "0.2.3"
+    assert contracts.CONTRACTS_VERSION == "0.2.4"
     assert versions_compatible("0.2.1", contracts.CONTRACTS_VERSION)
     assert versions_compatible("0.2.0", contracts.CONTRACTS_VERSION)
 

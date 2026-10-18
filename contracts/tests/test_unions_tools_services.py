@@ -96,6 +96,10 @@ EXPECTED_EVENT_TYPES = {
     "plan.completed",
     "demo.fault",
     "camera.overlay",
+    # judges' demo (0.2.4)
+    "checkout.unload",
+    "item.verification",
+    "payment.agent_step",
 }
 
 
