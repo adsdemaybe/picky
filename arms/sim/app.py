@@ -63,7 +63,7 @@ from arms.sim.assets import (
     rover_usd_from_env,
 )
 from arms.sim.geometry import ARM_FULL_EXT_M, ARM_STOW_EXT_M, NEAR_CLIP_M, CameraPose
-from arms.sim.labels import label_png, sign_png
+from arms.sim.labels import label_png, package_kind, package_png, sign_png
 from arms.sim.scene_spec import (
     LIFT_REF_M,
     PrimSpec,
@@ -408,6 +408,21 @@ class IsaacBackend:
         if key in self._materials:
             return self._materials[key]
         product = spec.products.get(sku)
+        kind = package_kind(product.subcategory, product.tags) if product else None
+        if product and kind:  # retail package front, pixels in the box face's aspect
+            w, _, h = product.asset.dims_m
+            png = package_png(
+                text or sku,
+                kind=kind,
+                brand=product.brand,
+                size=product.size,
+                price_cents=price_cents,
+                barcode=barcode,
+                color=color,
+                px=(320, round(320 * h / w)),
+            )
+            self._materials[key] = self._texture_material(key, png) if png else self._color_material(color)
+            return self._materials[key]
         png = label_png(
             text or sku,
             brand=product.brand if product else None,
@@ -668,7 +683,9 @@ class IsaacBackend:
         self._bind(body.GetPrim(), self._color_material(prim.color))
         if prim.shape != "sphere" and spec is not None:
             w, d, h = prim.size
-            hw, hh, y = w * 0.46, h * 0.42, -d / 2 - 0.0015
+            product = spec.products.get(prim.sku or "")
+            packaged = product is not None and package_kind(product.subcategory, product.tags) is not None
+            hw, hh, y = (w * 0.5, h * 0.5, -d / 2 - 0.0008) if packaged else (w * 0.46, h * 0.42, -d / 2 - 0.0015)
             mesh = UsdGeom.Mesh.Define(self.stage, f"{prim.path}/label")
             mesh.CreatePointsAttr(
                 [Gf.Vec3f(-hw, y, -hh), Gf.Vec3f(hw, y, -hh), Gf.Vec3f(hw, y, hh), Gf.Vec3f(-hw, y, hh)]

@@ -68,3 +68,19 @@ def test_decor_and_signs_are_visual_only(spec):
     assert {p.label_text for p in decor if p.role == "sign"} >= {"T-Mobile", "Accessories"}
     assert all(not p.collider for p in decor)
     assert len(spec.instances) == sum(min(s.qty, 120) for s in load_planogram(STORE).slots)
+
+
+def test_wireless_accessories_get_retail_packages():
+    from arms.sim.labels import package_image, package_kind
+
+    products = load_products()
+    kinds = {sku: package_kind(p.subcategory, p.tags) for sku, p in products.items() if p.category == "wireless"}
+    assert kinds["IP17PRO-256"] is None  # phones are 3D models, not boxes
+    assert kinds["CASE-IP16-MAG"] == "cases"
+    assert kinds["CBL-USBC-2M"] == "cables" and kinds["PB-10K"] == "power_banks" and kinds["CHG-20W"] == "chargers"
+    assert package_kind("produce", ()) is None
+    p = products["CASE-IP16-MAG"]
+    img = package_image(
+        p.name, kind="cases", brand=p.brand, price_cents=p.price_cents, barcode=p.barcode, px=(320, 608)
+    )
+    assert img is not None and img.size == (320, 608)
