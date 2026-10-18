@@ -397,3 +397,48 @@ async def test_fleet_from_data_dir_when_present():
     cams = robot.camera_ids(store_id="store_ave")
     assert "store_ave.ceiling-1" in cams and "rover-ave-1.front" in cams
     jpeg(await robot.capture_camera("store_ave.ceiling-1"))
+
+
+async def test_checkout_unload_basket_to_counter(services):
+    """0.2.4: the arm takes a unit out of the basket and puts it on the counter; the handoff bags the counter."""
+    from contracts.common import Point3
+
+    robot = fast(services, strict_reach=False)
+    assert robot.can_unload_to_counter(R1)
+    await robot.pick(R1, "S-salsa", "salsa-mild")
+    await robot.place_in_basket(R1)
+    with pytest.raises(RobotError) as exc:
+        await robot.place_on_counter(R1, Point3(x=1, y=1, z=0.9))
+    assert exc.value.code == "no_instance"  # empty gripper
+    held = await robot.pick_from_basket(R1, "salsa-mild")
+    st = await robot.state(R1)
+    assert st.holding == held.instance_id and st.basket == []
+    with pytest.raises(RobotError) as exc:
+        await robot.pick_from_basket(R1, "salsa-mild")
+    assert exc.value.code == "grasp_failed"  # gripper busy
+    spot = Point3(x=st.pose.x + 0.4, y=st.pose.y, z=0.9)
+    await robot.place_on_counter(R1, spot, 0.0, 0)
+    units = [u for u in await robot.list_instances(R1) if u.on_counter]
+    assert [u.instance_id for u in units] == [held.instance_id] and not units[0].in_basket
+    assert (await robot.state(R1)).holding is None
+    with pytest.raises(RobotError) as exc:
+        await robot.pick_from_basket(R1, "salsa-mild")
+    assert exc.value.code == "no_instance"  # basket empty now
+    bagged = await robot.unload_basket(R1)
+    assert [u.instance_id for u in bagged] == [held.instance_id]
+    assert not [u for u in await robot.list_instances(R1) if u.on_counter]
+
+
+async def test_place_on_counter_reach_check(services):
+    from contracts.common import Point3
+
+    robot = fast(services, strict_reach=False)
+    await robot.pick(R1, "S-salsa", "salsa-mild")
+    await robot.place_in_basket(R1)
+    await robot.pick_from_basket(R1, "salsa-mild")
+    strict = robot
+    strict.strict_reach = True
+    st = await strict.state(R1)
+    with pytest.raises(RobotError) as exc:
+        await strict.place_on_counter(R1, Point3(x=st.pose.x + 3.0, y=st.pose.y, z=0.9))
+    assert exc.value.code == "grasp_failed"
