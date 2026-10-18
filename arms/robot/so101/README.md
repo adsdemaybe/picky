@@ -29,6 +29,22 @@ lerobot-find-cameras opencv
 export SO101_PORT=/dev/ttyACM0 SO101_CAMERA=0
 ```
 
+## Grounding backend: self-hosted (default for the team) or Perceptron API
+
+`detect()` uses the **self-hosted Isaac-0.2-1B server** whenever `PICKY_VLM_URL` is set, otherwise the Perceptron API
+(`PERCEPTRON_API_KEY`; the team key currently returns *QuotaExceeded*). Both read from `~/.config/picky/env`.
+
+```bash
+# on caraxes (RTX 5090), venv /data/picky/vlm: torch cu128, transformers==4.56.2, fastapi, uvicorn, pillow
+cd /data/picky && HF_HOME=/data/picky/hf nohup vlm/bin/python vlm_server.py --host 127.0.0.1 --port 8765     > vlm_server.log 2>&1 &
+# on the robot Mac (~/.config/picky/env)
+PICKY_VLM_URL=http://100.93.119.54:8765
+```
+
+caraxes runs Tailscale in userspace mode, so the server binds `127.0.0.1` and tailnet traffic still reaches it
+(no exposure to the campus network). Measured: ~2 s for target + basket including the network hop, boxes within
+~2 px on a synthetic test frame; 2.5 GB VRAM. Model license: CC-BY-NC-4.0 (fine for the hackathon, not commercial).
+
 ## Calibrate the table (once per camera placement)
 
 Tape 4 markers on the table, measure each one's (x forward, y left) in meters from the centre of the SO-101 base, then:
