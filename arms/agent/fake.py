@@ -1,5 +1,7 @@
 """Deterministic, rule-based AgentService (base deps only, no LLM).
 
+- interpret_request: keyword rules (``interpret.py``): shop (list = expand_intent's), shelf_scan, return_to_dock,
+  fetch (staff), status / chat, needs_input for vague requests; robot / store / category / aisle hints.
 - expand_intent: regex parse of the demo phrases ('tacos for 6, under $40, one vegetarian') + catalog search at call
   time for SKU guesses (personalized by the profile, so trip 2 ranks a spicier salsa first after feedback).
 - source_list: deterministic split sourcing (in store -> robot, OOS / online-only -> online order).
@@ -14,8 +16,9 @@ import re
 from typing import Any
 
 from arms.agent import logic
-from contracts.common import ONLINE_STORE_ID, Channel, StoreId, money
+from contracts.common import ONLINE_STORE_ID, Channel, StoreId, UserId, money
 from contracts.events import make_event
+from contracts.fleet import RequestDraft, RequesterRole
 from contracts.messaging import InboundMessage, OutboundMessage, ReplyInterpretation
 from contracts.profile import UserProfile
 from contracts.services import Services
@@ -43,6 +46,22 @@ class FakeAgent:
         self._ids = IdFactory("agent-fake")
 
     # -- planning ------------------------------------------------------------------------------------------------
+    async def interpret_request(
+        self,
+        text: str,
+        user_id: UserId,
+        store_id: StoreId | None = None,
+        *,
+        role: RequesterRole = "shopper",
+        profile: UserProfile | None = None,
+        history: list[str] | None = None,
+    ) -> RequestDraft:
+        from arms.agent.interpret import interpret_rules
+
+        return await interpret_rules(
+            self._services.catalog, text, user_id, store_id, role=role, profile=profile, history=history
+        )
+
     async def expand_intent(self, intent: Intent, profile: UserProfile | None = None) -> ShoppingList:
         return await logic.expand_intent_rules(self._services.catalog, intent, profile)
 
