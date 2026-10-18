@@ -90,10 +90,30 @@ def _grab_via_terminal(cfg: RigConfig, timeout: float = 25.0) -> np.ndarray | No
     return frame
 
 
+def _grab_msmf(cfg: RigConfig) -> np.ndarray | None:
+    src = resolve_camera(cfg.camera_index)
+    if not isinstance(src, int):
+        return None
+    cap = cv2.VideoCapture(src, cv2.CAP_MSMF)
+    ok, frame = False, None
+    for _ in range(10):
+        ok, f = cap.read()
+        frame = f if ok else frame
+    cap.release()
+    return frame if ok else None
+
+
 def grab_frame(cfg: RigConfig) -> np.ndarray:
     frame = _grab_direct(cfg)
     if frame is None and sys.platform == "darwin":
         frame = _grab_via_terminal(cfg)
+    if frame is None and sys.platform == "win32":
+        frame = _grab_msmf(cfg)
+        if frame is None:
+            raise RuntimeError(
+                f"camera {cfg.camera_index} returned no frame - it is probably open in another app (Windows Camera, "
+                "Discord/Teams/Zoom video, OBS). Close that app and retry; check SO101_CAMERA in ~/.config/picky/env."
+            )
     if frame is None:
         raise RuntimeError(
             f"camera {cfg.camera_index} returned no frame. On macOS allow camera access for this terminal app "
