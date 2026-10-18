@@ -114,6 +114,10 @@ export type Handoff = {
   /** who drives the arm: "Scripted skill" / "SmolVLA" (gateway step tier), null = the replay */
   tier: string | null;
   startedAt: number;
+  /** checkout.unload (0.2.4): the backend's line for the current unit ("Unloading 3/9: Mild Chunky Salsa → counter ✓") */
+  text?: string;
+  n?: number;
+  total?: number;
 };
 type CheckoutApproval = Extract<Approval, { kind: "checkout" }>;
 export type RobotStatus = "idle" | "driving" | "scanning" | "picking" | "unloading" | "waiting" | "done";

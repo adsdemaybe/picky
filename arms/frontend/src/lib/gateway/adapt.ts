@@ -320,6 +320,7 @@ const UI_KIND: Record<ApprovalRequest["kind"], string> = {
   substitution: "question",
   online_order: "question",
   question: "question",
+  verify_item: "check",
 };
 
 /** approvalsLog row (same answer vocabulary as the replay: yes/no, approve/decline, the chosen instance). */

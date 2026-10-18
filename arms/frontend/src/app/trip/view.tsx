@@ -431,11 +431,19 @@ function QuestionBody({ a, answer }: { a: Extract<Approval, { kind: "question" }
       </div>
       <div className="flex flex-wrap gap-2">
         {a.options.length ? (
-          a.options.map((o) => (
-            <Button key={o.id} size="lg" variant="outline" onClick={() => answer(o.id)} title={o.detail}>
-              {o.label}
-            </Button>
-          ))
+          <>
+            {a.options.map((o) => (
+              <Button key={o.id} size="lg" variant="outline" onClick={() => answer(o.id)} title={o.detail}>
+                {o.label}
+              </Button>
+            ))}
+            {/* "Want any of these before checkout?" (multi): saying no is an answer too */}
+            {a.multi && (
+              <Button size="lg" variant="ghost" onClick={() => answer("no")}>
+                No thanks
+              </Button>
+            )}
+          </>
         ) : (
           <>
             <Button variant="outline" size="lg" onClick={() => answer("no")}>

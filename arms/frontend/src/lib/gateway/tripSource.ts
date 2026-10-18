@@ -91,7 +91,9 @@ let tweenTimer: ReturnType<typeof setInterval> | null = null;
 /** the gateway sent its own purchase checks on this trip: no client-side ones from then on */
 let gatewayChecks = false;
 /** loop steps seen (step.started) by step_id: step.completed only carries the id */
-let loopSteps = new Map<string, { sku: string | null; handoff: boolean }>();
+let loopSteps = new Map<string, { sku: string | null; handoff: boolean; phase: "grasp" | "place" | "other" }>();
+/** the gateway sends checkout.unload (0.2.4): it drives the per-unit handoff, the loop steps only the whole-basket one */
+let unloadEvents = false;
 /** the robot's basket as of the last robot.state (basket_skus, 0.2.1+) */
 let lastBasket: string[] | null = null;
 // shared across trips
@@ -119,6 +121,7 @@ export function startGateway(store: TripApi, o: FollowOptions) {
   lastRobotError = null;
   gatewayChecks = false;
   loopSteps = new Map();
+  unloadEvents = false;
   lastBasket = null;
   const alive = () => my === token;
 
@@ -402,7 +405,71 @@ const TIER: Record<string, string> = { t0_scripted: "Scripted skill", t1_pretrai
 function isHandoffStep(st: Record<string, unknown>) {
   const kind = String(st.kind ?? "");
   const dest = String(st.destination ?? st.at ?? "");
-  return /handoff|unload|counter/.test(kind) || (kind === "place" && /counter|checkout/.test(dest));
+  return /handoff|unload|counter/.test(kind) || (kind === "place" && /counter|checkout/.test(dest)) || (kind === "grasp" && st.source === "basket");
+}
+
+/** The SKU a loop step works on: place steps carry `sku`, grasp steps `target.sku`. */
+function stepSku(st: Record<string, unknown>): string | null {
+  if (typeof st.sku === "string" && st.sku) return st.sku;
+  const t = st.target as { sku?: unknown } | undefined;
+  return t && typeof t.sku === "string" && t.sku ? t.sku : null;
+}
+
+/** Start (or keep) the active handoff: one unit per basket item, as of now. */
+function activeHandoff(store: TripApi, tier: unknown): Handoff | null {
+  const s = store.getState();
+  if (s.handoff?.status === "active") return s.handoff;
+  const units = basketUnits(store);
+  if (!units.length) return null;
+  ensureProducts(store, units.map((u) => ({ sku: u.sku })));
+  return { status: "active", units, tier: TIER[String(tier ?? "")] ?? null, startedAt: Date.now() };
+}
+
+/** One unit of `sku` from the basket into the gripper (no-op when one of that SKU is already held). */
+function toGripper(h: Handoff, sku: string): Handoff {
+  if (h.units.some((u) => u.sku === sku && u.state === "arm")) return h;
+  const i = h.units.findIndex((u) => u.sku === sku && u.state === "basket");
+  return i >= 0 ? { ...h, units: h.units.map((u, j) => (j === i ? { ...u, state: "arm" as const } : u)) } : h;
+}
+
+/** The held unit of `sku` (else one still in the basket) onto the counter. */
+function toCounter(units: HandoffUnit[], sku: string): HandoffUnit[] {
+  const i = units.findIndex((u) => u.sku === sku && u.state === "arm");
+  const j = i >= 0 ? i : units.findIndex((u) => u.sku === sku && u.state === "basket");
+  return j >= 0 ? units.map((u, k) => (k === j ? { ...u, state: "counter" as const } : u)) : units;
+}
+
+/** checkout.unload (0.2.4, the agent's per-unit unload): started = the arm takes the unit out of the basket, placed /
+ *  verified = it is on the counter, done = the basket is empty. `text` is the backend's line ("Unloading 3/9: Mild
+ *  Chunky Salsa → counter ✓"). */
+function applyCheckoutUnload(store: TripApi, raw: Record<string, unknown>) {
+  unloadEvents = true;
+  const s = store.getState();
+  const status = String(raw.status ?? "");
+  const sku = typeof raw.sku === "string" && raw.sku ? raw.sku : null;
+  const text = typeof raw.text === "string" && raw.text ? raw.text : undefined;
+  let h = activeHandoff(store, "t0_scripted");
+  if (!h) {
+    if (s.handoff && text) store.setState({ handoff: { ...s.handoff, text } });
+    return;
+  }
+  h = { ...h, text: text ?? h.text, n: Number(raw.n ?? h.n ?? 0) || h.n, total: Number(raw.total ?? h.total ?? 0) || h.total };
+  if (status === "started" || status === "grasped") {
+    if (sku) h = toGripper(h, sku);
+    store.setState({ handoff: h, robot: { ...s.robot, status: "unloading", speed: 0 }, ...(s.stops.end ? { activeStop: "end" } : {}) });
+    return;
+  }
+  if (status === "placed" || status === "verified") {
+    const units = sku ? toCounter(h.units, sku) : h.units;
+    return finishHandoff(store, h, units);
+  }
+  if (status === "skipped" || status === "failed") {
+    // the unit stays in the basket (staff take it out): back out of the gripper
+    const units = h.units.map((u) => (u.sku === sku && u.state === "arm" ? { ...u, state: "basket" as const } : u));
+    store.setState({ handoff: { ...h, units } });
+    return;
+  }
+  if (status === "done") return finishHandoff(store, h, h.units.map((u) => (u.state === "basket" && lastBasket?.length === 0 ? { ...u, state: "counter" as const } : u)), true);
 }
 
 /** What is in the basket right now, one row per unit (robot.state basket_skus, else the in-store cart). */
@@ -416,8 +483,8 @@ function basketUnits(store: TripApi): HandoffUnit[] {
   });
 }
 
-function finishHandoff(store: TripApi, h: Handoff, units: HandoffUnit[]) {
-  const done = units.every((u) => u.state === "counter");
+function finishHandoff(store: TripApi, h: Handoff, units: HandoffUnit[], final = false) {
+  const done = units.every((u) => u.state === "counter") || (final && !units.some((u) => u.state === "arm"));
   const s = store.getState();
   store.setState({ handoff: { ...h, units, status: done ? "done" : "active" }, ...(done && s.robot.status === "unloading" ? { robot: { ...s.robot, status: "idle" } } : {}) });
 }
@@ -429,21 +496,15 @@ function applyLoopStep(store: TripApi, raw: Record<string, unknown>) {
   const s = store.getState();
   if (raw.type === "step.started") {
     const st = (raw.step && typeof raw.step === "object" ? raw.step : {}) as Record<string, unknown>;
-    const sku = typeof st.sku === "string" ? st.sku : null;
+    const sku = stepSku(st);
     const handoff = isHandoffStep(st);
-    loopSteps.set(String(st.step_id ?? ""), { sku, handoff });
+    const phase = st.kind === "grasp" ? "grasp" : st.kind === "place" ? "place" : "other";
+    loopSteps.set(String(st.step_id ?? ""), { sku, handoff, phase });
     if (!handoff) return;
-    let h: Handoff | null = s.handoff?.status === "active" ? s.handoff : null;
-    if (!h) {
-      const units = basketUnits(store);
-      if (!units.length) return;
-      ensureProducts(store, units.map((u) => ({ sku: u.sku })));
-      h = { status: "active", units, tier: TIER[String(raw.tier ?? "")] ?? null, startedAt: Date.now() };
-    }
-    if (sku) {
-      const i = h.units.findIndex((u) => u.sku === sku && u.state === "basket");
-      if (i >= 0) h = { ...h, units: h.units.map((u, j) => (j === i ? { ...u, state: "arm" as const } : u)) };
-    }
+    // checkout.unload drives the per-unit unload; the steps only start the panel (and the whole-basket handoff)
+    let h = activeHandoff(store, raw.tier);
+    if (!h) return;
+    if (sku && !unloadEvents) h = toGripper(h, sku);
     store.setState({ handoff: h, robot: { ...s.robot, status: "unloading", speed: 0 }, ...(s.stops.end ? { activeStop: "end" } : {}) });
     return;
   }
@@ -452,12 +513,9 @@ function applyLoopStep(store: TripApi, raw: Record<string, unknown>) {
     const h = s.handoff;
     if (!info?.handoff || !h || h.status !== "active") return;
     if (raw.status !== "succeeded" && raw.status !== "provisional") return;
-    let units = h.units;
-    if (info.sku) {
-      const i = units.findIndex((u) => u.sku === info.sku && u.state === "arm");
-      const j = i >= 0 ? i : units.findIndex((u) => u.sku === info.sku && u.state === "basket");
-      if (j >= 0) units = units.map((u, k) => (k === j ? { ...u, state: "counter" as const } : u));
-    } else units = units.map((u) => ({ ...u, state: "counter" as const }));
+    if (info.phase === "grasp") return; // the unit is in the gripper until its place step completes
+    if (info.sku && unloadEvents) return; // checkout.unload moves it
+    const units = info.sku ? toCounter(h.units, info.sku) : h.units.map((u) => ({ ...u, state: "counter" as const }));
     finishHandoff(store, h, units);
   }
 }
@@ -470,13 +528,14 @@ function syncHandoffBasket(store: TripApi, skus: string[]) {
   for (const sku of skus) left.set(sku, (left.get(sku) ?? 0) + 1);
   const units = [...h.units];
   for (const sku of new Set(units.map((u) => u.sku))) {
-    const off = units.filter((u) => u.sku === sku && u.state !== "counter").length - (left.get(sku) ?? 0);
+    // a held unit (gripper) has left the basket but is not on the counter yet: only basket units are compared
+    const off = units.filter((u) => u.sku === sku && u.state === "basket").length - (left.get(sku) ?? 0);
     if (off <= 0) continue;
     const order = units
       .map((u, i) => ({ u, i }))
-      .filter(({ u }) => u.sku === sku && u.state !== "counter")
-      .sort((a, b) => (a.u.state === "arm" ? -1 : 0) - (b.u.state === "arm" ? -1 : 0) || a.i - b.i);
-    for (const { i } of order.slice(0, off)) units[i] = { ...units[i], state: "counter" };
+      .filter(({ u }) => u.sku === sku && u.state === "basket");
+    // per-unit unload (checkout.unload): the unit leaving the basket goes to the gripper; whole-basket handoff: counter
+    for (const { i } of order.slice(0, off)) units[i] = { ...units[i], state: unloadEvents ? "arm" : "counter" };
   }
   if (units.some((u, i) => u !== h.units[i])) finishHandoff(store, h, units);
 }
@@ -660,6 +719,7 @@ async function apply(store: TripApi, ev: GatewayEvent) {
   if (raw.type === "payment.agent_step") return applyPayStep(store, raw);
   if (raw.type === "item.verification") return applyItemVerification(store, raw);
   if (raw.type === "step.started" || raw.type === "step.completed") return applyLoopStep(store, raw);
+  if (raw.type === "checkout.unload") return applyCheckoutUnload(store, raw);
   switch (ev.type) {
     case "trip.created":
       return hydrate(store, ev.trip);

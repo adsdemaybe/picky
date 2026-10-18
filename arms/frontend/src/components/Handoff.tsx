@@ -53,7 +53,13 @@ export function HandoffPanel({ className }: { className?: string }) {
           {counter.length} of {h.units.length}
         </span>
       </div>
-      <p className="mt-1 text-[14px] text-muted-foreground">{who} takes each item out of the basket and sets it on the checkout counter.</p>
+      {h.text ? (
+        <p className="tabular mt-1 text-[15px] font-semibold text-foreground" data-testid="unload-text">
+          {h.text}
+        </p>
+      ) : (
+        <p className="mt-1 text-[14px] text-muted-foreground">{who} takes each item out of the basket and sets it on the checkout counter.</p>
+      )}
       <LayoutGroup id="handoff">
         <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-2">
           <Column title="Basket" icon={ShoppingBasket} units={basket} empty="Empty" />
