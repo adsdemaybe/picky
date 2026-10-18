@@ -189,7 +189,10 @@ the VLA + verifier are wired), `PICKY_PLAN_TIMEOUT_S` (20), `PICKY_VERIFY_TIMEOU
 - Photo cards: after every shelf grasp a wrist photo goes to the shopper (`item.verification`, approval kind
   `verify_item`); wrong → the `wrong_item` recovery (put back + re-pick); silence → auto-accepted. Produce review
   options carry cropped blurred photos; timeout → the #1 freshness pick (labelled best guess).
-- Limitation: a "wrong" on a backend without put-back (Isaac) is noted and the unit kept for staff.
+- No put-back (Isaac): a "wrong" unit (or a grasp of another unit than the shopper chose) is set aside in the basket,
+  never charged, and another unit is grabbed; the checkout unload still puts it on the counter in basket order
+  ("Unloading 1/2: … (set aside for staff, not charged)", its counter card says not charged and stays off the
+  purchase photos).
 
 ## Known limitations
 

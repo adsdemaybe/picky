@@ -84,7 +84,8 @@ class FakeEvidenceCameras:
         geom = await self._slots(store_id)
         facing = self.facing(geom, st.pose)
         wanted = [sid for sid in [*slot_ids, *facing] if sid and sid in geom]
-        taken = {st.holding, *st.basket}
+        counter = [u for u in units if u.on_counter]
+        taken = {st.holding, *st.basket, *(u.instance_id for u in counter)}
         slots: dict[str, SlotTruth] = {}
         for sid in dict.fromkeys(wanted):
             g = geom[sid]
@@ -107,6 +108,7 @@ class FakeEvidenceCameras:
             battery_pct=st.battery_pct,
             holding=holding,
             basket=basket,
+            counter=counter,
             slots=slots,
             visible_slots={robot_camera_id(robot_id, "front"): facing},
             labels=labels,
