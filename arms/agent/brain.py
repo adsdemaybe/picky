@@ -535,31 +535,44 @@ class _BrainBase:
 
         query = m.group("q").strip()
         try:
-            hits = await catalog.search(SearchQuery(text=query, store_ids=[store_id], limit=3))
+            hits = await catalog.search(SearchQuery(text=query, store_ids=[store_id], limit=6))
         except Exception:  # noqa: BLE001 - the shopper still gets an answer
             return None
         if not hits:
-            return f"Sorry, I couldn't find {query} in this store."
-        hit = hits[0]
+            return f"Hmm, I couldn't find any {query} here, sorry. Want me to look for something similar?"
+        words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2]
+
+        def fit(h: Any) -> tuple:
+            """'the honey' -> Wildflower Honey before Honey Oat Clusters Cereal: the thing asked for is the noun."""
+            name = _say(h.product.name)
+            covered = sum(w.rstrip("s") in name for w in words)
+            head = bool(words) and name.split()[-1].rstrip("s") == words[-1].rstrip("s")
+            sub = (h.product.subcategory or "").replace("_", " ")
+            return (covered, head or (bool(words) and words[-1].rstrip("s") in sub), -len(name))
+
+        hit = max(hits[:6], key=fit)
         p = hit.product
         offer = hit.offer_for(store_id)
-        words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2]
         exact = all(w.rstrip("s") in p.name.lower() for w in words)
-        lead = "" if exact else f"I don't see {query} exactly; the closest is "
+        lead = "" if exact else f"I don't think we carry {query}, but the closest thing is "
         if cheaper:
             return await self._cheaper(p, offer, store_id, lead)
         if ingr:
             return _ingredients_reply(p, lead, ingr.groupdict().get("ask") or "", text)
         locs = await catalog.get_locations(p.sku, store_id)
+        name = _say(p.name)
         if not locs:
-            return f"We don't carry {p.name} in this store."
+            return f"{lead or 'Sorry, '}we don't carry {name} at this store. I can check what else we have, though."
         loc = locs[0]
         where, shelf = await self._shelf_words(loc, store_id)
-        price = f" It's ${offer.price_cents / 100:.2f}" if offer is not None else ""
-        stock = ""
-        if offer is not None:
-            stock = f", {offer.qty} on the shelf" if offer.qty > 0 else ", but it's out of stock right now"
-        return f"{lead}{p.name} is in {where}, {shelf}.{price}{stock}. Want me to take you there?"
+        if offer is not None and offer.qty <= 0:
+            return f"{lead}{name} usually lives in {_aisle(where)}, {shelf}, but we're out right now, sorry about that."
+        price = f" It's {_money(offer.price_cents)}." if offer is not None else ""
+        spot = shelf if shelf.startswith("on ") else f"in {_aisle(where)}, {shelf}"
+        if lead:  # "I don't think we carry X, but the closest thing is the Y. It's on ..."
+            return f"{lead}the {name}. It's {spot}.{price} Want me to walk you over?"
+        opener = _pick(p.sku, ("Sure! ", "Of course! ", "Yes, we have it! ", "Good question! "))
+        return f"{opener}{_cap(f'the {name} {_is(name)} {spot}')}.{price} Want me to walk you over?"
 
     async def _shelf_words(self, loc: Any, store_id: str) -> tuple[str, str]:
         fx = None
@@ -590,19 +603,17 @@ class _BrainBase:
             alts.append((o.price_cents, h.product, o))
         alts.sort(key=lambda a: a[0])
         if not alts:
-            return f"{lead}{p.name} (${base / 100:.2f}) is already the cheapest of its kind here."
+            return f"{lead}Good news: at {_money(base)}, the {_say(p.name)} is already the best price for that here."
         cents, alt, _o = alts[0]
         locs = await catalog.get_locations(alt.sku, store_id)
         where = ""
         if locs:
             aisle, shelf = await self._shelf_words(locs[0], store_id)
-            where = f" It's in {aisle}, {shelf}."
-        more = (
-            f" I also see {len(alts) - 1} other cheaper option{'s' if len(alts) > 2 else ''}." if len(alts) > 1 else ""
-        )
+            where = f" You'll find it in {_aisle(aisle)}, {shelf}."
+        more = " There's another cheaper option too, if you'd like to hear it." if len(alts) > 1 else ""
         return (
-            f"{lead}{p.name} is ${base / 100:.2f}. {alt.name} is ${cents / 100:.2f}, "
-            f"saving ${(base - cents) / 100:.2f}.{where}{more} Want me to grab it or take you there?"
+            f"{lead}Smart thinking! The {_say(p.name)} is {_money(base)}, but the {_say(alt.name)} is {_money(cents)}, "
+            f"so you'd save {_money(base - cents)}.{where}{more} Want me to grab it, or walk you over?"
         )
 
     async def _look(self, rt: BrainRuntime, goal: Goal | None, question: str, store_id: str | None) -> str | None:
@@ -646,11 +657,11 @@ class _BrainBase:
         if robot is not None:
             with contextlib.suppress(Exception):
                 st = await robot.state(rt.robot_id)
-                batt = f", battery {st.battery_pct:.0f}%" if st.battery_pct is not None else ""
-                at = f"{st.status.value} at ({st.pose.x:.1f}, {st.pose.y:.1f})"
-                where = "charging on my dock" if st.charging else at
-                return f"I'm free: {where}{batt}. Send me a goal!"
-        return "I'm free right now. Send me a goal!"
+                charge = ""
+                if st.battery_pct is not None:
+                    charge = " and fully charged" if st.battery_pct >= 95 else f" with {st.battery_pct:.0f}% battery"
+                return f"Hi! I'm free right now{charge}. What can I help you find?"
+        return "Hi! I'm free right now. What can I help you find?"
 
 
 def _is_mirror(step: BrainStep) -> bool:
@@ -868,22 +879,74 @@ def _ingredients_reply(p: Any, lead: str, ask: str, text: str) -> str:
     items = info.get("ingredients") or []
     allergens = sorted({*(p.allergens or []), *(info.get("allergens") or [])})
     diet = re.search(r"vegan|vegetarian|gluten[- ]free|dairy[- ]free|nut[- ]free|halal|kosher", text, re.I)
+    name = _say(p.name)
+    heads_up = f" Just so you know, it contains {_and(allergens)}." if allergens else ""
     if diet:
-        want = diet.group(0).lower().replace(" ", "_").replace("-", "_")
-        yes = want in (p.dietary or []) or want in (p.tags or [])
-        return f"{lead}{p.name} is {'' if yes else 'not marked '}{diet.group(0).lower()}." + (
-            f" Allergens: {', '.join(allergens)}." if allergens else ""
-        )
+        label = diet.group(0).lower().replace("-", " ")
+        want = label.replace(" ", "_")
+        if want in (p.dietary or []) or want in (p.tags or []):
+            return f"{lead}Yes, the {name} is {label}!{heads_up}"
+        return f"{lead}It isn't marked {label}, so I'd play it safe and skip the {name}.{heads_up}"
     if ask.strip():
         word = ask.strip().lower().rstrip("s")
         hay = " ".join(items + allergens).lower()
-        hit = word in hay or (word in ("nut", "peanut", "tree nut") and "nut" in hay)
-        return f"{lead}{p.name} {'does' if hit else 'does not'} list {ask.strip()}" + (
-            f" (allergens: {', '.join(allergens)})." if allergens else "."
-        )
+        if word in hay or (word in ("nut", "peanut", "tree nut") and "nut" in hay):
+            return f"{lead}Careful: the {name} does list {ask.strip()}."
+        return f"{lead}Good news, the {name} doesn't list any {ask.strip()}.{heads_up}"
     if not items:
-        return f"{lead}I don't have the ingredient list for {p.name} yet."
-    src = f" (from {info.get('matched_product')} on Open Food Facts)" if info.get("matched_product") else ""
-    shown = ", ".join(items[:12]) + (" and more" if len(items) > 12 else "")
-    extra = f" Allergens: {', '.join(allergens)}." if allergens else ""
-    return f"{lead}{p.name}: {shown}{src}.{extra}"
+        return f"{lead}Sorry, I don't have the ingredients for the {name} yet. The package label will list them."
+    if len(items) == 1:
+        return f"{lead}It's just {items[0].lower()}, nothing else added."
+    shown = [re.sub(r"^(and|or)\s+", "", i[:1].lower() + i[1:]) for i in items[:8]]
+    rest = " and a few other things" if len(items) > 8 else ""
+    return f"{lead}{_cap(f'the {name} {_is(name)} made with')} {_and(shown)}{rest}.{heads_up}"
+
+
+def _say(name: str) -> str:
+    """'Mild Chunky Salsa 16 oz' -> 'mild chunky salsa' (how a person says it)."""
+    s = re.sub(r"\(.*?\)", " ", name)
+    s = re.sub(r"\b\d+(\.\d+)?\s*(oz|fl oz|lb|lbs|ct|g|kg|ml|l|gal|pk|pack|count|sticks?)\b", " ", s, flags=re.I)
+    s = re.sub(r"\b(half gallon|1 gal|glass)\b", " ", s, flags=re.I)
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+def _is(name: str) -> str:
+    """'is' / 'are' for a spoken product name ('tortilla chips are', 'salsa is')."""
+    last = name.split()[-1] if name.split() else ""
+    plural = last.endswith("s") and not last.endswith(("ss", "us", "is")) and last not in ("hummus", "molasses")
+    return "are" if plural else "is"
+
+
+def _money(cents: int) -> str:
+    dollars, c = divmod(int(cents), 100)
+    if dollars == 0:
+        return f"{c} cents"
+    return f"${dollars}" if c == 0 else f"${dollars}.{c:02d}"
+
+
+def _and(items: list[str]) -> str:
+    items = [i for i in items if i]
+    if len(items) <= 1:
+        return "".join(items)
+    return ", ".join(items[:-1]) + f" and {items[-1]}"
+
+
+def _aisle(where: str) -> str:
+    """'Aisle 3 - International & Mexican, Canned' -> 'aisle 3, with the international & Mexican food'."""
+    head, _, rest = where.partition(" - ")
+    if head.lower().startswith("aisle") and rest:
+        return f"{head.lower()}, with the {rest.split(',')[0].strip().lower().replace('mexican', 'Mexican')} items"
+    if head.lower().startswith("back wall") and rest:
+        return f"the {rest.strip().lower()} section along the back wall"
+    return where[:1].lower() + where[1:] if where else "the store"
+
+
+def _pick(key: str, options: tuple[str, ...]) -> str:
+    """A stable bit of variety: the same product always gets the same phrasing."""
+    import zlib
+
+    return options[zlib.crc32(key.encode()) % len(options)]
