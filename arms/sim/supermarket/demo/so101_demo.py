@@ -118,6 +118,19 @@ def R_to_quat(R) -> list:
     return [float(w), float(x), float(y), float(z)]
 
 
+def slerp_R(R0, R1, s: float) -> np.ndarray:
+    q0, q1 = np.array(R_to_quat(R0)), np.array(R_to_quat(R1))
+    d = float(q0 @ q1)
+    if d < 0:
+        q1, d = -q1, -d
+    if d > 0.9995:
+        q = q0 + s * (q1 - q0)
+    else:
+        th = math.acos(d)
+        q = (math.sin((1 - s) * th) * q0 + math.sin(s * th) * q1) / math.sin(th)
+    return quat_to_R(*(q / np.linalg.norm(q)))
+
+
 def box_corners(lo, hi) -> np.ndarray:
     return np.array([[x, y, z, 1.0] for x in (lo[0], hi[0]) for y in (lo[1], hi[1]) for z in (lo[2], hi[2])])
 
@@ -127,6 +140,34 @@ SIDE_N = {"west": (-1.0, 0.0), "east": (1.0, 0.0), "south": (0.0, -1.0), "north"
 
 def r2(v, n=3):
     return [round(float(x), n) for x in v]
+
+
+def ik_natural(kin: RoverKinematics, p, R, roll=None, w_rot=0.1, tol=(0.003, 0.05), extra_seeds=()):
+    """IK over many seeds; among the solutions within tol pick the most natural posture: elbow well above the
+    shoulder and the upper arm leaning towards the target (not folded back behind the riser). (q, err) or best-effort"""
+    pan0 = kin._pan_seed(np.asarray(p, float))
+    r0 = kin.grasp_roll if roll is None else roll
+    seeds = [list(s_) for s_ in extra_seeds]
+    seeds += [
+        [pan0, lift, el, wr, r0] for lift in (-0.5, -0.1, 0.3, 0.7) for el in (0.4, 1.0, 1.5) for wr in (-0.5, 0.5)
+    ]
+    best, best_any = None, None
+    for sd_ in seeds:
+        q, e = kin.solve(p, R=R, roll=roll, w_rot=w_rot, seeds=[sd_])
+        if best_any is None or e[0] + 0.05 * e[1] < best_any[1][0] + 0.05 * best_any[1][1]:
+            best_any = (q, e)
+        if e[0] > tol[0] or e[1] > tol[1]:
+            continue
+        L = kin.links(q)
+        sh, el = L["so101_upper_arm"][:3, 3], L["so101_lower_arm"][:3, 3]
+        # horizontal direction from the pan axis to the target
+        d = np.asarray(p, float)[:2] - sh[:2]
+        d = d / (np.linalg.norm(d) + 1e-9)
+        lean = float((el[:2] - sh[:2]) @ d)  # elbow towards the target (+) or behind the shoulder (-)
+        score = (el[2] - sh[2]) + 0.6 * min(lean, 0.0)
+        if best is None or score > best[0]:
+            best = (score, q, e)
+    return (best[1], best[2]) if best else best_any
 
 
 # --- shopping list: products the SO-101 can grasp, parked parallel to the shelf ---------------------------------------
@@ -207,7 +248,7 @@ class Catalog:
         roll = self.kin.grasp_roll + (math.pi if flip else 0.0)
         front = p.depth - depth_len / 2  # aisle face of the product, from the fixture face
         along = (width / 2 - 0.0005) * (-1.0 if flip else 1.0)  # fixed jaw: robot-forward side (default roll)
-        for standoff in (max(0.37, front + 0.36), max(0.40, front + 0.39), front + 0.43):
+        for standoff in (max(0.48, front + 0.36), max(0.44, front + 0.36), max(0.52, front + 0.40), front + 0.43):
             if standoff > 0.56:
                 continue
             xy, yaw = side_pose(p.center, side, standoff, self.pan_x, along)
@@ -747,6 +788,7 @@ class Mission:
         self.drop_k = 0
         self.eff_max = {n: 0.0 for n in ARM + ["gripper"]}
         self.stats = {"grasp_ok": 0, "grasp_fail": 0, "in_basket": 0, "missed_basket": 0, "replans": 0}
+        self.tracked: set[str] = set()  # products that have moved (logged per frame)
         self.FJ = np.array(self.K["fixed_jaw_points"])
         self.MJ = np.array(self.K["moving_jaw_points"])
         self._jaw_table()
@@ -803,8 +845,13 @@ class Mission:
             path, rel = self.held
             q_pred = {n: self.qm[n] + self.cmd_v.get(n, 0.0) * DT for n in self.qm}
             self.io.set_body_T(path, self.world_gripper(q_pred) @ rel)
+        capture = (self.k + 1) % 2 == 0
+        if capture and self.director is not None:  # camera for the frame this step renders
+            q = self.qm
+            self.drift = min(self.drift + 0.0005, 0.12) if self.director.mode == "hold" else 0.0
+            self.director.update(q["base_x"], q["base_y"], q["base_yaw"], self.drift)
         if self.rec is not None:
-            self.rec.render((self.k + 1) % 2 == 0)
+            self.rec.render(capture)
         self.io.update()
         self.t += DT
         self.k += 1
@@ -816,19 +863,24 @@ class Mission:
                     self.eff_max[n] = max(self.eff_max[n], abs(v))
         if self.k % 2 == 0:
             q = self.qm
-            if self.director is not None:
-                self.drift = min(self.drift + 0.00025, 0.12) if self.director.mode == "hold" else 0.0
-                self.director.update(q["base_x"], q["base_y"], q["base_yaw"], self.drift)
             if self.rec is not None:
                 self.rec.capture()
+            moved = {}
+            for p in self.tracked:
+                T = self.io.body_T(p)
+                moved[p] = r2(T[:3, 3], 4) + [round(v, 4) for v in R_to_quat(T[:3, :3])]
+            d = self.director
             self.frames.write(
                 json.dumps(
                     {
                         "f": (self.rec.frame - 1) if self.rec else self.k // 2,
                         "t": round(self.t, 3),
                         "phase": self.gphase,
-                        "shot": self.director.shot if self.director else 0,
-                        "mode": self.director.mode if self.director else "",
+                        "shot": d.shot if d else 0,
+                        "mode": d.mode if d else "",
+                        "cam": [r2(d.eye), r2(d.tgt), round(d.focal, 2)] if d and d.eye is not None else None,
+                        "q": [round(q[n], 4) for n in ARM + ["gripper"]],
+                        "moved": moved,
                         "rovers": [
                             {
                                 "name": NAME,
@@ -909,6 +961,35 @@ class Mission:
         if g is not None:
             d["gripper"] = float(g)
         return d
+
+    def cart_path(self, q0, q1, n=14, bulge=0.04):
+        """joint waypoints q0 -> q1 along a Cartesian blend (TCP position lerp + a small lift, tool rotation slerp),
+        each IK seeded by the previous one so the arm stays on one branch: no elbow flips mid-move. None if a waypoint
+        is unreachable."""
+        T0, T1 = self.kin.fk(q0), self.kin.fk(q1)
+        q = np.array(q0, float)
+        out = [q.copy()]
+        for s_ in np.linspace(0, 1, n)[1:]:
+            p = (1 - s_) * T0[:3, 3] + s_ * T1[:3, 3] + np.array([0, 0, bulge * math.sin(math.pi * s_)])
+            R = slerp_R(T0[:3, :3], T1[:3, :3], s_)
+            q, e = self.kin.solve(p, R=R, w_rot=0.25, seeds=[q])
+            if e[0] > 0.01 or e[1] > 0.12:
+                return None
+            out.append(q.copy())
+        return out
+
+    def move_cart(self, q1, n=14, bulge=0.04, vscale=0.75):
+        """Cartesian-blend move from the end of the queued trajectory to q1 (joint move if the blend fails);
+        returns the final joint vector"""
+        q0 = np.array([self._last(ARM)[n_] for n_ in ARM])
+        path = self.cart_path(q0, q1, n=n, bulge=bulge)
+        if path is None:
+            self.plan_move(self.arm_dict(q1), vscale=vscale)
+            return np.array(q1, float)
+        dq = np.abs(np.diff(np.array(path), axis=0)).sum(axis=0)
+        T = max(0.8, float(np.max(1.875 * dq / (vscale * self.kin.vmax))) * 1.1)
+        self.plan_path(path, T=T)
+        return np.array(path[-1], float)
 
     def line(self, q_start, p0, p1, R, n=10):
         out = self.kin.line(q_start, p0, p1, R=R, n=n, w_rot=0.1)
@@ -1076,6 +1157,7 @@ class Mission:
         }
 
     def attach(self, path):
+        self.tracked.add(path)
         if self.io.make_dynamic(path):
             self.step()
         self.io.set_gravity(path, False)
@@ -1113,10 +1195,10 @@ class Mission:
             off_x = 0.002 - width / 2 - 0.0015
             c_grip = c_w + a_w * shift
             tcp = (Tbi @ np.r_[c_grip, 1.0])[:3] - R[:, 0] * off_x
-            qg, e = self.kin.solve(tcp, R=R, roll=roll, w_rot=0.1)
+            qg, e = ik_natural(self.kin, tcp, R, roll=roll)
             if e[0] > 0.003 or e[1] > math.radians(3):
                 continue
-            far_d = max(0.15, min(dl / 2, GRIP_IN) + 0.10)
+            far_d = max(0.12, min(dl / 2, GRIP_IN) + 0.09)
             far = tcp - a_b * far_d
             qf, ef = self.kin.solve(far, R=R, w_rot=0.1, seeds=[qg])
             if ef[0] > 0.004:
@@ -1125,7 +1207,7 @@ class Mission:
             if err_in > 0.004:
                 continue
             up = tcp + np.array([0, 0, 0.025])
-            back = up - np.array([a_b[0], a_b[1], 0.0]) / max(np.linalg.norm(a_b[:2]), 1e-6) * (far_d + 0.08)
+            back = up - np.array([a_b[0], a_b[1], 0.0]) / max(np.linalg.norm(a_b[:2]), 1e-6) * far_d
             return {
                 "R": R,
                 "tcp": tcp,
@@ -1282,18 +1364,25 @@ class Mission:
             lift = max(0.0, bk["rim_z"] + 0.05 - float(cb[:, 2].min()))
             p_hi = np.array([xy[0], xy[1], z_tcp + lift])
             q_hi, e_hi = self.kin.solve(p_hi, R=R, w_rot=0.25, seeds=[q_drop])
-            line_dn, _ = self.line(q_hi, p_hi, np.array([xy[0], xy[1], z_tcp]), R, n=6)
         else:
-            q_hi, line_dn = q_drop, [q_drop, q_drop]
-        # carry pose on the right side (same fold, pan rotated 90 deg towards the shelf), then the swing
+            q_hi = q_drop
+        # carry pose on the right side (the high drop pose with the pan turned 90 deg towards the shelf), reached by a
+        # Cartesian blend from the retract pose (tool turns from horizontal to pointing down), then the pan swing
         q_side = np.array(q_hi, float)
         q_side[0] = q_hi[0] - math.pi / 2
-        self.plan_move(self.arm_dict(q_side), vscale=0.8)
+        q_end = self.move_cart(q_side, n=16, bulge=0.05)
         self.wait_arm()
         self.sub = "swing to the basket"
-        self.plan_move({"shoulder_pan": float(q_hi[0])}, vscale=0.85)
+        q_sw = np.array(q_end, float)
+        q_sw[0] = q_hi[0]
+        self.plan_move({"shoulder_pan": float(q_sw[0])}, vscale=0.85)
         self.wait_arm()
         self.sub = "lower into the basket"
+        if R is not None:
+            p_sw = self.kin.fk(q_sw)[:3, 3]
+            line_dn, _ = self.line(q_sw, p_sw, np.array([xy[0], xy[1], z_tcp]), R, n=8)
+        else:
+            line_dn = [q_sw, q_sw]
         self.plan_path(line_dn, T=0.9)
         self.wait_arm()
         self.wait(0.15)
@@ -1442,8 +1531,9 @@ class Mission:
         q_side = np.array(qs[-1], float)
         q_side[0] = q_up[0]
         self.plan_move(self.arm_dict(q_side), vscale=0.85)
-        self.plan_move(self.arm_dict(q_up), vscale=0.8)
+        q_up = self.move_cart(q_up, n=10, bulge=0.03)
         self.wait_arm()
+        p_up = self.kin.fk(q_up)[:3, 3]
         dn, _ = self.line(q_up, p_up, np.array([spot_b[0], spot_b[1], z_tcp]), R2, n=6)
         self.plan_path(dn, T=0.8)
         self.wait_arm()
