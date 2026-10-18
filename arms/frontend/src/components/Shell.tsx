@@ -1,5 +1,5 @@
 "use client";
-import { Bot, ChartPie, House, LogOut, ScanSearch, Search, ShieldHalf, Sparkles, Video } from "lucide-react";
+import { Bot, ChartPie, House, LogOut, ScanSearch, Search, ShieldHalf, Sparkles, Store, Video } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -126,6 +126,16 @@ export function TopBar() {
             <DropdownMenuItem asChild>
               <Link href="/permissions">
                 <ShieldHalf /> Rules and privacy
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/staff">
+                <Store /> Store staff (live stock)
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link href="/fleet">
+                <Bot /> Fleet (robots and goals)
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem disabled>
