@@ -48,6 +48,187 @@ Demo loop: drive to a shelf → N → jog with ↑/↓ until the gripper is at a
 | `robot/finalize_usd.py` | flattens `mujoco-usd-converter` output, adds PhysX joint drives |
 | `tools/fetch_geniesim.py` | downloads one scene + only the assets it references (0.4 GB instead of 29 GB) |
 | `setup_linux.sh` / `run_sim.sh` | one-shot install / launch |
+| `robot/solve_arm_ik.py` | MuJoCo IK tables for the demo (gripper level at any shelf height; reach into the basket) → `demo/arm_ik.json` |
+| `demo/store_map.py` | store map from the stage: products, fixtures, sections, top-down height map, occupancy grid, A* |
+| `demo/planner.py` | Gemini route planner (plan + replan), JSONL log of every request/response, no key in logs |
+| `demo/autopilot.py` | `--demo`: rovers execute the plan (drive, pick, basket, checkout), cameras, frame recorder |
+| `demo/edit_video.py` | cuts a recorded run into the demo video (captions, mini-map, gripper PiP, cards) |
+| `demo/demo_config.json` | robots + spawns, checkout counter + slots, overview camera, optional fixed shopping list |
+| `robot/build_so101_rover.py` | robot v3 USD: PMB2 base + fixed riser + long-reach SO-101 (cut + carbon-tube extensions, reducers) + round wire basket + cameras, one articulation; writes `.kin.json` (chain, actuators, torque budget, jaw points) |
+| `robot/setup_so101_rover.sh` | fetches SO-ARM100 + pmb2_robot at pinned commits, makes the tools venv, builds the USD, runs the reach check |
+| `robot/so101_ik.py` / `robot/urdf_tree.py` | numpy FK/IK (DLS) for the long-reach chain; minimal URDF reader |
+| `robot/reach_check.py` | reach table (shelf heights × standoffs, body clearance), basket drop, torque budget |
+| `robot/preview_so101_rover.py` / `robot/validate_so101_rover.py` / `robot/make_validation_video.py` | studio renders; supermarket validation run (sweeps, diff drive, IK pick with jaw check, basket drop); review video + pick clip |
+
+## Autopilot demo (`--demo`): Gemini plans the route, the rovers shop
+
+The rover's navigation brain is an LLM: before driving, the app builds a **store map from the scene** (every product
+prim's world box grouped into sections by the shelf it sits on, shelf/fixture boxes plus an orthographic top-down
+**depth render** as obstacles — that catches pillars and walls that are only in the building mesh — the rover
+spawns and the checkout counter) and sends Gemini the shopping list + a compact map (sections, obstacle boxes, a
+0.25 m ASCII occupancy picture). Gemini splits the list between the rovers, orders each route and gives a one-line
+reason per leg. The rovers then **execute** that plan: grid A* (0.05 m, inflated by the rover's footprint) between
+stops, driven through the same swerve command path as the keyboard (`cmd` → wheels steer and spin, kinematic base).
+A stop that fails (approach spot blocked, no path, product not at the gripper) goes back to Gemini with what
+happened and the product's alternatives (same SKU elsewhere) for a **replan**. Every LLM call is logged to
+`<out>/llm_log.jsonl` (model, latency, prompt, response; never the key).
+
+Per pick (Suraj's arm + grab, nothing learned): IK-table pre-grasp 11 cm in front of the product at its height →
+straight slide in → measure the gripper↔product error in the sim and correct it (arm x/z + a sideways base strafe)
+→ close → `grab(target, keep_offset=True)`: the product that is actually at the gripper (≤ 5 cm, checked) is
+attached **where it is** — never snapped/teleported to the gripper → lift, retract → B pose → release (gravity drops
+it into the basket). Settled basket items then ride with the base (re-posed with it every step: the kinematic base is
+teleported, which friction can't carry). Checkout: drive to the counter, take each item out of the basket (IK into
+the basket, same attach rule), put it on the counter, "paid".
+
+```bash
+# on vhagar (Isaac Sim 6.0 standalone; key in ~/.config/picky/secrets.env as GEMINI_API_KEY)
+PY=/data/advaiv2/isaacsim/python.sh; D=/data/advaiv2/picky-suraj
+$PY arms/sim/supermarket/teleop_app.py --scene $D/geniesim/background/supermarket/supermarket_06/background.usda \
+    --robot $D/build/rm2_basket.usd --demo --robots 2 --max-items 12 --record --out $D/runs/full
+# --plan-only: build the map + ask Gemini, write plan.json / topdown.jpg, exit (fast iteration on the config)
+$D/tools/bin/python arms/sim/supermarket/demo/edit_video.py $D/runs/full $D/video   # needs pillow, imageio[ffmpeg]
+```
+
+Recording: replicator render products + `rgb` annotators (chase cam per rover, wrist cam per rover, side tracking cam,
+overview, intro/outro orbit), one frame every 2 physics steps (30 fps of sim time), JPEGs written by a thread pool;
+cameras the edit doesn't need in a phase are switched off. The scene is `supermarket_06` (10 sections: snacks,
+drinks, cleaning, paper goods, personal care, …); fetch it with `tools/fetch_geniesim.py --scene supermarket_06`
+(its dome-light HDR is not referenced as a USD layer, so fetch `background/common/HDR/*.hdr` too).
+
+## Picky SO-101 rover v3 (robot): PMB2 round base + long-reach Hiwonder SO-ARM101 + circular wire basket
+
+Replaces the rm2_car/AIRBOT robot after review feedback ("the arm doesn't move like in real life, parts of the arm
+disappear"), then two design rounds from the lead: no lift/mast ("a roller to raise the robot is weird": a short fixed
+riser + a longer arm instead), and a bigger round base with a round wire basket that matches it.
+
+| v1 problem | cause | v3 |
+|---|---|---|
+| parts vanish at some angles | OBJ→STL→USD meshes with inconsistent/flipped winding, single-sided | every STL cleaned, winding made consistent + outward per body (signed volume), 35° crease normals authored, `doubleSided = true`, `subdivisionScheme = none`, UsdPreviewSurface, no LODs |
+| robot looks like boxes | DISCOVERSE ships no chassis meshes, primitives used | real meshes: exact SO-101 + exact PAL PMB2 parts; riser, arm extensions, reducers and basket generated as real geometry |
+| arm motion unrealistic | preset-to-preset jumps through stiff drives | min-jerk trajectories within each actuator's speed limit (1.0–1.5 rad/s), position **and** velocity targets, arm links with gravity held by drives capped at the actuator torque, reflected rotor inertia as armature |
+| product teleported onto the gripper | attach snapped the product to the gripper | close the moving jaw until it meets the product (jaw mesh points vs product box), attach only if it is between the jaws, keep its relative pose; release = gravity into the basket; it rides along by friction |
+
+### Design and sources
+
+| part | source | license |
+|---|---|---|
+| **Arm: SO-101 follower** (every STL, joint origin/axis/limit, wrist camera mount) | [TheRobotStudio/SO-ARM100 `Simulation/SO101/so101_new_calib_camera.urdf`](https://github.com/TheRobotStudio/SO-ARM100/tree/main/Simulation/SO101) @ `a758567` | Apache-2.0 |
+| look: Hiwonder LeRobot SO-ARM101 follower = this open design, white PLA prints + black bus servos (HX-30HM, 30 kg·cm, 0.19 s/60°, 1:345), gripper camera | [hiwonder.com/products/lerobot-so-101](https://www.hiwonder.com/products/lerobot-so-101), [Hiwonder docs](https://docs.hiwonder.com/projects/LeRobot/en/latest/), [Hiwonder-official/hiwonder-SoArm-101](https://github.com/Hiwonder-official/hiwonder-SoArm-101) | — |
+| **Base: PAL Robotics PMB2** (TIAGo base): shell, bumper ring, dock contacts, 2 drive wheels, 4 casters, poses from the xacros | [pal-robotics/pmb2_robot `pmb2_description`](https://github.com/pal-robotics/pmb2_robot/tree/humble-devel/pmb2_description) @ `e658413` | Apache-2.0 |
+| riser, arm extensions (carbon tubes + printed couplers), reducer drums, basket, camera bodies | generated in `build_so101_rover.py` | (ours) |
+| STS3250 servo data (50 kg·cm stall / 16 kg·cm rated @12 V, 0.133 s/60°, 74.5 g, 45.2×24.7×35 mm = STS3215 case) | [evelta.com STS3250](https://evelta.com/sts3250-12v-50kg-360deg-magnetic-encoder-double-shaft-ttl-servo/), [openelab STS3250-C002](https://openelab.io/products/feetech-sts3250-c002-servo-12v) | — |
+
+Base candidates considered: LeKiwi (official SO-101 base, but 0.3 m and 3 small omni wheels: too small for a grocery
+basket), TurtleBot 4 / Create 3 and Kobuki (~0.34–0.35 m: too small), Fetch base (~0.56 m, but COLLADA meshes and no
+licence file GitHub detects on `fetch_ros`), **PMB2 (0.54 m, Apache-2.0, STL meshes, diff drive + 4 casters) → picked**.
+
+**Layout** (robot frame x forward, origin on the floor at the base centre):
+- **Base**: PMB2, footprint radius 0.269 m (bumper ring), top 0.297 m, wheel radius 0.0985 m, separation 0.4044 m.
+  White shell, black bumper + top trim, one thin green accent line.
+- **Riser**: fixed white column Ø 90 mm at x = +0.175 m, 0.337 m tall (no joint), black flanges; SO-101 base on top.
+  Head camera on its front, basket camera on its back.
+- **Arm**: the SO-101 mounted facing the robot's right (pan 0), so **pan −90° = forward (shelves), +90° = back (basket)**.
+  Shoulder axis 0.75 m above the floor.
+- **Basket**: Ø 0.32 m floor → Ø 0.37 m rim, 0.20 m deep, centred at x = −0.07 m so its back follows the base's curve
+  1 cm inside the bumper. 40 vertical wires + 4 rings + floor wire grid (white powder-coat look) on a solid floor
+  panel, black rolled rim with a green accent, black collar on the base. Physics: floor box + 16 wall boxes on base_link.
+
+### Long-reach SO-101 (extension + motor upgrade)
+
+The stock links are cut at plain solid sections (upper arm at link-frame x = −0.072 m, forearm at −0.058 m) and
+lengthened like the usual hobbyist SO-100/101 extensions: **twin 16/14 mm pultruded carbon tubes between printed
+couplers** that sleeve the cut ends (thin green band on each coupler). Upper arm **+0.25 m** (shoulder→elbow 0.116 →
+0.364 m), forearm **+0.275 m** (elbow→wrist 0.135 → 0.410 m); wrist, roll, gripper and wrist camera stock. The URDF
+joint origins (`elbow_flex`, `wrist_flex`) move by the same amounts, so the USD joints, `.kin.json` and the IK agree.
+
+Lengths come from a reach study (`reach_check.py`, exact 3-D IK on the built chain, link points kept clear of base,
+riser and basket): every shelf height 0.30–1.50 m at a standoff (pan axis → item, horizontal) of 0.35, 0.40 and 0.45 m
+is reachable — horizontal approach from 0.6 m up, tool pitched down 5–20° for the bottom shelves (the SO-101's
+shoulder only tilts 10° below horizontal), −5…−10° at 1.5 m. The basket drop (gripper straight down, 12 cm over the
+rim) is exact. Parking: with a 0.40 m standoff the bumper stays ~0.2 m off the shelf face.
+
+| shelf height | standoff 0.35 m | standoff 0.40 m | standoff 0.45 m |
+|---|---|---|---|
+| 0.30 m | +20° | +15° | +10° |
+| 0.40 m | +20° | +15° | +5° |
+| 0.50 m | +15° | +10° | +5° |
+| 0.60 m | +5° | level | level |
+| 0.70 m | level | level | level |
+| 0.80 m | level | level | level |
+| 0.90 m | level | level | level |
+| 1.00 m | level | level | level |
+| 1.10 m | level | level | level |
+| 1.20 m | level | level | level |
+| 1.30 m | level | level | level |
+| 1.40 m | level | level | level |
+| 1.50 m | level | -5° | -10° |
+
+(tool pitch at the grasp: level = horizontal approach, + = pitched down)
+
+**Torque check** (static, arm stretched out horizontally = the worst case for every pitch joint, + a 0.5 kg item at the
+tool point; masses from the URDF inertials + servo upgrades + tubes 75 g/m each + couplers 12 g):
+
+| joint | required | actuator | available (stall @12 V) | SF |
+|---|---|---|---|---|
+| `shoulder_lift` | 7.50 N·m (arm 3.04 + item 4.47, lever 0.91 m) | Feetech STS3250 + 3:1 reducer | 13.23 N·m | **1.76** |
+| `elbow_flex` | 3.93 N·m (arm 1.24 + item 2.69, lever 0.55 m) | Feetech STS3250 + 2:1 reducer | 8.82 N·m | **2.24** |
+| `wrist_flex` | 0.79 N·m (arm 0.12 + item 0.67, lever 0.14 m) | Feetech STS3215 / Hiwonder HX-30HM | 2.94 N·m | **3.72** |
+
+Stock STS3215/HX-30HM (2.94 N·m) would give SF 0.39 at the shoulder and 0.75 at the elbow, and even a direct STS3250
+(4.9 N·m) only 0.65 / 1.25, so both get a printed reducer (black drum on the pivot side of the joint): shoulder 3:1,
+elbow 2:1 (η 0.9). Continuous (rated, 16 kg·cm) shoulder torque is 4.2 N·m: holding the arm alone (3.0 N·m) is
+continuous-safe; a 0.5 kg item at full stretch is a short peak (the shelf grasps run far from full stretch).
+`shoulder_pan` is a direct STS3250 (inertia of the long arm), wrist/roll/gripper stay stock.
+
+### Joints, limits, drives (`.kin.json` → `actuators`)
+
+| joint | limits | actuator | max torque | max speed | kp (N·m/rad) | kd (N·m·s/rad) | armature |
+|---|---|---|---|---|---|---|---|
+| `shoulder_pan` | -110° … +110° | STS3250 | 4.90 N·m | 1.2 rad/s | 163 | 11.4 | 0.028 |
+| `shoulder_lift` | -100° … +100° | STS3250 3:1 | 13.23 N·m | 1.0 rad/s | 441 | 27.0 | 0.252 |
+| `elbow_flex` | -97° … +97° | STS3250 2:1 | 8.82 N·m | 1.3 rad/s | 294 | 13.9 | 0.112 |
+| `wrist_flex` | -95° … +95° | STS3215 / Hiwonder HX-30HM | 2.94 N·m | 1.5 rad/s | 98 | 3.4 | 0.028 |
+| `wrist_roll` | -157° … +163° | STS3215 / Hiwonder HX-30HM | 2.94 N·m | 1.5 rad/s | 98 | 3.3 | 0.028 |
+| `gripper` | -10° … +100° | STS3215 / Hiwonder HX-30HM | 2.94 N·m | 1.5 rad/s | 98 | 3.3 | 0.028 |
+| `base_x`, `base_y` | ±100 m | virtual planar joints | 6 kN | 0.6 m/s (script) | 2e5 N/m | 2e4 | — |
+| `base_yaw` | free | virtual | 4 kN·m | 0.9 rad/s (script) | 2e4 | 2e3 | — |
+| `wheel_left/right_joint` | free | cosmetic spin from v, ω (diff drive) | 50 | — | 0 | 0.5 | — |
+
+kp saturates the drive at 0.03 rad (1.7°) of error (stiff bus-servo loop; gravity sag ≤ 0.4°); kd is critical damping
+for the outboard link inertia at a reference pose + armature (servo rotor inertia 0.028 kg·m² × ratio²).
+
+**IK** (`robot/so101_ik.py`, numpy): damped least squares on a numerical Jacobian over the 5 arm joints, joint-limit
+clamping, several seeds; targets = tool point + full tool rotation (shelf grasp: approach horizontal or pitched, jaws
+horizontal with the wrist camera on top via `grasp_roll`) or just the approach axis (basket drop, gripper down).
+Straight tool lines are IK-sampled waypoints followed with one min-jerk time scaling. The SO-101 grasps against its
+fixed jaw: the product centre goes to tool x = 2 mm − width/2 − 1.5 mm, then the moving jaw closes to the contact angle.
+
+**Cameras**: `cam_head` (riser front, 20° down), `cam_front` (base front), `cam_wrist` (SO-101 wrist camera lens, near
+clip 5 mm), `cam_basket` (riser back, into the basket), `cam_chase` (behind/above, for videos).
+
+**Navigation**: the store map inflates obstacles by `ROBOT_RADIUS = 0.32` m (footprint 0.269 m + 5 cm), see
+`demo/store_map.py`; the contract rover radius (0.3 m) still bounds the footprint.
+
+### Validation
+
+Validation status: PENDING (vhagar unreachable while this was built; reach + torque checked offline with
+`reach_check.py`, geometry checked with offline renders). Run the commands below.
+
+
+### Rebuild / validate (vhagar; assets stay out of git)
+
+```bash
+PICKY_SO101=/data/advaiv2/picky-so101 bash arms/sim/supermarket/robot/setup_so101_rover.sh
+# -> /data/advaiv2/picky-so101/build/picky_so101_rover.usd (+ .kin.json, reach_check.json); args: --dl1 --dl2 --shoulder-z
+/data/advaiv2/isaacsim/python.sh arms/sim/supermarket/robot/preview_so101_rover.py \
+    --robot /data/advaiv2/picky-so101/build/picky_so101_rover.usd --out /tmp/so101_preview   # studio renders
+/data/advaiv2/isaacsim/python.sh arms/sim/supermarket/robot/validate_so101_rover.py \
+    --scene /data/advaiv2/picky-suraj/geniesim/background/supermarket/supermarket_06/background.usda \
+    --robot /data/advaiv2/picky-so101/build/picky_so101_rover.usd --out /data/advaiv2/picky-so101/runs/val
+/data/advaiv2/picky-so101/venv/bin/python arms/sim/supermarket/robot/make_validation_video.py \
+    /data/advaiv2/picky-so101/runs/val --speed 1.5
+```
 
 ## Decisions & known limitations
 
