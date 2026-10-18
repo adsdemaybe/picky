@@ -31,6 +31,8 @@ UA = "PickyHackathon/0.1 (+https://github.com/adsdemaybe/picky)"
 SEARCH = "https://search.openfoodfacts.org/search?q={q}&page_size=12&fields=code,product_name,brands"
 PRODUCT = "https://world.openfoodfacts.org/api/v2/product/{code}?fields=product_name,brands,ingredients_text_en,allergens_tags"
 FRESH_CATEGORIES = {"produce"}
+NONFOOD_CATEGORIES = {"wireless", "household", "personal_care"}  # no food label to match
+MIN_OVERLAP = 0.5  # share of the query's words the matched product's name must contain
 FRESH_WORDS = re.compile(
     r"\b(lime|lemon|avocado|banana|apple|onion|garlic|cilantro|tomato|pepper|carrot|potato|lettuce"
     r"|berries|strawberr|grape|orange|cucumber|broccoli|spinach|egg|eggs)\b",
@@ -81,6 +83,10 @@ def _words(s: str) -> set[str]:
     return {w for w in re.findall(r"[a-z]+", s.lower()) if len(w) > 2}
 
 
+def _close(want: set[str], name: str) -> bool:
+    return bool(want) and len(want & _words(name)) / len(want) >= MIN_OVERLAP
+
+
 def match(product, pause: float) -> dict | None:
     q = _query(product.name)
     found = _get(SEARCH.format(q=urllib.parse.quote(q)))
@@ -91,7 +97,7 @@ def match(product, pause: float) -> dict | None:
     hits = sorted(found.get("hits", []), key=lambda h: -len(want & _words(h.get("product_name") or "")))
     for h in hits[:6]:
         code = h.get("code")
-        if not code or not (want & _words(h.get("product_name") or "")):
+        if not code or not _close(want, h.get("product_name") or ""):
             continue
         rec = _get(PRODUCT.format(code=code))
         time.sleep(pause / 4)
@@ -115,16 +121,35 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", default="")
     ap.add_argument("--pause", type=float, default=6.5, help="seconds between searches")
+    ap.add_argument(
+        "--prune", action="store_true", help="drop non-food and weak matches already in the file, then exit"
+    )
     args = ap.parse_args()
     products = load_products()
     data = yaml.safe_load(OUT.read_text()) if OUT.exists() else {}
     entries: dict = data.get("ingredients", {}) if data else {}
+    if args.prune:
+        drop = [
+            s
+            for s, e in entries.items()
+            if s not in products
+            or products[s].category in NONFOOD_CATEGORIES
+            or (e.get("matched_product") and not _close(_words(_query(products[s].name)), e["matched_product"]))
+        ]
+        for s in drop:
+            print(f"pruned {s}: {entries[s].get('matched_product')}")
+            entries.pop(s)
+        OUT.write_text(_dump(entries))
+        print(f"{len(entries)} entries kept")
+        return 0
     only = {s.strip() for s in args.only.split(",") if s.strip()}
     for sku, p in products.items():
         if only and sku not in only:
             continue
         if sku in entries and not only:
             continue  # resume
+        if p.category in NONFOOD_CATEGORIES:
+            continue
         single = (
             (p.category in FRESH_CATEGORIES or p.perishable) and FRESH_WORDS.search(p.name) and len(_words(p.name)) <= 3
         )
