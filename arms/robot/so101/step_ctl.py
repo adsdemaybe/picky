@@ -15,12 +15,17 @@ Commands: write JSON to <dir>/cmd.json (write to a temp name, then rename):
     {"id": 5, "home": true}  /  {"id": 6, "quit": true}
 After each command: <dir>/state_<id>.json, cam<i>_<id>.jpg. Any arm-servo error -> home + release + exit.
 No command for --idle-timeout seconds -> home + release + exit.
+
+Or type commands in the terminal running it (see TYPED_HELP): `up 2`, `pick 0.225 -0.10 0.05`, `place`, ...
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import queue
+import sys
+import threading
 import time
 from pathlib import Path
 
@@ -30,6 +35,7 @@ from .config import RigConfig
 from .grounding import detect
 from .kinematics import SO101Kinematics
 from .pick_place import ARM_JOINTS, connect_robot, move, read_pose
+from .typed_cmds import TYPED_HELP, parse_typed
 
 MAX_STEP_DEG = 10.0
 
@@ -78,6 +84,8 @@ def main() -> None:
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
+    find_label = ""
+
     def capture(tag: str) -> dict:
         paths = {}
         first = None
@@ -95,9 +103,10 @@ def main() -> None:
             paths[i] = str(p)
             first = frame if first is None else first
         det = None
-        if args.find and first is not None:
+        label = find_label or args.find
+        if label and first is not None:
             try:
-                d = detect(first, [args.find], cfg.perceptron_model).get(args.find)
+                d = detect(first, [label], cfg.perceptron_model).get(label)
                 det = {"box": d.box_px, "center": d.center_px} if d else None
             except Exception as e:  # noqa: BLE001
                 det = {"error": str(e)}
@@ -120,26 +129,56 @@ def main() -> None:
     rest, rest_grip = read_pose(robot)
     state = {"id": 0, "joints": rest, "gripper": rest_grip, **capture("0")}
     (out / "state_0.json").write_text(json.dumps(state, indent=1))
-    print("ready; holding start pose", flush=True)
+    print("ready; holding start pose. Type commands here (help for the list).", flush=True)
+    typed: queue.Queue[str] = queue.Queue()
+
+    def read_stdin() -> None:
+        for line in sys.stdin:
+            typed.put(line)
+
+    if sys.stdin.isatty():
+        threading.Thread(target=read_stdin, daemon=True).start()
+    pending: list[dict] = []
+    next_id = 1000
     last_cmd = time.time()
     try:
         while True:
             cmd_file = out / "cmd.json"
-            if not cmd_file.exists():
+            if not pending and not typed.empty():
+                line = typed.get().strip()
+                if line.lower() == "help":
+                    print(TYPED_HELP, flush=True)
+                    continue
+                pose, _ = read_pose(robot)
+                try:
+                    pending = parse_typed(line, tip(pose), pose["wrist_roll"])
+                except (ValueError, IndexError) as e:
+                    print(f"? {e}", flush=True)
+                for c in pending:
+                    next_id += 1
+                    c["id"], c["typed"] = next_id, True
+            if pending:
+                cmd = pending.pop(0)
+            elif cmd_file.exists():
+                cmd = json.loads(cmd_file.read_text())
+                cmd_file.unlink()
+            else:
                 if time.time() - last_cmd > args.idle_timeout:
                     print("idle timeout", flush=True)
                     break
                 time.sleep(0.1)
                 continue
-            cmd = json.loads(cmd_file.read_text())
-            cmd_file.unlink()
             last_cmd = time.time()
             cid = cmd.get("id", int(last_cmd))
             if cmd.get("quit"):
                 break
             pose, grip = read_pose(robot)
             note = ""
-            if cmd.get("home"):
+            if cmd.get("status"):
+                pass
+            elif cmd.get("find"):
+                find_label = cmd["find"]
+            elif cmd.get("home"):
                 move(robot, rest, rest_grip, seconds=2.5)
             elif "xyz" in cmd:
                 try:
@@ -175,6 +214,7 @@ def main() -> None:
                 "id": cid,
                 "cmd": cmd,
                 "joints": pose,
+                "tip": tip(pose),
                 "gripper": grip,
                 "servo_errors": bad,
                 "note": note,
@@ -182,7 +222,20 @@ def main() -> None:
             }
             state.update(capture(str(cid)))
             (out / f"state_{cid}.json").write_text(json.dumps(state, indent=1))
-            print(f"done {cid}: {cmd}", flush=True)
+            if cmd.get("typed"):
+                t = state["tip"]
+                det = state.get("detection")
+                seen = det.get("center") if isinstance(det, dict) else None
+                print(
+                    f"  tip x={t[0]:.3f} y={t[1]:.3f} z={t[2]:.3f}  roll={pose['wrist_roll']:.0f}  gripper={grip:.0f}"
+                    + (f"  [{note}]" if note else "")
+                    + (f"  {find_label or args.find} seen at {seen}" if seen else ""),
+                    flush=True,
+                )
+                if note.startswith(("IK failed", "refused")):
+                    pending.clear()  # don't run the rest of a macro after a failed step
+            else:
+                print(f"done {cid}: {cmd}", flush=True)
             if arm_bad:
                 break
     finally:
