@@ -113,6 +113,8 @@ class ScenePlan:
     waypoints: list[Waypoint] = field(default_factory=list)
     frame_path: str = "last_scene.jpg"
     error: str | None = None
+    height: float = 0.05
+    steer: dict[str, float] = field(default_factory=dict)
 
 
 def plan(
@@ -161,33 +163,14 @@ def plan(
         p.error = f"{target} at ({t[0]:.2f}, {t[1]:.2f}) is out of reach: {e}"
         return p
     p.roll = max(-175.0, min(175.0, best_roll(kin, q_hover, jaw) + st["roll"]))
-    hang = h - 0.02  # the object hangs this far below the fingertip (gripped 2 cm below its top)
-    lower_z = 0.01 + hang + 0.01  # object bottom ~1 cm above the plate when released
-    # Transit must clear a plate/bowl rim with margin for arm error and the object slipping in the jaws:
-    # object bottom >= ~6 cm above the table -> fingertip >= hang + 0.06.
-    clear_z = max(h + 0.04, hang + 0.06)
-
-    dd = choose_drop_point(
-        kin,
-        cam,
-        dets[dest].box_px,
-        size,
-        (clear_z, lower_z),
-        seed,
-        shift=(st["drop_dx"], st["drop_dy"]),
-    )
-    if dd is None:
-        p.error = (
-            f"no part of the {dest} is within reach at a safe carry height - move it within ~28 cm of the arm's base"
-        )
+    p.target_xy, p.height, p.steer = (float(t[0]), float(t[1])), h, st
+    lift_z = highest_reachable(kin, t[0], t[1], seed, z_min=_carry_heights(h)[0])
+    if lift_z is None:
+        p.error = f"can't lift the {target} high enough to carry it; move it closer to the arm"
         return p
-    p.target_xy, p.dest_xy = (float(t[0]), float(t[1])), (float(dd[0]), float(dd[1]))
-    lift_z = highest_reachable(kin, t[0], t[1], seed, z_min=clear_z)
-    drop_high_z = highest_reachable(kin, dd[0], dd[1], seed, z_min=clear_z)
-    mid = ((t[0] + dd[0]) / 2 * 0.85, (t[1] + dd[1]) / 2)  # a bit closer to the base, where the arm reaches higher
-    mid_z = highest_reachable(kin, mid[0], mid[1], seed, z_min=clear_z)
-    if None in (lift_z, drop_high_z, mid_z):
-        p.error = f"can't carry high enough (>= {clear_z * 100:.0f} cm) between {target} and {dest}; move them closer"
+    drop = plan_drop(kin, cam, p, dets[dest].box_px, size, seed)
+    if isinstance(drop, str):
+        p.error = drop
         return p
     p.waypoints = [
         Waypoint("hover over target", hover, GRIP_OPEN),
@@ -195,11 +178,7 @@ def plan(
         Waypoint("close", None, GRIP_CLOSED),
         Waypoint("lift straight up", (t[0], t[1], h + 0.03), GRIP_CLOSED),
         Waypoint("lift high", (t[0], t[1], lift_z), GRIP_CLOSED),
-        Waypoint("transit", (mid[0], mid[1], mid_z), GRIP_CLOSED),
-        Waypoint("over destination", (dd[0], dd[1], drop_high_z), GRIP_CLOSED),
-        Waypoint("lower", (dd[0], dd[1], lower_z), GRIP_CLOSED),
-        Waypoint("release", None, GRIP_OPEN),
-        Waypoint("retreat", (dd[0], dd[1], drop_high_z), GRIP_OPEN),
+        *drop,
     ]
     for w in p.waypoints:  # check every waypoint is reachable before moving anything
         if w.xyz:
@@ -209,6 +188,37 @@ def plan(
                 p.error = f"waypoint '{w.name}' {tuple(round(c, 3) for c in w.xyz)} unreachable: {e}"
                 return p
     return p
+
+
+def _carry_heights(h: float) -> tuple[float, float]:
+    """(clear_z, lower_z) fingertip heights for an object of height h gripped 2 cm below its top."""
+    hang = h - 0.02  # the object hangs this far below the fingertip
+    # Transit must clear a plate/bowl rim with margin for arm error and the object slipping in the jaws:
+    # object bottom >= ~6 cm above the table -> fingertip >= hang + 0.06.
+    return max(h + 0.04, hang + 0.06), 0.01 + hang + 0.01  # release with the object bottom ~1 cm above the plate
+
+
+def plan_drop(kin, cam, p: ScenePlan, dest_box, size, seed) -> list[Waypoint] | str:
+    """Carry + place waypoints from the grasp point to the destination box (an error string if impossible).
+    Called by plan(), and again mid-run once the object is in the gripper, from a fresh view of the destination."""
+    st, (t0, t1) = p.steer, p.target_xy
+    clear_z, lower_z = _carry_heights(p.height)
+    dd = choose_drop_point(kin, cam, dest_box, size, (clear_z, lower_z), seed, shift=(st["drop_dx"], st["drop_dy"]))
+    if dd is None:
+        return f"no part of the {p.dest} is within reach at a safe carry height - move it within ~28 cm of the arm"
+    drop_high_z = highest_reachable(kin, dd[0], dd[1], seed, z_min=clear_z)
+    mid = ((t0 + dd[0]) / 2 * 0.85, (t1 + dd[1]) / 2)  # a bit closer to the base, where the arm reaches higher
+    mid_z = highest_reachable(kin, mid[0], mid[1], seed, z_min=clear_z)
+    if None in (drop_high_z, mid_z):
+        return f"can't carry high enough (>= {clear_z * 100:.0f} cm) between {p.target} and {p.dest}; move them closer"
+    p.dest_xy = (float(dd[0]), float(dd[1]))
+    return [
+        Waypoint("transit", (mid[0], mid[1], mid_z), GRIP_CLOSED),
+        Waypoint("over destination", (dd[0], dd[1], drop_high_z), GRIP_CLOSED),
+        Waypoint("lower", (dd[0], dd[1], lower_z), GRIP_CLOSED),
+        Waypoint("release", None, GRIP_OPEN),
+        Waypoint("retreat", (dd[0], dd[1], drop_high_z), GRIP_OPEN),
+    ]
 
 
 def execute(
@@ -293,23 +303,6 @@ def _snap(cfg: RigConfig | None, name: str, which: tuple[str, ...], log) -> None
         log(f"  (no frame: {e})")
 
 
-def looks_successful(cfg: RigConfig, target: str, dest: str) -> tuple[bool | None, np.ndarray | None]:
-    """Camera check after a run: is the target now inside the destination's box? None if it can't tell."""
-    try:
-        frame = grab_frame(cfg)
-    except RuntimeError:
-        return None, None
-    t = detect_named(frame, target, cfg.perceptron_model)
-    d = detect_named(frame, dest, cfg.perceptron_model)
-    if d is None:
-        return None, frame
-    if t is None:
-        return False, frame
-    x0, y0, x1, y1 = d.box_px
-    u, v = t.center_px
-    return (x0 <= u <= x1 and y0 <= v <= y1), frame
-
-
 def go_home(robot, home: dict[str, float], gripper: float) -> None:
     """Move to the raised home pose (wrist camera overlooking the table) and settle there."""
     pose, _ = read_pose(robot)
@@ -339,6 +332,7 @@ def main() -> None:
     ap.add_argument("--height", type=float, default=0.05, help="object height in metres (standing gum pack: 0.05)")
     ap.add_argument("--save", metavar="NAME", help="after the run, save it as a replayable recipe")
     ap.add_argument("--replay", metavar="NAME", help="re-run a saved recipe exactly (no camera / planning)")
+    ap.add_argument("--attempts", type=int, default=3, help="retries after a missed / dropped grasp")
     ap.add_argument(
         "--record",
         nargs="?",
@@ -372,75 +366,85 @@ def main() -> None:
             replay(robot, args.replay)
             print("done")
             return
-        from .train_loop import DATA_DIR, QPolicy  # late import: train_loop imports this module
+        from . import closed_loop  # late imports: both import this module
+        from .train_loop import DATA_DIR, QPolicy
 
         policy = QPolicy.load()
-        actions = policy.greedy()  # best-known tweaks (both "base" = the routine that succeeded); no exploration
+        actions = policy.greedy()  # best-known tweaks; no exploration here
         steer = policy.steer(actions)
-        scene = grab_frame(cfg)
-        p = plan(cfg, kin, cam, args.command, rest, args.height, frame=scene.copy(), steer=steer)
-        print(describe(p))
-        print(f"annotated camera frame: {p.frame_path}")
-        if p.error or args.dry:
+        if args.dry:
+            p = plan(cfg, kin, cam, args.command, rest, args.height, steer=steer)
+            print(describe(p))
+            print(f"annotated camera frame: {p.frame_path}")
             return
-        if rec:
-            rec.caption = f"found {p.target} and {p.dest} - planning done"
-        traj = execute(
+        attempts: list = []
+
+        def learn(att) -> None:
+            policy.learn(att.actions, att.held, att.placed)
+
+        closed_loop.run(
             robot,
             kin,
-            p,
+            cam,
+            cfg,
+            args.command,
+            rest,
+            args.height,
+            lambda: (actions, steer),
+            attempts,
+            learn=learn,
+            caption=(lambda c: setattr(rec, "caption", c)) if rec else (lambda c: None),
+            max_attempts=args.attempts,
             step=args.step,
-            cfg=cfg,
-            on_step=(lambda name: setattr(rec, "caption", name)) if rec else None,
         )
-        if rec:
-            rec.caption = "returning home"
+        last = attempts[-1]
+        if last.plan.error and len(attempts) == 1:
+            print(f"can't do that: {last.note}")
+            return
         go_home(robot, rest, GRIP_OPEN)
-        save_recipe("last_run", p, traj, rest)  # every run is replayable; --save keeps a named copy
+        save_recipe("last_run", last.plan, last.traj, rest)  # every run is replayable; --save keeps a named copy
         if args.save:
-            print(f"saved recipe: {save_recipe(args.save, p, traj, rest)}")
-        guess, after = looks_successful(cfg, p.target, p.dest)
+            print(f"saved recipe: {save_recipe(args.save, last.plan, last.traj, rest)}")
+        guess = last.placed
         if rec:
-            rec.caption = {True: f"done: {p.target} is on the {p.dest}", False: "done", None: "done"}[guess]
+            rec.caption = {True: f"done: the {last.plan.target} is on the {last.plan.dest}", False: "failed"}.get(
+                guess, "done"
+            )
             time.sleep(2.0)  # hold the final shot
             print(f"video saved: {rec.stop()}  ({rec.frames} frames)")
             rec = None
-        hint = {True: "looks like a SUCCESS", False: "looks like a FAILURE", None: "can't tell from the camera"}[guess]
+        hint = {True: "camera says SUCCESS", False: "camera says FAILURE", None: "camera can't tell"}[guess]
         default = {True: "s", False: "f", None: ""}[guess]
         label = ""
         while label not in ("s", "f"):
-            ans = input(f"{hint} - Enter to accept, or type s / f: ").strip().lower()
+            ans = input(f"{hint} after {len(attempts)} attempt(s) - Enter to accept, or type s / f: ").strip().lower()
             label = ans or default
         success = label == "s"
-        policy.update(actions, success)  # TD update of both decisions' Q-values
+        held = last.held if not success else (last.held if last.held is not None else True)
+        policy.learn(last.actions, held, success if held is not False else None)
+        policy.finish(success)
         policy.save()
+        if not success:  # failures leave nothing on disk; what was learned from them is in q_policy.json
+            if args.record:
+                vid.unlink(missing_ok=True)
+            print(f"failure (not saved) | policy {policy.successes} successes / {policy.episodes} runs")
+            return
         ep = DATA_DIR / time.strftime("%Y%m%d-%H%M%S")
         ep.mkdir(parents=True, exist_ok=True)
-        if success:  # failures keep only episode.json: no video or frames
-            cv2.imwrite(str(ep / "scene.jpg"), scene)
-            if after is not None:
-                cv2.imwrite(str(ep / "after.jpg"), after)
-        elif args.record:
-            vid.unlink(missing_ok=True)
-            print("failure: video not kept")
+        if success:
+            cv2.imwrite(str(ep / "scene.jpg"), last.scene)
+            if last.after is not None:
+                cv2.imwrite(str(ep / "after.jpg"), last.after)
+            save_recipe(f"success_{ep.name}", last.plan, last.traj, rest)
         record = {
             "command": args.command,
             "success": success,
-            "auto_guess": guess,
-            "actions": actions,
-            "steer": steer,
-            "target_xy": p.target_xy,
-            "dest_xy": p.dest_xy,
-            "roll": p.roll,
-            "trajectory": traj,
-            "waypoints": [{"name": w.name, "xyz": w.xyz, "gripper": w.gripper} for w in p.waypoints],
+            "camera_verdict": guess,
+            "attempts": [a.summary() for a in attempts],
         }
         (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
-        if success:
-            save_recipe(f"success_{ep.name}", p, traj, rest)
         print(
-            f"{'SUCCESS' if success else 'failure'} saved to {ep} | policy {policy.successes} successes / "
-            f"{policy.episodes} runs | {policy.summary()}"
+            f"SUCCESS saved to {ep} | policy {policy.successes} successes / {policy.episodes} runs | {policy.summary()}"
         )
     finally:
         go_home(robot, dict(cfg.home_deg), GRIP_OPEN)

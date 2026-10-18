@@ -1,19 +1,21 @@
 """Human-in-the-loop RL for the SO-101 pick & place: press Enter to run, type s / f to label, it learns.
 
-Q-learning over the camera-guided pick routine. Each episode makes two decisions, each a small tweak to the base
-routine (the version that succeeded): a grasp tweak (shift / depth / wrist roll), then a drop tweak (shift over the
-plate). The only reward is your label at the end (s = 1, f = 0). TD updates:
+Q-learning over the closed-loop pick routine (closed_loop.py). Each attempt makes two decisions, each a small tweak to
+the base routine: a grasp tweak (shift / depth / wrist roll), then a drop tweak (shift over the plate). Perceptron
+Mk1.5 checks each phase and those checks are the step rewards; your s / f label, when you give one, overrides the
+final one:
 
-    Q_drop[a_drop]   += alpha * (r - Q_drop[a_drop])                          (terminal)
-    Q_grasp[a_grasp] += alpha * (gamma * Q_drop[a_drop] - Q_grasp[a_grasp])   (bootstraps from the next decision)
+    missed / dropped:  Q_grasp[g] += alpha * (0 - Q_grasp[g])                                  (terminal)
+    held, then placed: Q_drop[d]  += alpha * (r - Q_drop[d])           r = 1 on the plate, else 0
+                       Q_grasp[g] += alpha * (gamma * max_d' Q_drop[d'] - Q_grasp[g])      (Q-learning backup)
 
-Actions are chosen epsilon-greedily, so it mostly runs the best-known routine and sometimes tries a tweak. Every
-episode is saved (frames, plan, actions, joint trajectory, label) and every success becomes a replayable recipe.
+A failed attempt is learned from immediately and retried (up to 3 per episode) with the updated values. Actions are
+epsilon-greedy. Only successes are saved (log, video, frames, replayable recipe); failures only update q_policy.json.
 
-    python -m arms.robot.so101.train_loop "pick up the gum and put it on the plate"
+    python -m arms.robot.so101.train_loop "pick up the gum and put it on the plate" [--record]
 
 Keys (type, then Enter):  Enter = run an episode   s = success   f = failure   q = quit
-s / f can be typed any time during a run; if you haven't labelled by the end, it asks.
+s / f mid-run stops the arm right away, records the label and resets; otherwise the camera's verdict is suggested.
 """
 
 from __future__ import annotations
@@ -21,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import shutil
 import sys
 import threading
 import time
@@ -30,13 +33,12 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from . import pick_place
+from . import closed_loop, pick_place
 from .calibrate_camera import set_limits_from_calibration
-from .camera import grab_frame
 from .config import RUNS_DIR, RigConfig
 from .kinematics import SO101Kinematics
 from .pick_place import Interrupted, connect_robot, read_pose
-from .pick_routine import GRIP_OPEN, describe, execute, go_home, plan, save_recipe
+from .pick_routine import GRIP_OPEN, go_home, save_recipe
 from .scene import CameraModel
 
 DATA_DIR = RUNS_DIR
@@ -104,15 +106,28 @@ class QPolicy:
         s.update(DROP_ACTIONS[actions["drop"]])
         return s
 
-    def update(self, actions: dict[str, str], success: bool) -> None:
-        """One TD(0) backup per decision, last decision first so the grasp bootstraps from the updated drop value."""
-        r = 1.0 if success else 0.0
+    def learn(self, actions: dict[str, str], held: bool | None, placed: bool | None) -> None:
+        """TD(0) backups for one attempt from its step rewards.
+        held False (missed / dropped): the grasp decision ends the attempt with reward 0.
+        Otherwise the drop decision gets r = placed; the grasp bootstraps from the drop values: the best one when the
+        hold was confirmed (Q-learning), the one actually taken when it wasn't (credit can't be split)."""
+        g, d = actions["grasp"], actions["drop"]
+        if held is False:
+            self.q_grasp[g] += self.alpha * (0.0 - self.q_grasp[g])
+        elif placed is not None:
+            self.q_drop[d] += self.alpha * (float(placed) - self.q_drop[d])
+            nxt = max(self.q_drop.values()) if held else self.q_drop[d]
+            self.q_grasp[g] += self.alpha * (self.gamma * nxt - self.q_grasp[g])
+        self.epsilon = max(0.05, self.epsilon * 0.95)  # explore less as it learns
+
+    def finish(self, success: bool) -> None:
         self.episodes += 1
         self.successes += int(success)
-        d, g = actions["drop"], actions["grasp"]
-        self.q_drop[d] += self.alpha * (r - self.q_drop[d])
-        self.q_grasp[g] += self.alpha * (self.gamma * self.q_drop[d] - self.q_grasp[g])
-        self.epsilon = max(0.05, self.epsilon * 0.95)  # explore less as it learns
+
+    def update(self, actions: dict[str, str], success: bool) -> None:
+        """End-of-episode label only (no step checks)."""
+        self.learn(actions, None, success)
+        self.finish(success)
 
     def summary(self) -> str:
         a = self.greedy()
@@ -127,6 +142,7 @@ def main() -> None:
     ap.add_argument("command", help='e.g. "pick up the gum and put it on the plate"')
     ap.add_argument("--height", type=float, default=0.05, help="object height in metres (standing gum pack: 0.05)")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--attempts", type=int, default=3, help="retries per episode after a missed/dropped grasp")
     ap.add_argument("--record", action="store_true", help="film every episode (overhead camera) to its folder")
     args = ap.parse_args()
 
@@ -158,8 +174,6 @@ def main() -> None:
             if k in ("s", "f"):
                 print("(no run in progress - press Enter to start one)")
                 continue
-            actions = policy.act(rng)
-            theta = policy.steer(actions)
             ep = DATA_DIR / time.strftime("%Y%m%d-%H%M%S")
             ep.mkdir(parents=True, exist_ok=True)
             rec = None
@@ -167,17 +181,6 @@ def main() -> None:
                 from .camera import start_recording
 
                 rec = start_recording(cfg, str(ep / "video.mp4"), title=f'Picky  |  "{args.command}"')
-                rec.caption = "looking at the table"
-            print(f"actions: grasp={actions['grasp']}  drop={actions['drop']}", flush=True)
-            frame = grab_frame(cfg)
-            p = plan(cfg, kin, cam, args.command, rest, args.height, frame=frame.copy(), steer=theta)
-            print(describe(p), flush=True)
-            if p.error:
-                print("not running this episode (fix the scene and press Enter)")
-                if rec:
-                    rec.stop()
-                continue
-            cv2.imwrite(str(ep / "scene.jpg"), frame)
             label: str | None = None
             quit_after = False
 
@@ -191,22 +194,34 @@ def main() -> None:
                         quit_after = True
                 return label is not None or quit_after
 
+            def choose():
+                a = policy.act(rng)
+                return a, policy.steer(a)
+
+            def learn(att) -> None:  # a failed attempt that will be retried: learn before the retry
+                policy.learn(att.actions, att.held, att.placed)
+                print(f"  learned from the failed attempt | {policy.summary()}", flush=True)
+
             print("running... type s or f + Enter any time to label it, stop and reset", flush=True)
             t0 = time.time()
-            grip_after_close = None
-            traj: list[dict] = []
+            attempts: list = []
             pick_place.ABORT_CHECK = labelled
             try:
-                for w in p.waypoints:
-                    if rec:
-                        rec.caption = w.name
-                    traj += execute(
-                        robot, kin, type(p)(**{**p.__dict__, "waypoints": [w]}), log=lambda m: print(m, flush=True)
-                    )
-                    if w.name == "close":
-                        grip_after_close = read_pose(robot)[1]
-                    if labelled():
-                        raise Interrupted
+                closed_loop.run(
+                    robot,
+                    kin,
+                    cam,
+                    cfg,
+                    args.command,
+                    rest,
+                    args.height,
+                    choose,
+                    attempts,
+                    learn=learn,
+                    log=lambda m: print(m, flush=True),
+                    caption=(lambda c, r=rec: setattr(r, "caption", c)) if rec else (lambda c: None),
+                    max_attempts=args.attempts,
+                )
             except Interrupted:
                 if label:
                     print(
@@ -220,52 +235,66 @@ def main() -> None:
                 if rec:
                     rec.caption = "returning home"
                 go_home(robot, rest, GRIP_OPEN)  # reset pose
-            try:
-                cv2.imwrite(str(ep / "after.jpg"), grab_frame(cfg))
-            except RuntimeError:
-                pass
+            last = attempts[-1] if attempts else None
+            if last is None or (last.plan.error and len(attempts) == 1 and label is None):
+                print(f"not running this episode: {last.note if last else 'no plan'} (fix the scene, press Enter)")
+                if rec:
+                    rec.stop()
+                shutil.rmtree(ep, ignore_errors=True)
+                if quit_after:
+                    break
+                continue
             if rec:
-                rec.caption = "done"
+                rec.caption = {True: f"done: the {last.plan.target} is on the {last.plan.dest}", False: "failed"}.get(
+                    last.placed, "done"
+                )
                 time.sleep(1.5)  # hold the final shot
-                print(f"video: {rec.stop()}  ({rec.frames} frames)", flush=True)
+                rec.stop()
             if quit_after and label is None:
                 label = "f"  # quit mid-run without a label: log it as a failure, then exit
-            while label is None:
-                print("success or failure? (s/f + Enter)", flush=True)
-                kk = keys.get()
-                if kk in ("s", "f"):
-                    label = kk
-                elif kk == "q":
-                    label = "f"
+            if label is None:
+                hint = {True: "camera says SUCCESS", False: "camera says FAILURE", None: "camera can't tell"}
+                default = {True: "s", False: "f", None: None}[last.placed]
+                print(f"{hint[last.placed]} - Enter to accept, or type s / f", flush=True)
+                while label is None:
+                    kk = keys.get()
+                    if kk in ("s", "f"):
+                        label = kk
+                    elif kk == "" and default:
+                        label = default
+                    elif kk == "q":
+                        label, quit_after = (default or "f"), True
+                    else:
+                        print("type s or f + Enter", flush=True)
             success = label == "s"
-            policy.update(actions, success)
+            # the final attempt: your label is the final reward; the camera's "held" check stays the grasp reward
+            held = last.held if not success else (last.held if last.held is not None else True)
+            policy.learn(last.actions, held, success if held is not False else None)
+            policy.finish(success)
             policy.save()
             record = {
                 "command": args.command,
                 "success": success,
-                "actions": actions,
-                "steer": theta,
+                "label_source": "human",
+                "camera_verdict": last.placed,
                 "q_grasp_after": policy.q_grasp,
                 "q_drop_after": policy.q_drop,
-                "target_xy": p.target_xy,
-                "dest_xy": p.dest_xy,
-                "roll": p.roll,
-                "jaw_yaw_deg": p.jaw_yaw_deg,
-                "gripper_after_close": grip_after_close,  # ~5 = closed on nothing, >8 = holding something
                 "duration_s": round(time.time() - t0, 1),
-                "waypoints": [{"name": w.name, "xyz": w.xyz, "gripper": w.gripper} for w in p.waypoints],
-                "trajectory": traj,  # joint targets actually commanded: replayable (pick_routine --replay)
+                "attempts": [a.summary() for a in attempts],
             }
-            (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
-            if success:  # every success becomes a replayable recipe
-                save_recipe(f"success_{ep.name}", p, traj, rest)
-            else:  # failures keep only episode.json (the label the Q-learning used): no video or frames
-                for f in ("video.mp4", "scene.jpg", "after.jpg"):
-                    (ep / f).unlink(missing_ok=True)
+            if success:  # only successes are kept: log, video, first and final view, replayable recipe
+                (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
+                cv2.imwrite(str(ep / "scene.jpg"), last.scene)
+                if last.after is not None:
+                    cv2.imwrite(str(ep / "after.jpg"), last.after)
+                save_recipe(f"success_{ep.name}", last.plan, last.traj, rest)
+            else:  # failures leave nothing on disk; what was learned from them is in q_policy.json
+                shutil.rmtree(ep, ignore_errors=True)
             rate = policy.successes / max(1, policy.episodes)
             print(
-                f"saved {ep.name}: {'SUCCESS' if success else 'failure'} | {policy.successes}/{policy.episodes} "
-                f"({rate:.0%}) | {policy.summary()}",
+                f"{'SUCCESS saved to ' + ep.name if success else 'failure (not saved)'} "
+                f"after {len(attempts)} attempt(s) | "
+                f"{policy.successes}/{policy.episodes} ({rate:.0%}) | {policy.summary()}",
                 flush=True,
             )
             if quit_after:
@@ -275,8 +304,8 @@ def main() -> None:
     finally:
         from . import camera
 
-        if camera._ACTIVE is not None:  # quit mid-episode: close the video so it stays playable
-            print(f"video: {camera._ACTIVE.stop()}")
+        if camera._ACTIVE is not None:  # quit mid-episode: unlabelled, so not a success - drop its folder
+            shutil.rmtree(Path(camera._ACTIVE.stop()).parent, ignore_errors=True)
         go_home(robot, rest, GRIP_OPEN)
         robot.disconnect()
         print("arm released")

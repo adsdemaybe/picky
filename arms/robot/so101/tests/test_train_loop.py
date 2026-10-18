@@ -29,6 +29,21 @@ def test_repeated_failures_switch_away_from_base():
     assert p.greedy()["grasp"] != "base" and p.greedy()["drop"] != "base"
 
 
+def test_missed_grasp_only_blames_the_grasp():
+    p = QPolicy()
+    drop_before = dict(p.q_drop)
+    for _ in range(3):
+        p.learn({"grasp": "base", "drop": "base"}, held=False, placed=None)
+    assert p.greedy()["grasp"] != "base" and p.q_drop == drop_before
+
+
+def test_held_but_missed_the_plate_only_blames_the_drop():
+    p = QPolicy()
+    for _ in range(4):
+        p.learn({"grasp": "base", "drop": "base"}, held=True, placed=False)
+    assert p.greedy() == {"grasp": "base", "drop": p.greedy()["drop"]} and p.greedy()["drop"] != "base"
+
+
 def test_successes_make_a_tweak_the_greedy_choice():
     p = QPolicy()
     for _ in range(3):
