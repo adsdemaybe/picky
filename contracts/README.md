@@ -1,7 +1,8 @@
 # contracts — the locked interfaces between arms
 
 Every arm codes against this package and nothing else from other arms. One author per change, so the whole set stays
-consistent. `CONTRACTS_VERSION` (in `contracts/__init__.py`) is currently **0.2.1**.
+consistent. `CONTRACTS_VERSION` (in `contracts/__init__.py`) is currently **0.2.5** (Cart Whisperer, additive:
+[`CHANGES-0.2.5.md`](CHANGES-0.2.5.md)).
 
 **v0.2.1 (planner → VLA → verifier loop, additive):** an LLM planner (Gemini) turns a goal into a typed `StepPlan`
 (`plan.py`), a VLA service executes motion steps as an idempotent status stream (`vla.py`), and a verifier

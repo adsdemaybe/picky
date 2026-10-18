@@ -1,5 +1,13 @@
 # Cart Whisperer: checkout suggestions that actually help (T-Mobile track)
 
+> **Update (contracts 0.2.5):** the contract shipped as an additive **patch** (`contracts/whisper.py`,
+> `contracts/CHANGES-0.2.5.md`), not the 0.3.0 proposed in §7, so the running 0.2.x Isaac worker keeps connecting.
+> Names differ from §7: `WhisperCard` (kinds `complete | replenish | swap_save | qty | deal | remove | skip | wait`,
+> actions `add | swap | set_qty | remove | skip | remind`), `WhisperResponse`, `ShopperContext`,
+> `RecommenderService.whisper` / `whisper_feedback`, event `whisper.cards`, REST `GET /api/users/{user_id}/whisper`
+> + `POST /api/users/{user_id}/whisper/{card_id}/accept|decline` (`contracts/api.md`, "Cart Whisperer"). The rest of
+> this doc (pipeline, gates, scoring, trust rules) is unchanged.
+
 > **Status: designed, not implemented in the backend.** Nothing in this doc runs in the gateway or recommender yet. It
 > needs a contracts change that lands **after** the v0.2 build merges (proposed v0.3, §7). Implementation follows in
 > the arms listed in §13. Owner: **recommender** arm. Trust gates it. Gateway, web app and messaging show it. The robot

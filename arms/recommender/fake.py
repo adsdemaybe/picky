@@ -31,6 +31,7 @@ from contracts.planogram import DemoUser, Planogram
 from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, ReplenishSuggestion, UserProfile
 from contracts.services import Services
 from contracts.shopping import Cart, RecKind, Recommendation, ShoppingList
+from contracts.whisper import WHISPER_EMPTY_REASON, WHISPER_MAX_CARDS, ShopperContext, WhisperCard, WhisperResponse
 from utils import data as data_mod
 from utils.log import get_logger
 
@@ -404,6 +405,26 @@ class FakeRecommenderService:
                 await store.add(named)
             except Exception as exc:  # noqa: BLE001 - the in-memory history above still moved the clocks
                 log.warning("purchase history database write failed: %s", exc)
+
+    # ---------------------------------------------------------------------------------------------------- whisper
+    async def whisper(self, context: ShopperContext, limit: int = WHISPER_MAX_CARDS) -> WhisperResponse:
+        """Cart Whisperer (contracts 0.2.5). Placeholder until feat/recommender-cart-whisperer: a valid zero-card
+        pass (zero is a normal result). Unknown user -> KeyError."""
+        self._profile(context.user_id)
+        return WhisperResponse(
+            user_id=context.user_id,
+            store_id=context.store_id,
+            phase=context.phase,
+            trip_id=context.trip_id,
+            empty_reason=WHISPER_EMPTY_REASON,
+        )
+
+    async def whisper_feedback(
+        self, user_id: UserId, card: WhisperCard, decision: str, trip_id: TripId | None = None
+    ) -> ProfileUpdate | None:
+        """Cart Whisperer answer (contracts 0.2.5). Placeholder: nothing is learned yet."""
+        self._profile(user_id)
+        return None
 
     # ---------------------------------------------------------------------------------------------------- replenish
     def _replenish(self) -> ReplenishFile:

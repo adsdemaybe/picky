@@ -1,4 +1,4 @@
-# Gateway API (contracts v0.2.1)
+# Gateway API (contracts v0.2.5)
 
 Served by `arms/gateway` (FastAPI, one process) on `GATEWAY_HOST:GATEWAY_PORT` (default `0.0.0.0:8000`) for **the web
 app** (one app: shopper, store-staff and fleet views; there is no iPad/native app). The gateway is the only caller of
@@ -394,3 +394,29 @@ truth fallback) → `grasp` (`source: "basket"`, T0 on every backend: the learne
 (`item_on_counter` + gripper empty). Then `handoff` = "Basket empty: hand off for payment" (`BasketContains({}, exact)`),
 and only then the trip's checkout (payment agent) starts. Isaac workers without the `basket_unload` capability skip
 the unload groups (the handoff unloads at once, as in 0.2.3).
+
+## Cart Whisperer (contracts 0.2.5, T-Mobile track; design `docs/cart-whisperer.md`)
+
+Checkout suggestions that actually help, including the ones that say **SKIP** and **WAIT**. Models in
+`contracts/whisper.py`; the recommender arm decides (`RecommenderService.whisper` / `whisper_feedback`), the gateway
+builds the server-side `ShopperContext` (trip, cart, list, budget, mandate, route, robot pose, last pick, chat) and
+applies accepts through the normal cart path. At most 3 cards per phase, SKIP and WAIT included; **zero cards is a
+valid answer** (`empty_reason`). Every card carries `reason` + `reason_codes` + `signals` (family `commerce` /
+`customer` / `physical`); `sponsored` is always false. The LLM only phrases `reason` (`phrased_by`).
+
+### REST
+
+| Method | Path | Body / query | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/users/{user_id}/whisper` | `?store_id=&phase=planning\|in_trip\|checkout&trip_id=` | `whisper.WhisperResponse` `{user_id, store_id, phase, trip_id, cards: WhisperCard[0..3], empty_reason, considered, hidden_declined, threshold}` | `store_id` defaults to the trip's store, else the user's home store; `trip_id` defaults to the user's live trip at that store (its cart, list, budget, route and pick feed the context); without a trip the pass uses profile + history + promo calendar + mandate only. 404 unknown user |
+| POST | `/api/users/{user_id}/whisper/{card_id}/accept` | optional `whisper.WhisperDecisionRequest` `{trip_id?, channel?, note?}` | `whisper.WhisperDecisionResult` | Through the normal cart path: add / swap / set_qty / remove / skip (removes the line when it is in the cart) → `TrustService.evaluate` → `outcome` `applied` / `needs_approval` (an approval is raised: `approval`) / `denied`; WAIT → `reminder_scheduled` (`reminder`, texted on `remind_on` through messaging); a skip / wait of something not in the cart → `acknowledged`; no trip → `not_applied` (the answer is still recorded). 404 unknown card (not served to this user), 409 stale (its line is gone) |
+| POST | `/api/users/{user_id}/whisper/{card_id}/decline` | optional `WhisperDecisionRequest` | `whisper.WhisperDecisionResult` (`outcome` `declined`, `profile_update`) | Feeds the profile: that (kind, sku, line_sku) is suppressed for the user and the kind down-weighted; `profile.updated` is published when it changes |
+
+### Events (`/ws`)
+
+| Type | Producer | Payload |
+|---|---|---|
+| `whisper.cards` | gateway | `phase`, `cards` (0..3 `WhisperCard`), `empty_reason`; envelope `trip_envelope(trip)`. Published for every in-trip / checkout pass (also when empty). The latest pass is on `Trip.whisper` (so `trip.snapshot` carries it) |
+
+Accepted / declined cards also land in the transparency log (`GET /api/trust/ledger`, `TransparencyEntry.kind =
+"whisper"`, `rec_id = <card_id>@<trip_id>`).

@@ -37,7 +37,8 @@ from contracts.common import (
 Sourcing = Literal["in_store", "online", "unresolved"]
 LineSource = Literal["in_store", "online"]
 LineStatus = Literal["planned", "picked", "verified", "declined"]
-RecKind = Literal["detour", "checkout_batch", "near_expiry_offer"]
+RecKind = Literal["detour", "checkout_batch", "near_expiry_offer", "whisper"]
+"""0.2.5: 'whisper' = a Cart Whisperer card in the transparency log (``whisper.whisper_transparency_entry``)."""
 
 
 class TripState(StrEnum):

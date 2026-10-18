@@ -19,7 +19,7 @@ Envelope rules (producers MUST follow them, or filtered sockets miss events):
 
 Producers (``EVENT_PRODUCERS``; exactly one per type, so nothing is published twice): the arm that owns the state.
 - gateway: trip flow (trip.*, intent/list/sourcing/recs/route, stop.updated, cart, approvals, mandate, checkout,
-  follow-up, feedback/profile), robot.state, and the live-only frame / camera.frame.
+  follow-up, feedback/profile, whisper.cards), robot.state, and the live-only frame / camera.frame.
 - fleet: request.received / request.planned, goal.created / assigned / updated / completed / failed,
   fleet.robot_updated.
 - agent: agent.message (shopper chat streaming); the robot brain: brain.step plus the in-store execution events of
@@ -92,6 +92,7 @@ from contracts.trust import (
 )
 from contracts.verify import Verdict, VerifyPhase
 from contracts.vla import VlaStatus
+from contracts.whisper import WhisperCard, WhisperPhase
 
 
 class EventBase(Model):
@@ -544,6 +545,17 @@ class PaymentAgentStepEvent(EventBase):
     step: PaymentAgentStep
 
 
+class WhisperCardsEvent(EventBase):
+    """0.2.5: one Cart Whisperer pass (producer: gateway, from ``RecommenderService.whisper``): 0..3 cards for a
+    phase (planning / in_trip / checkout). ``cards`` may be empty (zero is valid: show ``empty_reason``). The same
+    cards are on ``Trip.whisper`` and ``GET /api/users/{user_id}/whisper``."""
+
+    type: Literal["whisper.cards"] = "whisper.cards"
+    phase: WhisperPhase
+    cards: list[WhisperCard] = Field(default_factory=list)
+    empty_reason: str | None = None
+
+
 Event = Annotated[
     TripCreated
     | TripSnapshot
@@ -597,7 +609,8 @@ Event = Annotated[
     | CameraOverlay
     | CheckoutUnload
     | ItemVerificationEvent
-    | PaymentAgentStepEvent,
+    | PaymentAgentStepEvent
+    | WhisperCardsEvent,
     Field(discriminator="type"),
 ]
 
@@ -657,6 +670,7 @@ EVENT_CLASSES: tuple[type[EventBase], ...] = (
     CheckoutUnload,
     ItemVerificationEvent,
     PaymentAgentStepEvent,
+    WhisperCardsEvent,
 )
 
 EVENT_TYPES: dict[str, type[EventBase]] = {cls.model_fields["type"].default: cls for cls in EVENT_CLASSES}
@@ -714,6 +728,7 @@ EVENT_PRODUCERS: dict[str, str] = (
     | {t: "agent" for t in LOOP_EVENT_TYPES}
     | {"demo.fault": "robot"}
     | {"checkout.unload": "agent", "item.verification": "agent", "payment.agent_step": "gateway"}
+    | {"whisper.cards": "gateway"}
 )
 """Who publishes each event type (see module docstring). 'agent' covers the shopper agent, the robot brain and the
 LoopRunner (loop events); 'robot' = the robot arm's FaultInjector (demo.fault only)."""

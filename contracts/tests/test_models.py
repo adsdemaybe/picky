@@ -40,7 +40,7 @@ def _product(**kw) -> Product:
 
 
 def test_version_and_embed_dim():
-    assert contracts.CONTRACTS_VERSION == "0.2.4"
+    assert contracts.CONTRACTS_VERSION == "0.2.5"
     assert contracts.EMBED_DIM == 384
 
 
