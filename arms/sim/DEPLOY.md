@@ -172,3 +172,34 @@ curl -s -X POST localhost:8100/api/requests -H 'content-type: application/json' 
 | `ModuleNotFoundError: pydantic_settings` / `No module named 'utils.log'` | step 2 into the deps dir; run from the repo root with `-m` |
 | `cannot inherit from both a TypedDict type and a non-TypedDict base class` | `utils.config` imported after `SimulationApp` (custom scripts): import it first |
 | Isaac crashes on import of our deps | a deps-dir package shadows an Isaac one. Remove it (usually pydantic / typing-extensions / websockets) |
+
+## 8. T1 grasps with the Perceptron Mk1.5 policy (contracts 0.2.2, feat/perceptron-vla)
+
+A worker from this branch advertises `arm_joints` + `arm_ik`. With `PICKY_VLA_T1=perceptron` on the gateway (and
+`PERCEPTRON_API_KEY`), every `grasp` step resolves to T1: the robot arm (backend) runs the loop, one `ArmJointsCmd` per
+action chunk; Perceptron Mk1.5 sees the side + wrist policy cameras and calls a tool (`reach_point` on an image ->
+ray to the planogram's shelf face -> `ArmIkCmd` on the worker -> joint rows at 30 Hz; `set_gripper close` -> the
+sticky grasp attaches the unit). Pictures while moving: side + wrist every 8 rows (~4 pairs/s) stream live to the
+robot's front / wrist view; the front camera takes 2 pictures/s (blurred, retained evidence) while any VLA step
+drives. A separate test stack on vhagar keeps the live demo (:8100) untouched:
+
+```bash
+# /data/$USER/picky/sim-pvla.env = sim.env with repo -> repo-pvla, :8100 -> :8101, PICKY_SIM_WORKER_ID=isaac-pvla,
+# PICKY_SIM_STORES=store_ave, PICKY_SIM_LABEL_DIR=.../labels-pvla
+tmux new -d -s picky-pvla-gw  /data/$USER/picky/run_pvla_gw.sh    # PICKY_REAL_ARMS=robot,evidence,cameras PICKY_DEV=1
+                                                                  # PICKY_VLA_T1=perceptron GATEWAY_PORT=8101 + secrets
+tmux new -d -s picky-pvla-sim /data/$USER/picky/run_pvla_sim.sh   # source sim-pvla.env; $PY -m arms.sim.app
+curl -s localhost:8101/api/fleet/robots/rover-ave-1/vla          # t1_pretrained available, "perceptron-mk1.5 (tool policy)"
+curl -s -X POST localhost:8101/api/dev/plans -H 'content-type: application/json' \
+  -d '{"robot_id":"rover-ave-1","store_id":"store_ave","text":"pick up a jar of salsa"}'
+grep -E 'Mk1.5 step|sticky grasp|T1 rover' /data/$USER/picky/logs/pvla-gw.log
+```
+
+Measured on vhagar (2026-10-18, RTX 5090, store_ave, rover-ave-1 = LeKiwi + SO-101 rover USD, fake catalog / planner
+/ verifier, real robot + evidence): 4 of 4 dev plans (salsa x2, olive oil, diced tomatoes) completed end to end
+(navigate -> align -> scan -> ground -> **T1 grasp** -> T0 place -> verify -> checkout -> handoff). Each grasp took 2
+Mk1.5 calls (`reach_point(side, x, y)` then `set_gripper(close)`; 0.37-0.90 s per call), IK error 0.0 cm, the sticky
+grasp attached a unit of the target slot 0.0 cm from the jaw center, ~4-5 s from joint mode to attached, 3.4-4.0
+side + wrist pairs/s while the arm moved (all 22 policy pictures of a grasp reached `/ws/frames`). Navigation: 2.0
+front pictures/s while driving (26-33 per drive); the Perceptron look-out answered on every approach / arrival (the
+products are seen from above there, so it mostly says "not visible": advisory only). Extra worker GPU: ~3.3 GB.
