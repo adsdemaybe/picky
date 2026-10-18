@@ -184,10 +184,15 @@ function useStoreFeed(storeId: string | null) {
       filters: [["store_id", storeId]],
       afterSeq: () => last,
       onEvent: (ev: GatewayEvent) => {
-        const e = ev as unknown as { seq?: number; type: string; ts?: string; payload?: Record<string, unknown> };
+        // events are flat envelopes (type, seq, ts + the event's own fields); brain.step / robot / goal nest an object
+        const e = ev as unknown as Record<string, unknown> & { seq?: number; type: string; ts?: string };
         if (typeof e.seq === "number") last = e.seq;
-        const p = e.payload ?? {};
-        const text = String(p.text ?? p.message ?? p.last_thought ?? p.title ?? p.status ?? p.goal_id ?? p.robot_id ?? "");
+        const sub = (k: string) => (e[k] && typeof e[k] === "object" ? (e[k] as Record<string, unknown>) : {});
+        const step = sub("step");
+        const robot = sub("robot");
+        const goal = sub("goal");
+        const pick = [e.text, step.text, e.message, e.reason, robot.last_thought, goal.title && `${goal.title}: ${goal.status ?? ""}`, e.to_state, e.robot_id, e.goal_id];
+        const text = String(pick.find((v) => typeof v === "string" && v) ?? "");
         const row = { seq: e.seq ?? Date.now() + Math.random(), type: e.type, ts: e.ts ?? "", text };
         setFeed((f) => ({ sid: storeId, rows: [row, ...(f.sid === storeId ? f.rows : [])].slice(0, 40) }));
       },
