@@ -31,6 +31,9 @@ out/
 generated/
 outputs/
 recordings/
+runs/
+pitch/
+last_*.jpg
 
 # OS / editors
 .DS_Store

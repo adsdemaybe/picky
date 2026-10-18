@@ -22,7 +22,7 @@ import numpy as np
 
 from .calibrate_camera import set_limits_from_calibration, settle
 from .camera import grab_frame
-from .config import RigConfig
+from .config import RUNS_DIR, RigConfig
 from .grounding import detect, parse_command
 from .kinematics import SO101Kinematics
 from .pick_place import ARM_JOINTS, connect_robot, move, read_pose
@@ -246,7 +246,7 @@ def execute(
     return traj
 
 
-RECIPES = Path.home() / "picky_runs" / "recipes"
+RECIPES = RUNS_DIR / "recipes"
 
 
 def save_recipe(name: str, p: ScenePlan, traj: list[dict], home: dict[str, float]) -> Path:
@@ -344,7 +344,7 @@ def main() -> None:
         nargs="?",
         const="auto",
         metavar="PATH",
-        help="record the overhead camera to an MP4 (default ~/picky_runs/videos/<time>.mp4)",
+        help="record the overhead camera to an MP4 (default picky/runs/videos/<time>.mp4)",
     )
     args = ap.parse_args()
     cfg = RigConfig()
@@ -357,7 +357,7 @@ def main() -> None:
         vid = (
             Path(args.record)
             if args.record != "auto"
-            else (Path.home() / "picky_runs" / "videos" / f"{time.strftime('%Y%m%d-%H%M%S')}.mp4")
+            else (RUNS_DIR / "videos" / f"{time.strftime('%Y%m%d-%H%M%S')}.mp4")
         )
         vid.parent.mkdir(parents=True, exist_ok=True)
         rec = start_recording(cfg, str(vid), title=f'Picky  |  "{args.command or args.replay}"')

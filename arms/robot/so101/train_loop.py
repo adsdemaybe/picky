@@ -33,13 +33,13 @@ import numpy as np
 from . import pick_place
 from .calibrate_camera import set_limits_from_calibration
 from .camera import grab_frame
-from .config import RigConfig
+from .config import RUNS_DIR, RigConfig
 from .kinematics import SO101Kinematics
 from .pick_place import Interrupted, connect_robot, read_pose
 from .pick_routine import GRIP_OPEN, describe, execute, go_home, plan, save_recipe
 from .scene import CameraModel
 
-DATA_DIR = Path.home() / "picky_runs"
+DATA_DIR = RUNS_DIR
 POLICY_FILE = DATA_DIR / "q_policy.json"
 
 STEER_KEYS = ("grasp_dx", "grasp_dy", "grasp_dz", "roll", "drop_dx", "drop_dy")  # metres, roll in degrees

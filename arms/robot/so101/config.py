@@ -15,6 +15,8 @@ ASSETS = HERE / "assets"
 
 
 SECRETS_FILE = Path.home() / ".config" / "picky" / "env"
+# Episodes, videos, recipes and the learned policy live in the repo folder (git-ignored): picky/runs
+RUNS_DIR = Path(__file__).resolve().parents[3] / "runs"
 
 
 def _load_secrets(path: Path = SECRETS_FILE) -> None:
