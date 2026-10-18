@@ -386,7 +386,10 @@ class Editor:
             lat = (s.get("latency_ms") or 0) / 1000
             sub = f"Mk1.5 step {s['n']} (attempt {s['attempt']}) · decided in {lat:.1f} s"
             if done:
-                sub += f" · {s.get('outcome', '')}"
+                out = str(s.get("outcome", ""))
+                if out.startswith("ignored: target out of reach"):
+                    out = "ignored: IK can't reach that point with a level side grasp"
+                sub += f" · {out}"
             return (f"Perceptron VLA → {s.get('action') or 'no tool call'}", sub, PURPLE)
         return None
 
@@ -682,14 +685,15 @@ class Editor:
         d = ImageDraw.Draw(bg)
         panel(bg, (W / 2 - 560, 120, W / 2 + 560, H - 120), 222, 30)
         d.text((W / 2, 210), "Paid ✓", font=font(108, True), fill=GREEN, anchor="mm")
-        d.text(
-            (W / 2, 300),
-            "every item taken out of the basket by the arm and laid on the counter (simulated payment)",
-            font=font(27),
-            fill=(210, 210, 210),
-            anchor="mm",
-        )
         rv = fr["rovers"][0]
+        n_done, n_ctr = len(rv["done"]), int(rv.get("counter", 0) or 0)
+        line = "every item taken out of the basket by the arm and laid on the counter (simulated payment)"
+        if n_ctr < n_done:  # say what really happened at the counter
+            line = (
+                f"{n_ctr} of {n_done} taken out of the basket by the arm and laid on the counter, "
+                f"{n_done - n_ctr} left in the basket (no unload grasp) · simulated payment"
+            )
+        d.text((W / 2, 300), line, font=font(27), fill=(210, 210, 210), anchor="mm")
         names = [r.items.get(i, {}).get("name", i) for i in rv["done"]]
         y = 370
         d.text(

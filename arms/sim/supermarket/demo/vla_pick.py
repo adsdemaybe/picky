@@ -397,7 +397,10 @@ class VlaRig:
             )
             qg, e = ik_natural(kin, tcp, geo["R"], roll=geo["roll"], extra_seeds=[ms.arm_vec()])
             if e[0] > 0.008 or e[1] > math.radians(5):
-                return f"ignored: target out of reach (ik error {e[0] * 100:.1f} cm)"
+                return (
+                    f"ignored: target out of reach (ik error {e[0] * 100:.1f} cm, {math.degrees(e[1]):.0f} deg; "
+                    "a level side grasp needs <= 0.8 cm, 5 deg)"
+                )
             qf, ef = kin.solve(far, R=geo["R"], w_rot=0.1, seeds=[qg])
             line_in, err_in = ms.line(qf, far, tcp, geo["R"], n=12)
             if ef[0] > 0.008 or err_in > 0.008:
