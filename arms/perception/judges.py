@@ -21,6 +21,7 @@ The vision model only reports what it sees (boxes, points, yes/no, text); CODE d
 
 from __future__ import annotations
 
+import ast
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -272,6 +273,50 @@ def judge_label(path: str, atom: LabelMatches, ans: CameraAnswers, method: Verif
     )
 
 
+# ---- shopper-visible words -------------------------------------------------------------------------------------------
+def basket_words(counts: Mapping[Sku, int], names: Mapping[Sku, str]) -> str:
+    """{'AVOCADO': 6, 'GUAC-KIT': 1} -> '6 Picky Farms Hass Avocado, 1 Fresh Guacamole Kit' (words, never a dict)."""
+    parts = [f"{n} {names.get(s, s)}" for s, n in sorted(counts.items()) if n]
+    return ", ".join(parts) if parts else "nothing"
+
+
+_BASKET_DICT = r"(robot state: )?basket (\{[^{}]*\})"
+
+
+def humanize_reason(text: str, names: Mapping[Sku, str]) -> str:
+    """The contracts' state / truth evaluators write 'robot state: basket {'AVOCADO': 3}' and raw SKUs ('robot state:
+    holding BEANS-BLACK'); the reason is shown to the shopper ('Not sure: ...'), so -> 'robot state says 3 Picky Farms
+    Hass Avocado' / 'basket holds ...' and product names (one pass: inserted names are never rewritten)."""
+    skus = "|".join(re.escape(s) for s in sorted((s for s in names if s), key=len, reverse=True))
+    pattern = _BASKET_DICT + (rf"|(?<![\w-])({skus})(?![\w-])" if skus else "")
+
+    def sub(m: re.Match[str]) -> str:
+        if m.group(2) is None:
+            return names[m.group(3)]
+        try:
+            counts = ast.literal_eval(m.group(2))
+        except (ValueError, SyntaxError):
+            return m.group(0)
+        if not isinstance(counts, dict):
+            return m.group(0)
+        words = basket_words(counts, names)
+        return f"robot state says {words}" if m.group(1) else f"basket holds {words}"
+
+    return re.sub(pattern, sub, text)
+
+
+def humanize_atoms(atoms: list[AtomVerdict], names: Mapping[Sku, str]) -> list[AtomVerdict]:
+    return [a.model_copy(update={"reason": humanize_reason(a.reason, names)}) for a in atoms]
+
+
+def unpair_reason(reason: str, state_reason: str) -> str:
+    """``combine_verdicts``' disagreement line 'camera (A) vs state (B)' -> 'A; B' (one plain sentence)."""
+    head, tail = "camera (", f") vs state ({state_reason})"
+    if reason.startswith(head) and reason.endswith(tail):
+        return f"{reason[len(head) : -len(tail)]}; {state_reason}"
+    return reason
+
+
 # ---- basket ----------------------------------------------------------------------------------------------------------
 def _basket_counts(ans: CameraAnswers) -> tuple[dict[Sku, int] | None, list[Evidence]]:
     if not usable_count(ans.items) or ans.items is None:
@@ -319,13 +364,13 @@ def judge_basket_contains(
     ok = all(have.get(s, 0) >= n for s, n in atom.counts.items())
     if atom.exact:
         ok = ok and {s: n for s, n in have.items() if n} == {s: n for s, n in atom.counts.items() if n}
-    reason = f"camera: basket {dict(sorted(have.items()))}"
+    reason = f"camera sees {basket_words(have, ans.names)}"
     seen, want = sum(have.values()), sum(atom.counts.values())
     extra = any(n > atom.counts.get(s, 0) for s, n in have.items() if n) if atom.exact else False
     if not ok and not extra and 0 < seen < want and all(have.get(s, 0) <= n for s, n in atom.counts.items()):
         # Occlusion, not absence: a top-down camera sees the top layer of a full basket (Isaac taco trip: 2 of 11
         # units visible at the audit). Seeing a subset with nothing foreign is uncertain -> the robot state decides.
-        why = f"{reason}: {seen} of {want} units visible (the rest are under / behind them)"
+        why = f"{reason} ({seen} of {want} units visible; the rest are under / behind them)"
         return _av(path, atom, "uncertain", why, 0.5, method, ev[:6], {"basket": have})
     conf = COUNT_PASS_CONFIDENCE if ok else COUNT_FAIL_CONFIDENCE
     return _av(path, atom, "pass" if ok else "fail", reason, conf, method, ev[:6], {"basket": have})
