@@ -1,0 +1,205 @@
+{
+ "name": "success_20261018-015014",
+ "target": "gum",
+ "dest": "plate",
+ "target_xy": [
+  0.33540915043869296,
+  -0.1634651826782814
+ ],
+ "dest_xy": [
+  0.34783279032157044,
+  0.08277241881786362
+ ],
+ "roll": -97.5,
+ "home": {
+  "shoulder_pan": 0.0,
+  "shoulder_lift": -15.0,
+  "elbow_flex": -10.0,
+  "wrist_flex": 85.0,
+  "wrist_roll": 130.0
+ },
+ "trajectory": [
+  {
+   "name": "hover over target",
+   "joints": {
+    "shoulder_pan": 26.46,
+    "shoulder_lift": 40.37,
+    "elbow_flex": -44.82,
+    "wrist_flex": 64.46,
+    "wrist_roll": -97.5
+   },
+   "gripper": 98.0
+  },
+  {
+   "name": "straddle",
+   "joints": {
+    "shoulder_pan": 26.46,
+    "shoulder_lift": 40.43,
+    "elbow_flex": -31.31,
+    "wrist_flex": 50.88,
+    "wrist_roll": -97.5
+   },
+   "gripper": 98.0
+  },
+  {
+   "name": "close",
+   "joints": null,
+   "gripper": 5.0
+  },
+  {
+   "name": "lift straight up",
+   "joints": {
+    "shoulder_pan": 26.46,
+    "shoulder_lift": 46.04,
+    "elbow_flex": -62.55,
+    "wrist_flex": 76.51,
+    "wrist_roll": -97.5
+   },
+   "gripper": 5.0
+  },
+  {
+   "name": "lift high",
+   "joints": {
+    "shoulder_pan": 26.27,
+    "shoulder_lift": 31.77,
+    "elbow_flex": -63.33,
+    "wrist_flex": 76.56,
+    "wrist_roll": -97.5
+   },
+   "gripper": 5.0
+  },
+  {
+   "name": "transit",
+   "joints": {
+    "shoulder_pan": 7.91,
+    "shoulder_lift": -3.67,
+    "elbow_flex": -22.5,
+    "wrist_flex": 86.17,
+    "wrist_roll": -97.5
+   },
+   "gripper": 5.0
+  },
+  {
+   "name": "over destination",
+   "joints": {
+    "shoulder_pan": -13.42,
+    "shoulder_lift": 12.89,
+    "elbow_flex": -33.58,
+    "wrist_flex": 65.68,
+    "wrist_roll": -97.5
+   },
+   "gripper": 5.0
+  },
+  {
+   "name": "lower",
+   "joints": {
+    "shoulder_pan": -13.45,
+    "shoulder_lift": 26.82,
+    "elbow_flex": -17.58,
+    "wrist_flex": 50.76,
+    "wrist_roll": -97.5
+   },
+   "gripper": 5.0
+  },
+  {
+   "name": "release",
+   "joints": null,
+   "gripper": 98.0
+  },
+  {
+   "name": "retreat",
+   "joints": {
+    "shoulder_pan": -13.42,
+    "shoulder_lift": 12.89,
+    "elbow_flex": -33.58,
+    "wrist_flex": 65.68,
+    "wrist_roll": -97.5
+   },
+   "gripper": 98.0
+  }
+ ],
+ "waypoints": [
+  {
+   "name": "hover over target",
+   "xyz": [
+    0.33540915043869296,
+    -0.1634651826782814,
+    0.062
+   ],
+   "gripper": 98.0
+  },
+  {
+   "name": "straddle",
+   "xyz": [
+    0.33540915043869296,
+    -0.1634651826782814,
+    0.030000000000000002
+   ],
+   "gripper": 98.0
+  },
+  {
+   "name": "close",
+   "xyz": null,
+   "gripper": 5.0
+  },
+  {
+   "name": "lift straight up",
+   "xyz": [
+    0.33540915043869296,
+    -0.1634651826782814,
+    0.08
+   ],
+   "gripper": 5.0
+  },
+  {
+   "name": "lift high",
+   "xyz": [
+    0.33540915043869296,
+    -0.1634651826782814,
+    0.16
+   ],
+   "gripper": 5.0
+  },
+  {
+   "name": "transit",
+   "xyz": [
+    0.290377824823112,
+    -0.04034638193020888,
+    0.16
+   ],
+   "gripper": 5.0
+  },
+  {
+   "name": "over destination",
+   "xyz": [
+    0.34783279032157044,
+    0.08277241881786362,
+    0.16
+   ],
+   "gripper": 5.0
+  },
+  {
+   "name": "lower",
+   "xyz": [
+    0.34783279032157044,
+    0.08277241881786362,
+    0.05
+   ],
+   "gripper": 5.0
+  },
+  {
+   "name": "release",
+   "xyz": null,
+   "gripper": 98.0
+  },
+  {
+   "name": "retreat",
+   "xyz": [
+    0.34783279032157044,
+    0.08277241881786362,
+    0.16
+   ],
+   "gripper": 98.0
+  }
+ ]
+}
