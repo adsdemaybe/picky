@@ -19,6 +19,7 @@ The vision model only reports what it sees (boxes, points, yes/no, text); CODE d
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 
@@ -58,6 +59,10 @@ STATE_BEFORE_CONFIDENCE = 0.6
 TEXT_MATCH_CONFIDENCE = 0.85
 TEXT_MISMATCH_CONFIDENCE = 0.75
 MIN_TEXT_CHARS = 3
+LABEL_PASS_OVERLAP = 0.5
+"""label_matches passes when at least this share of the expected name's significant words is read."""
+LABEL_FAIL_MIN_TOKENS = 2
+"""label_matches fails only on a read with at least this many significant words and none of the expected ones."""
 MIN_EMPTY_CONFIDENCE = 0.5
 GENERIC_HELD_CLASS = "other grocery item"
 
@@ -206,13 +211,47 @@ def judge_gripper(
 
 
 # ---- label -----------------------------------------------------------------------------------------------------------
+_LABEL_FIELD_RE = re.compile(
+    r"\b(brand|product(?:\s+name)?|name|size|price|n/?a|none|unknown|not\s+visible)\b\s*:?", re.I
+)
+_UNIT_TOKENS = frozenset(
+    {"oz", "fl", "lb", "lbs", "ml", "ct", "pk", "pack", "each", "g", "kg", "l", "in", "inch", "sq", "ft"}
+)
+
+
+def _label_tokens(text: str) -> set[str]:
+    """Significant lowercase tokens of a label / product name (>= 3 chars, no units / pure numbers)."""
+    toks = re.findall(r"[a-z0-9%]+", text.casefold())
+    return {t for t in toks if len(t) >= 3 and t not in _UNIT_TOKENS and not t.isdigit()}
+
+
+def label_content(text: str) -> str:
+    """The OCR text without template field names: 'Brand:  Product Name:  Size:' (nothing read) -> ''."""
+    return re.sub(r"[\s:;,.|/-]+", " ", _LABEL_FIELD_RE.sub(" ", text)).strip()
+
+
+def label_overlap(expect: str, text: str) -> float:
+    """Share of the expected name's significant tokens found in the text (1.0 = all of them)."""
+    want = _label_tokens(expect)
+    if not want:
+        return 1.0 if expect.casefold() in text.casefold() else 0.0
+    return len(want & _label_tokens(text)) / len(want)
+
+
 def judge_label(path: str, atom: LabelMatches, ans: CameraAnswers, method: VerifyMethod) -> AtomVerdict | None:
+    """Pass when the expected name is in the text, or at least half of its significant words are; FAIL only on a
+    substantial read that shares none of them; anything in between (or a template-only / empty read) is uncertain.
+    A partial read ('MILD CHUNKY SALSA' without the size) or a cut-off label must not trigger a put-back."""
     if not answer_ok(ans.label) or ans.label is None:
         return None
     text = (ans.label.text or "").strip()
-    if len(text) < MIN_TEXT_CHARS:
+    content = label_content(text)
+    if len(re.sub(r"[^0-9A-Za-z]", "", content)) < MIN_TEXT_CHARS:
         return _av(path, atom, "uncertain", "label unreadable", 0.3, method)
-    ok = atom.expect_text.casefold() in text.casefold()
+    overlap = label_overlap(atom.expect_text, content)
+    ok = atom.expect_text.casefold() in text.casefold() or overlap >= LABEL_PASS_OVERLAP
+    if not ok and (overlap > 0 or len(_label_tokens(content)) < LABEL_FAIL_MIN_TOKENS):
+        return _av(path, atom, "uncertain", f"label partly read {text!r} (expected {atom.expect_text!r})", 0.4, method)
     ev = Evidence(
         kind="text", role="label", frame=ans.frame, text=text, sku=atom.sku if ok else None, matches_expectation=ok
     )
