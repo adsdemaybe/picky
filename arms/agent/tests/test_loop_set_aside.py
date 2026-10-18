@@ -7,6 +7,7 @@ from typing import Any
 from arms.agent.loop import PlanLoop
 from arms.agent.tests.loop_world import build_loop_services
 from arms.agent.tests.loop_world.helpers import run
+from contracts.faults import FaultMatch, FaultRule, FaultScenario
 from contracts.plan import GraspStep, PlaceStep, PlanRequest
 from contracts.policy import DEFAULT_RETRY_POLICY
 from contracts.trust import ApprovalRequest, ApprovalResponse
@@ -213,3 +214,159 @@ def test_set_aside_second_unit_unloads_between_its_neighbours_in_basket_order() 
     lines = out.run.local_cart
     assert lines[0].qty == 2 and out.run.local_cart_cents == 2 * lines[0].unit_price_cents
     assert wrong_unit not in lines[0].instance_ids
+
+
+# ---- verifier-caught wrong grasp (live vhagar, goal_bu7gy5gm): never strand the trip on a put-back it cannot run ----
+_NIKE = "Brand: Nike\nProduct Name: Air Max 270 React\nSize: 10"  # what the Isaac label check read on the live trip
+
+
+def _mislabel_first_grasp(sku: str = "SALSA-MILD") -> FaultScenario:
+    rule = FaultRule(
+        fault_id="f-mislabel",
+        effect="mislabel",
+        match=FaultMatch(step_kind="grasp", sku=sku, attempt=1),
+        params={"text": _NIKE},
+    )
+    return FaultScenario(name="mislabel_first_grasp", description="label check fails on the first grasp", rules=[rule])
+
+
+def _verifier_caught_run(*, put_back: bool | None, basket_unload: bool = False) -> tuple[Any, Any, list[Any]]:
+    """1 x mild salsa; the first grasp's label check reads a Nike shoebox. ``put_back`` False = T0 says it has no
+    place-back primitive (Isaac); None = the capability claims one but the backend has none (the live failure)."""
+    s = build_loop_services(_mislabel_first_grasp(), basket_unload=basket_unload)
+    if put_back is False:
+        _no_put_back(s)
+    asked: list[ApprovalRequest] = []
+
+    async def answer(req: ApprovalRequest) -> ApprovalResponse:
+        asked.append(req)
+        if req.kind.value == "verify_item":
+            return ApprovalResponse(approval_id=req.approval_id, decision="choice", choice="correct")
+        return ApprovalResponse(approval_id=req.approval_id, decision="approve")
+
+    s.runner = PlanLoop(s, policy=DEFAULT_RETRY_POLICY, answer=answer, verify_items=True, heartbeat_s=0.05)
+
+    async def go() -> Any:
+        plan = await s.planner.plan(PlanRequest(robot_id=ROBOT, text="1 mild salsa", store_id=STORE))
+        return await s.runner.run_plan(plan)
+
+    return s, run(go()), asked
+
+
+def _assert_set_aside_and_regrabbed(s: Any, out: Any, asked: list[Any]) -> str:
+    assert out.status == "completed", out.summary
+    caught = s.events.of("step.failed")[0]
+    assert caught.failure.step_kind == "grasp" and caught.failure.caught_by_verifier
+    assert caught.decision.action == "return_item"
+    # never 'Try again?' / a hand-off for a step the robot cannot run
+    assert not [r for r in asked if r.kind.value not in ("verify_item",)], [r.title for r in asked]
+    assert not any(e.decision.action in ("ask_user", "escalate") for e in s.events.of("step.failed"))
+    texts = [e.step.text for e in s.events.of("brain.step")]
+    assert not any("Try again" in t or "another robot" in t for t in texts), texts
+    # the mislabelled unit rode in the basket uncounted; a fresh unit was grabbed and is the one charged
+    aside = [e for e in out.run.effects if e.kind == "goal_item_progress" and e.payload.get("set_aside")]
+    assert len(aside) == 1
+    picked = {e.step_id: e.payload.get("instance_id") for e in out.run.effects if e.kind == "record_pick"}
+    wrong_unit = picked[aside[0].step_id]
+    assert wrong_unit and len(picked) == 2
+    aside_step = next(st for st in out.plan.steps if st.step_id == aside[0].step_id)
+    assert isinstance(aside_step, PlaceStep) and aside_step.destination == "basket"
+    assert "set aside for staff, not charged" in aside_step.title and "SALSA" not in aside_step.title
+    lines = out.run.local_cart
+    assert [(ln.sku, ln.qty) for ln in lines] == [("SALSA-MILD", 1)]
+    assert wrong_unit not in lines[0].instance_ids and len(lines[0].instance_ids) == 1
+    assert out.run.local_cart_cents == lines[0].unit_price_cents
+    item = next(i for i in out.plan.items if i.sku == "SALSA-MILD")
+    assert item.picked_qty == 1 and item.status == "in_basket" and wrong_unit not in item.instance_ids
+    return wrong_unit
+
+
+def test_verifier_caught_wrong_grasp_without_put_back_is_set_aside_and_regrabbed() -> None:
+    """T0 says it cannot put back (Isaac): the label catch sets the held unit aside in the basket (never charged) and
+    grabs another; no put-back step is ever planned."""
+    s, out, asked = _verifier_caught_run(put_back=False)
+    _assert_set_aside_and_regrabbed(s, out, asked)
+    caught = s.events.of("step.failed")[0]
+    assert "not charged" in caught.decision.reason and "putting it back" not in caught.decision.reason
+    started = [e.step for e in s.events.of("step.started")]
+    assert not any(isinstance(st, PlaceStep) and st.destination == "shelf" for st in started)
+    assert len(s.events.of("step.failed")) == 1  # nothing else failed on the way
+    regrab = [st for st in out.plan.steps if isinstance(st, GraspStep) and st.status.value == "succeeded"]
+    assert len(regrab) == 1 and regrab[0].attempts == 2  # the same grasp step, re-run on a fresh unit
+
+
+def test_put_back_the_backend_cannot_run_becomes_a_set_aside_not_a_question() -> None:
+    """The live failure: the capability claimed a put-back but T0 has no primitive ('unsupported_step'). The put-back
+    step turns into a set-aside place (no 'Try again?', no hand-off to another robot) and the trip completes."""
+    s, out, asked = _verifier_caught_run(put_back=None)
+    _assert_set_aside_and_regrabbed(s, out, asked)
+    failed = s.events.of("step.failed")
+    assert [e.failure.code for e in failed][1] == "unsupported_step"
+    assert failed[1].decision.action == "retry" and failed[1].decision.rule_id == "no_put_back"
+    assert "not charged" in failed[1].decision.reason
+    converted = next(st for st in out.plan.steps if st.step_id == failed[1].step_id)
+    assert isinstance(converted, PlaceStep) and converted.destination == "basket" and converted.slot_id is None
+    assert converted.status.value == "succeeded" and converted.attempts == 2
+
+
+def test_no_put_back_is_remembered_for_the_rest_of_the_run() -> None:
+    """After one 'unsupported_step' put-back, a later wrong unit is set aside straight away (no second failed
+    put-back attempt)."""
+    s = build_loop_services(
+        FaultScenario(
+            name="two_mislabels",
+            description="both units' first grasps read a wrong label",
+            rules=[
+                FaultRule(
+                    fault_id="f-m",
+                    effect="mislabel",
+                    match=FaultMatch(step_kind="grasp", sku="SALSA-MILD", attempt=1),
+                    params={"text": _NIKE},
+                    times=2,
+                )
+            ],
+        )
+    )
+
+    async def go() -> Any:
+        plan = await s.planner.plan(PlanRequest(robot_id=ROBOT, text="2 mild salsa", store_id=STORE))
+        return await s.runner.run_plan(plan)
+
+    out = run(go())
+    assert out.status == "completed", out.summary
+    codes = [e.failure.code for e in s.events.of("step.failed")]
+    assert codes.count("unsupported_step") == 1, codes
+    assert sum(1 for e in out.run.effects if e.kind == "goal_item_progress" and e.payload.get("set_aside")) == 2
+    lines = out.run.local_cart
+    assert [(ln.sku, ln.qty) for ln in lines] == [("SALSA-MILD", 2)]
+
+
+def test_verifier_caught_set_aside_unit_is_unloaded_at_the_counter_not_charged() -> None:
+    s, out, asked = _verifier_caught_run(put_back=False, basket_unload=True)
+    wrong_unit = _assert_set_aside_and_regrabbed(s, out, asked)
+    total, by_unit = _unload_by_unit(s)
+    assert total == 2 and all([e.status for e in evs] == ["started", "placed", "verified"] for evs in by_unit.values())
+    on_counter = [e.payload.get("instance_id") for e in out.run.effects if e.kind == "unload_to_counter"]
+    assert on_counter[0] == wrong_unit and all("not charged" in e.text for e in by_unit[1])
+    assert "Mild Chunky Salsa" in by_unit[1][0].text and "SALSA" not in by_unit[1][0].text
+    done = [e for e in s.events.of("checkout.unload") if e.status == "done"]
+    assert "(1 set aside for staff, not charged)" in done[0].text
+
+
+def test_wrong_unit_is_still_put_back_where_the_backend_can() -> None:
+    """Put-back supported (the 2D fake's overlay): the wrong jar goes back on its shelf as before, nothing set aside."""
+    s = build_loop_services("wrong_salsa")
+
+    async def go() -> Any:
+        plan = await s.planner.plan(PlanRequest(robot_id=ROBOT, text="1 mild salsa", store_id=STORE))
+        return await s.runner.run_plan(plan)
+
+    out = run(go())
+    assert out.status == "completed", out.summary
+    caught = s.events.of("step.failed")[0]
+    assert caught.decision.action == "return_item" and "putting it back" in caught.decision.reason
+    back = [st for st in out.plan.steps if isinstance(st, PlaceStep) and st.destination == "shelf"]
+    assert len(back) == 1 and back[0].status.value == "succeeded"
+    assert not out.run.effects or not any(e.payload.get("set_aside") for e in out.run.effects)
+    assert not any("not charged" in e.step.text for e in s.events.of("brain.step"))
+    assert [(ln.sku, ln.qty) for ln in out.run.local_cart] == [("SALSA-MILD", 1)]

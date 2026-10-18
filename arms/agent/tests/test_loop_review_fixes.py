@@ -12,7 +12,6 @@ from contracts.bridge import goal_update_from_outcome
 from contracts.faults import FaultMatch, FaultRule, FaultScenario
 from contracts.fleet import Goal, GoalItem, GoalStatus
 from contracts.plan import ApprovalGranted, PlanRequest
-from contracts.sim import RobotError
 from contracts.trust import ApprovalRequest, ApprovalResponse
 from contracts.verify import StateFacts, VerifyRequest, evaluate_on_state
 
@@ -100,12 +99,18 @@ def test_a_foreign_unit_in_the_gripper_is_never_counted_as_the_item() -> None:
         await _hold(s, "SALSA-HOT")
         return await s.runner.run_goal(ROBOT, _goal(GoalItem(item_id="i1", query="salsa", sku="SALSA-MILD")))
 
-    with pytest.raises(RobotError):  # T0 has no place-back: ask staff, then escalate (the fleet reassigns)
-        run(go())
-    actions = [e.decision.action for e in s.events.of("step.failed")]
-    assert actions[0] == "return_held" and actions[-1] == "escalate"
-    assert s.catalog.picks == []  # nothing recorded / charged for the foreign unit
-    assert s.events.of("plan.completed")[-1].status == "failed"
+    # T0 has no place-back: the foreign unit is set aside in the basket for staff (never charged), then the grasp
+    out = run(go())
+    assert out.status == "completed", out.summary
+    failed = s.events.of("step.failed")
+    assert [e.decision.action for e in failed][:2] == ["return_held", "retry"]
+    assert failed[1].decision.rule_id == "no_put_back" and "not charged" in failed[1].decision.reason
+    assert not any(e.decision.action in ("ask_user", "escalate") for e in failed)
+    assert out.plan.items[0].picked_qty == 1 and out.plan.items[0].status == "in_basket"
+    assert [(ln.sku, ln.qty) for ln in out.run.local_cart] == [("SALSA-MILD", 1)]  # the foreign unit: no line
+    aside = [e for e in out.run.effects if e.kind == "goal_item_progress" and e.payload.get("set_aside")]
+    assert len(aside) == 1
+    assert sorted(sku for _, sku, _ in s.catalog.picks) == ["SALSA-HOT", "SALSA-MILD"]  # stock: it left its shelf
 
 
 # ---- produce: the chosen units survive a re-ground; one choice per unit; v0.2 pick.choices ----------------------

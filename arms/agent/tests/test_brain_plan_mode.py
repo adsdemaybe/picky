@@ -173,19 +173,23 @@ def test_robot_error_from_the_runner_propagates_without_finishing_the_goal() -> 
     assert any(e.step.kind == "error" and "battery_low" in e.step.text for e in s.events.of("brain.step"))
 
 
-def test_a_foreign_unit_in_the_gripper_escalates_to_the_fleet() -> None:
+def test_a_foreign_unit_in_the_gripper_is_set_aside_and_the_goal_finishes() -> None:
+    """T0 has no place-back primitive: the foreign unit goes in the basket for staff (never charged) instead of a
+    put-back the robot cannot run (which used to ask 'Try again?', then hand the goal to another robot)."""
     s, fleet, brain = _world()
 
-    async def go() -> None:
+    async def go() -> Any:
         plano = await s.catalog.get_planogram(STORE)
         slot = next(x for x in plano.slots if x.sku == "SALSA-HOT")
         await s.robot.navigate(ROBOT, [slot.approach_pose])
         await s.robot.pick(ROBOT, slot.slot_id, "SALSA-HOT")
-        await brain.run_goal(ROBOT, fleet.add(_goal(_salsa())))
+        return await brain.run_goal(ROBOT, fleet.add(_goal(_salsa())))
 
-    with pytest.raises(RobotError):
-        run(go())
-    assert s.catalog.picks == [] and all(u.status is None for u in fleet.updates)
+    final = run(go())
+    assert final.status == GoalStatus.COMPLETED
+    assert {i.item_id: (i.status, i.picked_qty) for i in final.items} == {"i1": ("in_basket", 1)}
+    assert sorted(sku for _, sku, _ in s.catalog.picks) == ["SALSA-HOT", "SALSA-MILD"]  # it left its shelf
+    assert not [e for e in s.events.of("brain.step") if "Try again" in e.step.text or e.step.kind == "error"]
 
 
 def test_a_runner_crash_falls_back_to_the_v02_executor() -> None:

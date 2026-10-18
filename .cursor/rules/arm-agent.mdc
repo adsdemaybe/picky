@@ -192,7 +192,13 @@ the VLA + verifier are wired), `PICKY_PLAN_TIMEOUT_S` (20), `PICKY_VERIFY_TIMEOU
 - No put-back (Isaac): a "wrong" unit (or a grasp of another unit than the shopper chose) is set aside in the basket,
   never charged, and another unit is grabbed; the checkout unload still puts it on the counter in basket order
   ("Unloading 1/2: … (set aside for staff, not charged)", its counter card says not charged and stays off the
-  purchase photos).
+  purchase photos). The same holds for EVERY wrong-unit recovery that would put a unit back: a verifier catch
+  (label / SKU check), a photo-check "wrong", a foreign unit already in the gripper. When T0 reports
+  `place_back=false` no put-back step is planned (the held unit gets a set-aside basket place, then a fresh unit is
+  re-grounded and grabbed); when a planned put-back fails `unsupported_step` (no primitive on the 0.2 sim wire), that
+  step becomes the set-aside place (rule id `no_put_back`) and the run sets every later wrong unit aside. Never a
+  "Try again?" for a step the robot cannot run, never a hand-off to another robot for it. Put-back stays where the
+  backend has it (2D fake).
 
 ## Known limitations
 
