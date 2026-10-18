@@ -14,10 +14,17 @@ from arms.gateway.registry import build_registry
 from arms.gateway.tests.helpers import FAST_FAKES, needs_data, until
 from arms.gateway.tests.stubs import StubBrain, StubCameras, StubFleet
 from contracts.api import CreateTripRequest, RobotLoginRequest
-from contracts.fleet import GoalStatus
+from contracts.fleet import GoalItem, GoalStatus, goal_items_from_trip
 from contracts.messaging import InboundMessage
 from contracts.shopping import CartLine, ListItem, TripState
-from contracts.trust import ApprovalKind, ApprovalRequest, ApprovalResponse, MandateReason, MandateVerdict
+from contracts.trust import (
+    ApprovalKind,
+    ApprovalOption,
+    ApprovalRequest,
+    ApprovalResponse,
+    MandateReason,
+    MandateVerdict,
+)
 from utils.ids import new_id
 
 TACOS = "tacos for 6, under $40, one vegetarian"
@@ -453,3 +460,191 @@ def test_fit_detours_keeps_a_near_expiry_markdown_on_a_tight_budget() -> None:
     kept, _ = TripOrchestrator._fit_detours([rec("HOT", 299), rec("CHIPS", 349), rec("JAL", 129)], 3, 244)
     assert [r.sku for r in kept] == ["HOT", "JAL"], "still at most one plain over-budget detour"
     assert [r.sku for r in TripOrchestrator._fit_detours(recs, 3, None)[0]] == ["HOT", "GUAC", "JAL"]
+
+
+# ======================================================================================================================
+# checkout-phase suggestions: billed in store only once a robot has picked them (CLAUDE.md §8)
+# ======================================================================================================================
+CHIPS = "tortilla chips and salsa, under $40"
+"""Leaves budget headroom, so the checkout batch has in-store suggestions."""
+
+
+async def checkout_shopper(reg, *, take_batch: bool, take_detours: bool = False) -> None:  # noqa: ANN001
+    """Web shopper: says no to detours (unless ``take_detours``), takes every checkout-batch card (or none), answers
+    the rest with yes / the first option, approves the checkout with its cart hash."""
+    while True:
+        for p in reg.approvals.pending():
+            if p.kind == ApprovalKind.CHECKOUT:
+                resp = ApprovalResponse(approval_id=p.approval_id, decision="approve", cart_hash=p.cart_hash)
+            elif p.payload.get("kind") == "checkout_batch":
+                resp = (
+                    ApprovalResponse(
+                        approval_id=p.approval_id, decision="choice", choices=[o.option_id for o in p.options]
+                    )
+                    if take_batch
+                    else ApprovalResponse(approval_id=p.approval_id, decision="reject")
+                )
+            elif p.options:
+                resp = ApprovalResponse(approval_id=p.approval_id, decision="choice", choice=p.options[0].option_id)
+            elif p.kind == ApprovalKind.RECOMMENDATION:
+                resp = ApprovalResponse(approval_id=p.approval_id, decision="approve" if take_detours else "reject")
+            else:
+                resp = ApprovalResponse(approval_id=p.approval_id, decision="approve")
+            await reg.approvals.resolve(resp)
+        await asyncio.sleep(0.01)
+
+
+class _RecordingFleet(StubFleet):
+    """Remembers, per in-store run, the cart before it and the goal items it was handed."""
+
+    def __init__(self, services) -> None:  # noqa: ANN001
+        super().__init__(services)
+        self.runs: list[tuple[list[CartLine], list[GoalItem]]] = []
+
+    async def execute_trip(self, trip_id: str, robot_id: str | None = None):  # noqa: ANN201
+        trip = await self.services.trips.get_trip(trip_id)
+        self.runs.append((list(trip.cart.lines), goal_items_from_trip(trip)))
+        return await super().execute_trip(trip_id, robot_id)
+
+
+async def _paid_trip(reg, text: str, **shopper):  # noqa: ANN001, ANN003, ANN202
+    orch = reg.orchestrator
+    await orch.start()
+    task = asyncio.create_task(checkout_shopper(reg, **shopper))
+    try:
+        trip = await orch.create_trip(CreateTripRequest(user_id="maya", text=text, auto_execute=True))
+        await until(lambda: orch.peek(trip.trip_id).state in (TripState.FOLLOWUP, TripState.DONE, TripState.FAILED))
+        final = await orch.get_trip(trip.trip_id)
+        assert final.receipt is not None and final.receipt.status == "succeeded", final.error
+        bought = await reg.services.recommender.purchase_history("maya")
+        return final, [p for p in bought if p.trip_id == trip.trip_id]
+    finally:
+        task.cancel()
+        await orch.stop()
+
+
+def _recording_registry(**cfg):  # noqa: ANN003, ANN202
+    return build_registry(
+        real_arms=set(),
+        fake_opts=FAST_FAKES,
+        overrides={**STUBS, "fleet": _RecordingFleet},
+        orchestrator_config=OrchestratorConfig(approval_channels=("web",), payment_step_pause_s=0.0, **cfg),
+    )
+
+
+@needs_data
+async def test_checkout_suggestion_accepted_after_picking_is_billed_only_once_the_robot_picks_it() -> None:
+    """The trip_j2x2ci4p bug: a suggestion accepted at checkout, after the robot had finished, was billed as an
+    in-store 'picked' line nobody picked. Now the robot goes back for it first."""
+    reg = _recording_registry()
+    final, bought = await _paid_trip(reg, CHIPS, take_batch=True)
+    accepted = {r.rec_id: r for r in final.checkout_recs if r.store_id == final.store_id}
+    assert accepted, "precondition: the checkout batch has in-store suggestions"
+    runs = reg.services.fleet.runs
+    assert len(runs) == 2, "the shop run, then one run back to the shelves for the accepted suggestions"
+    cart_before, items = runs[1]
+    assert not any(ln.rec_id in accepted for ln in cart_before), "nothing is billed before the robot goes back"
+    todo = [i for i in items if i.status == "pending"]
+    assert {i.rec_id for i in todo} == set(accepted)
+    assert not any(i.optional for i in todo), "the shopper already said yes: no second ask"
+    billed = [ln for ln in final.receipt.lines if ln.rec_id in accepted]
+    assert {ln.rec_id for ln in billed} == set(accepted)
+    for ln in billed:  # the stub robot's pick (status 'picked' after arriving at the stop), at the card's price
+        assert ln.source == "in_store" and ln.status == "picked"
+        assert final.stop_status[f"rec:{ln.rec_id}"] == "done"
+        assert ln.unit_price_cents == accepted[ln.rec_id].price_cents
+    assert final.receipt.amount_cents == final.cart.total_cents
+    assert {r.sku for r in accepted.values()} <= {p.sku for p in bought}
+    assert not [e for e in reg.bus.recent(trip_id=final.trip_id) if e.type == "error"]
+
+
+@needs_data
+@pytest.mark.parametrize("why", ["fetch_off", "goal_failed"])
+async def test_checkout_suggestion_is_not_billed_when_no_robot_can_pick_it(why: str) -> None:
+    reg = _recording_registry(fetch_checkout_suggestions=why != "fetch_off")
+    if why == "goal_failed":
+        reg.services.fleet.outcome = GoalStatus.FAILED  # the in-store run ended early: nobody goes back
+    final, bought = await _paid_trip(reg, CHIPS, take_batch=True)
+    accepted = {r.rec_id: r for r in final.checkout_recs if r.store_id == final.store_id}
+    assert accepted, "precondition: the checkout batch has in-store suggestions"
+    assert len(reg.services.fleet.runs) == 1
+    assert not any(ln.rec_id in accepted for ln in final.cart.lines)
+    assert not any(ln.rec_id in accepted for ln in final.receipt.lines)
+    assert not {r.sku for r in accepted.values()} & {p.sku for p in bought}, "never in the purchase history"
+    assert all(ln.status in ("picked", "verified") for ln in final.receipt.lines if ln.source == "in_store")
+    errors = [
+        e for e in reg.bus.recent(trip_id=final.trip_id) if e.type == "error" and e.code == "suggestion_not_picked"
+    ]
+    assert len(errors) == len(accepted) and all("not in your cart or on your bill" in e.message for e in errors)
+
+
+@needs_data
+async def test_mid_trip_detour_accept_is_still_picked_and_billed() -> None:
+    reg = _recording_registry()
+    final, bought = await _paid_trip(reg, CHIPS, take_batch=False, take_detours=True)
+    picked = [r for r in final.recs if final.stop_status.get(f"rec:{r.rec_id}") == "done"]
+    assert picked, "precondition: the shopper said yes to a detour"
+    assert len(reg.services.fleet.runs) == 1, "a declined checkout batch sends nobody back"
+    lines = {ln.rec_id: ln for ln in final.receipt.lines if ln.rec_id}
+    for rec in picked:
+        ln = lines[rec.rec_id]
+        assert ln.source == "in_store" and ln.status == "picked" and ln.sku == rec.sku
+    assert final.receipt.amount_cents == final.cart.total_cents
+    assert {r.sku for r in picked} <= {p.sku for p in bought}
+
+
+@needs_data
+async def test_pick_of_a_checkout_choice_uses_the_card_price_and_that_choice_once() -> None:
+    """The robot's line for a suggestion chosen at checkout: billed at the price on the card, and the batch choice is
+    its line approval (one use per chosen rec), so an above-threshold pick is not dropped after the robot picked it."""
+    reg = build_registry(
+        real_arms=set(),
+        fake_opts=FAST_FAKES,
+        overrides={**STUBS, "fleet": _BlockingFleet},
+        orchestrator_config=OrchestratorConfig(approval_channels=("web",)),
+    )
+    orch = reg.orchestrator
+    await orch.start()
+    try:
+        trip = await orch.create_trip(CreateTripRequest(user_id="maya", text=TACOS, auto_execute=True))
+        await until(lambda: orch.peek(trip.trip_id).state == TripState.EXECUTING and orch.peek(trip.trip_id).robot_id)
+        live = await orch.get_trip(trip.trip_id)
+        mandate = await reg.services.trust.get_mandate("maya")
+        card = mandate.ask_above_cents + 200
+        batch = ApprovalRequest(
+            approval_id=new_id("appr"),
+            trip_id=trip.trip_id,
+            user_id="maya",
+            kind=ApprovalKind.RECOMMENDATION,
+            title="Want any of these before checkout?",
+            options=[ApprovalOption(option_id="rec_x", label="Coffee"), ApprovalOption(option_id="rec_y", label="Tea")],
+            multi=True,
+            payload={"kind": "checkout_batch"},
+        )
+        fut = await reg.approvals.open(batch)
+        await reg.approvals.resolve(ApprovalResponse(approval_id=batch.approval_id, decision="choice", choice="rec_x"))
+        await fut
+        orch._checkout_picks[trip.trip_id] = {"rec_x": (batch.approval_id, card), "rec_y": (batch.approval_id, card)}
+
+        def picked(rec_id: str) -> CartLine:  # the robot's own price lookup disagrees with the card
+            return CartLine(
+                line_id=new_id("line"),
+                sku="COFFEE",
+                name="Coffee",
+                category="beverages",
+                unit_price_cents=card - 100,
+                store_id=live.store_id,
+                status="picked",
+                rec_id=rec_id,
+                instance_ids=["X#00"],
+            )
+
+        res = await orch.add_line(trip.trip_id, picked("rec_x"))
+        assert res.added and res.decision.verdict == MandateVerdict.NEEDS_APPROVAL
+        line = next(ln for ln in res.cart.lines if ln.line_id == res.line_id)
+        assert line.unit_price_cents == card and line.status == "picked"
+        assert not (await orch.add_line(trip.trip_id, picked("rec_x"))).added, "one use per chosen rec"
+        assert not (await orch.add_line(trip.trip_id, picked("rec_y"))).added, "rec_y was not chosen"
+    finally:
+        reg.services.fleet.release.set()
+        await orch.stop()

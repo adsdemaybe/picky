@@ -97,11 +97,23 @@ def test_suggestions_order_unload_pay_and_history() -> None:
         mine = [e for e in events if e.get("trip_id") == tid]
         unload = [e for e in mine if e["type"] == "checkout.unload"]
         verified = [e for e in unload if e["status"] == "verified"]
+        runs: dict[str, list[dict[str, Any]]] = {}  # plan_id -> its unload (the shop run, then a run back for an
+        for e in verified:  # in-store suggestion accepted at checkout: only a robot pick puts it on the bill)
+            runs.setdefault(e["plan_id"], []).append(e)
         total = verified[0]["total"]  # the ordered cards + any detour the shopper said yes to
-        assert total >= 3 and len(verified) == total
+        assert total >= 3
+        for seq in runs.values():  # every unload sequence is complete, laid left -> right on the cleared counter
+            n = seq[0]["total"]
+            assert len(seq) == n and [e["counter_spot"] for e in seq] == list(range(n))
         assert verified[0]["text"] == f"Unloading 1/{total}: {verified[0]['name']} → counter ✓"
-        assert [e["counter_spot"] for e in verified] == list(range(total))
         assert any(e["status"] == "done" for e in unload)
+        final = c.get(f"/api/trips/{tid}").json()
+        suggested = {r["rec_id"] for r in final["checkout_recs"]}
+        taken = [ln for ln in final["receipt"]["lines"] if ln["rec_id"] in suggested]
+        assert bool(taken) == bool(suggested)  # the shopper took the first card: the robot went back for it
+        for ln in taken:  # an accepted checkout suggestion is billed in store only once picked
+            assert ln["source"] == "online" or (ln["instance_ids"] and ln["status"] in ("picked", "verified")), ln
+        assert len(runs) == 1 + any(ln["source"] == "in_store" for ln in taken)
         steps = [e for e in mine if e["type"] == "step.started"]
         kinds = [(e["step"]["kind"], e["step"].get("source"), e["step"].get("destination")) for e in steps]
         assert ("grasp", "basket", None) in kinds and ("place", None, "counter") in kinds
@@ -115,7 +127,7 @@ def test_suggestions_order_unload_pay_and_history() -> None:
 
         cards_seen = [e for e in mine if e["type"] == "item.verification"]
         shelf = {e["verification"]["verification_id"] for e in cards_seen if e["verification"]["status"] == "accepted"}
-        assert len(shelf) >= total  # one per purchased unit, answered ✓ in the app
+        assert len(shelf) >= len(verified)  # one per purchased unit, answered ✓ in the app
         assert answered
 
         rows = c.get("/api/users/maya/purchases", params={"limit": 10}).json()
