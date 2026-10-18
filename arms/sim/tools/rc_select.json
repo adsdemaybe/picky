@@ -1,0 +1,130 @@
+{
+ "lettuce": [
+  "lettuce_7",
+  "lettuce_0"
+ ],
+ "chili_pepper": [
+  "chili_pepper_0",
+  "chili_pepper_2"
+ ],
+ "celery": [
+  "celery_1",
+  "celery_5"
+ ],
+ "sausage": [
+  "sausage_13",
+  "sausage_10"
+ ],
+ "chicken_breast": [
+  "chicken_breast_2",
+  "chicken_breast_11"
+ ],
+ "steak": [
+  "steak_3",
+  "steak_8"
+ ],
+ "bacon": [
+  "bacon_9",
+  "bacon_6"
+ ],
+ "shrimp": [
+  "shrimp_1",
+  "shrimp_4"
+ ],
+ "tofu": [
+  "tofu_8",
+  "tofu_15"
+ ],
+ "ice_cream": [
+  "ice_cream_1",
+  "ice_cream_11"
+ ],
+ "burrito": [
+  "burrito_6",
+  "burrito_11"
+ ],
+ "peanut_butter_jar": [
+  "peanut_butter_jar_12",
+  "peanut_butter_jar_7"
+ ],
+ "salsa": [
+  "salsa_10",
+  "salsa_0"
+ ],
+ "olive_oil_bottle": [
+  "olive_oil_bottle_10",
+  "olive_oil_bottle_5"
+ ],
+ "honey_bottle": [
+  "honey_bottle_9",
+  "honey_bottle_5"
+ ],
+ "vinegar": [
+  "vinegar_10",
+  "vinegar_9"
+ ],
+ "spaghetti_box": [
+  "spaghetti_box_10",
+  "spaghetti_box_6"
+ ],
+ "butter_stick": [
+  "butter_stick_9",
+  "butter_stick_12"
+ ],
+ "egg": [
+  "egg_13",
+  "egg_12"
+ ],
+ "canola_oil": [
+  "canola_oil_1",
+  "canola_oil_13"
+ ],
+ "pork_loin": [
+  "pork_loin_3",
+  "pork_loin_13"
+ ],
+ "salami": [
+  "salami_11",
+  "salami_12"
+ ],
+ "cheese": [
+  "cheese_5",
+  "cheese_11"
+ ],
+ "condiment": [
+  "condiment_0",
+  "condiment_4"
+ ],
+ "bagged_food": [
+  "bagged_food_4",
+  "bagged_food_0"
+ ],
+ "bowl": [
+  "bowl_1",
+  "bowl_7"
+ ],
+ "ham": [
+  "ham_1",
+  "ham_3"
+ ],
+ "boxed_food": [
+  "boxed_food_5",
+  "boxed_food_1"
+ ],
+ "canned_food": [
+  "canned_food_6",
+  "canned_food_2"
+ ],
+ "milk": [
+  "milk_4",
+  "milk_2"
+ ],
+ "yogurt": [
+  "yogurt_6",
+  "yogurt_1"
+ ],
+ "jug": [
+  "jug_6",
+  "jug_2"
+ ]
+}
