@@ -425,7 +425,7 @@ def test_truth_sidecar_and_frames() -> None:
 
 
 def test_version_is_a_patch_bump_the_deployed_isaac_worker_accepts() -> None:
-    assert contracts.CONTRACTS_VERSION == "0.2.1"
+    assert contracts.CONTRACTS_VERSION == "0.2.2"
     assert versions_compatible(contracts.CONTRACTS_VERSION, "0.2.0")  # the worker on vhagar (0.2.0) keeps working
     assert not versions_compatible("0.3.0", "0.2.0")  # T1 wire (RunSkillCmd) waits for 0.3.0 + a worker rebuild
     for name in ("StepPlan", "VlaService", "VerifierService", "PlannerService", "Services", "plan_envelope"):

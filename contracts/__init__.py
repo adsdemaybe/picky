@@ -310,9 +310,15 @@ from contracts.services import (
 )
 from contracts.shopping import Cart, CartLine, Intent, ListItem, Recommendation, ShoppingList, TripState
 from contracts.sim import (
+    ARM_JOINTS_CAPABILITY,
+    ARM_JOINTS_MAX_STEPS,
+    POLICY_CAMERAS,
+    ArmJointsCmd,
+    ArmJointState,
     CameraFrame,
     CommandResult,
     ItemInstance,
+    PolicyFrame,
     RobotError,
     RobotState,
     RobotStatus,
@@ -405,12 +411,14 @@ from contracts.vla import (
     resolve_tier,
 )
 
-CONTRACTS_VERSION = "0.2.1"
+CONTRACTS_VERSION = "0.2.2"
 
 __all__ = [
     "ACTION_INSERTS",
     "APPROACH_DIST_MAX_M",
     "APPROACH_DIST_MIN_M",
+    "ARM_JOINTS_CAPABILITY",
+    "ARM_JOINTS_MAX_STEPS",
     "ARM_MOUNT_X_M",
     "ARM_NAMES",
     "ARM_REACH_M",
@@ -460,6 +468,7 @@ __all__ = [
     "ONLINE_STORE_ID",
     "PERCEPTRON_CALLS",
     "PICK_CHOICE_MAX",
+    "POLICY_CAMERAS",
     "PRECONDITION_REPAIRS",
     "REACH_NAV_TOLERANCE_M",
     "REACH_Z_MAX_M",
@@ -501,6 +510,8 @@ __all__ = [
     "ApprovalKind",
     "ApprovalRequest",
     "ApprovalResponse",
+    "ArmJointState",
+    "ArmJointsCmd",
     "AskUserResult",
     "AskUserStep",
     "Assignment",
@@ -622,6 +633,7 @@ __all__ = [
     "Point3",
     "PolicyClient",
     "PolicyError",
+    "PolicyFrame",
     "PolicyServerMetadata",
     "PolicyServerSpec",
     "PolicyServerStatus",
