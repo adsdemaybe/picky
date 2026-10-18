@@ -163,7 +163,7 @@ def test_committed_map_covers_every_product():
 
 
 def _mapped_store_ids(map_path) -> set[str]:
-    """Store ids named in sku_assets.yaml's generated_from.planograms ("data/planograms/store_ave.yaml, store_hill.yaml")."""
+    """Store ids named in sku_assets.yaml's generated_from.planograms (e.g. store_ave, store_hill)."""
     import re
 
     import yaml
