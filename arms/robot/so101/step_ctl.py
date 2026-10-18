@@ -31,6 +31,7 @@ from pathlib import Path
 
 import cv2
 
+from .camera import open_camera
 from .config import RigConfig
 from .grounding import detect
 from .kinematics import SO101Kinematics
@@ -79,7 +80,7 @@ def main() -> None:
     for f in out.glob("*"):
         f.unlink()
     cfg = RigConfig()
-    caps = {int(i): cv2.VideoCapture(int(i)) for i in args.cams.split(",")}
+    caps = {int(i): open_camera(i) for i in args.cams.split(",")}
     for cap in caps.values():  # two full-HD streams on one USB hub tear each other's frames
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)

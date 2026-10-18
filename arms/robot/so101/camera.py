@@ -34,9 +34,16 @@ if frame is not None:
 """
 
 
+def open_camera(index: str | int) -> cv2.VideoCapture:
+    """DirectShow on Windows: much faster to open than MSMF and keeps camera indices stable."""
+    src = int(index) if str(index).isdigit() else index
+    if sys.platform == "win32" and isinstance(src, int):
+        return cv2.VideoCapture(src, cv2.CAP_DSHOW)
+    return cv2.VideoCapture(src)
+
+
 def _grab_direct(cfg: RigConfig) -> np.ndarray | None:
-    src = int(cfg.camera_index) if cfg.camera_index.isdigit() else cfg.camera_index
-    cap = cv2.VideoCapture(src)
+    cap = open_camera(cfg.camera_index)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_w)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_h)
     ok, frame = False, None

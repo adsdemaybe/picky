@@ -46,3 +46,7 @@ test-results/
 arms/robot/so101/assets/
 arms/robot/so101/homography.json
 arms/robot/so101/last_detection.jpg
+arms/robot/so101/last_scene.jpg
+last_scene.jpg
+last_detection.jpg
+snap.jpg
