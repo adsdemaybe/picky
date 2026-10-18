@@ -12,12 +12,13 @@ def test_success_pulls_mean_and_narrows():
     assert (p.episodes, p.successes) == (1, 1)
 
 
-def test_failure_widens_and_respects_caps():
+def test_failures_do_not_move_the_policy():
     p = SteeringPolicy()
-    theta = {k: 0.0 for k in DIMS}
-    for _ in range(20):
-        p.update(theta, success=False)
-    assert all(np.isclose(p.std[k], 2 * s0) for k, (s0, _) in DIMS.items())
+    before = (dict(p.mean), dict(p.std))
+    for _ in range(5):
+        p.update({k: 0.9 * b for k, (_, b) in DIMS.items()}, success=False)
+    assert (p.mean, p.std) == before
+    assert (p.episodes, p.successes) == (5, 0)
 
 
 def test_samples_stay_in_bounds():

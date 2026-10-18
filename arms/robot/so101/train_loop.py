@@ -1,10 +1,10 @@
 """Human-in-the-loop RL for the SO-101 pick & place: press Enter to run, type s / f to label, it learns.
 
 Policy-steering in the spirit of DSRL: the camera-guided pick routine is a frozen base policy, and a small Gaussian
-"steering" policy learns offsets to its key decisions (grasp x/y/depth, wrist roll, drop x/y) from success / failure
-labels. With a human labelling ~1 run a minute, a reward-weighted Gaussian update learns from every single episode
-(DSRL's SAC critic in noise space needs hundreds); every episode is also saved as a dataset for later BC / DSRL on a
-learned policy.
+"steering" policy learns offsets to its key decisions (grasp x/y/depth, wrist roll, drop x/y) from successful runs
+only: each success pulls the steering toward what worked and narrows the search; failures are logged, never learned
+from. Every episode is saved (frames, plan, offsets, joint trajectory, label) as a dataset for later BC / DSRL on a
+learned policy, and every success also becomes a replayable recipe.
 
     python -m arms.robot.so101.train_loop "pick up the gum and put it on the plate"
 
@@ -69,18 +69,16 @@ class SteeringPolicy:
         }
 
     def update(self, theta: dict[str, float], success: bool) -> None:
-        """Reward-weighted step: success pulls the mean to what worked and narrows the search; failure widens it
-        and steps slightly away. Std stays within [0.25x, 2x] of its initial value."""
+        """Learns from successes only: a success pulls the mean toward what worked and narrows the search around it.
+        Failures are counted (and kept in the episode log) but never move the policy."""
         self.episodes += 1
-        self.successes += int(success)
+        if not success:
+            return
+        self.successes += 1
         for k, (s0, b) in DIMS.items():
             d = theta[k] - self.mean[k]
-            if success:
-                self.mean[k] = float(np.clip(self.mean[k] + 0.6 * d, -b, b))
-                self.std[k] = max(0.25 * s0, self.std[k] * 0.8)
-            else:
-                self.mean[k] = float(np.clip(self.mean[k] - 0.15 * d, -b, b))
-                self.std[k] = min(2.0 * s0, self.std[k] * 1.15)
+            self.mean[k] = float(np.clip(self.mean[k] + 0.6 * d, -b, b))
+            self.std[k] = max(0.25 * s0, self.std[k] * 0.8)
 
     def summary(self) -> str:
         def fmt(k: str, v: float) -> str:

@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -271,6 +272,23 @@ def _snap(cfg: RigConfig | None, name: str, which: tuple[str, ...], log) -> None
         log(f"  (no frame: {e})")
 
 
+def looks_successful(cfg: RigConfig, target: str, dest: str) -> tuple[bool | None, np.ndarray | None]:
+    """Camera check after a run: is the target now inside the destination's box? None if it can't tell."""
+    try:
+        frame = grab_frame(cfg)
+    except RuntimeError:
+        return None, None
+    t = detect_named(frame, target, cfg.perceptron_model)
+    d = detect_named(frame, dest, cfg.perceptron_model)
+    if d is None:
+        return None, frame
+    if t is None:
+        return False, frame
+    x0, y0, x1, y1 = d.box_px
+    u, v = t.center_px
+    return (x0 <= u <= x1 and y0 <= v <= y1), frame
+
+
 def go_home(robot, home: dict[str, float], gripper: float) -> None:
     """Move to the raised home pose (wrist camera overlooking the table) and settle there."""
     pose, _ = read_pose(robot)
@@ -313,16 +331,54 @@ def main() -> None:
             replay(robot, args.replay)
             print("done")
             return
-        p = plan(cfg, kin, cam, args.command, rest, args.height)
+        from .train_loop import DATA_DIR, SteeringPolicy  # late import: train_loop imports this module
+
+        policy = SteeringPolicy.load()
+        steer = dict(policy.mean)  # run what has been learned from successes so far (no exploration here)
+        scene = grab_frame(cfg)
+        p = plan(cfg, kin, cam, args.command, rest, args.height, frame=scene.copy(), steer=steer)
         print(describe(p))
         print(f"annotated camera frame: {p.frame_path}")
         if p.error or args.dry:
             return
         traj = execute(robot, kin, p, step=args.step, cfg=cfg)
-        last = save_recipe("last_run", p, traj, rest)  # every run is replayable; --save keeps a named copy
+        go_home(robot, rest, GRIP_OPEN)
+        save_recipe("last_run", p, traj, rest)  # every run is replayable; --save keeps a named copy
         if args.save:
             print(f"saved recipe: {save_recipe(args.save, p, traj, rest)}")
-        print(f"done (trajectory: {last})")
+        guess, after = looks_successful(cfg, p.target, p.dest)
+        hint = {True: "looks like a SUCCESS", False: "looks like a FAILURE", None: "can't tell from the camera"}[guess]
+        default = {True: "s", False: "f", None: ""}[guess]
+        label = ""
+        while label not in ("s", "f"):
+            ans = input(f"{hint} - Enter to accept, or type s / f: ").strip().lower()
+            label = ans or default
+        success = label == "s"
+        policy.update(steer, success)  # learns from successes only
+        policy.save()
+        ep = DATA_DIR / time.strftime("%Y%m%d-%H%M%S")
+        ep.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(ep / "scene.jpg"), scene)
+        if after is not None:
+            cv2.imwrite(str(ep / "after.jpg"), after)
+        rec = {
+            "command": args.command,
+            "success": success,
+            "auto_guess": guess,
+            "steer": steer,
+            "target_xy": p.target_xy,
+            "dest_xy": p.dest_xy,
+            "roll": p.roll,
+            "trajectory": traj,
+            "waypoints": [{"name": w.name, "xyz": w.xyz, "gripper": w.gripper} for w in p.waypoints],
+        }
+        (ep / "episode.json").write_text(json.dumps(rec, indent=1, default=float))
+        if success:
+            save_recipe(f"success_{ep.name}", p, traj, rest)
+        print(
+            f"{'SUCCESS' if success else 'failure'} saved to {ep} | policy {policy.successes} successes / "
+            f"{policy.episodes} runs (learns from successes only)"
+        )
     finally:
         go_home(robot, dict(cfg.home_deg), GRIP_OPEN)
         robot.disconnect()

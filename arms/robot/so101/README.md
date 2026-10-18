@@ -105,11 +105,7 @@ python -m arms.robot.so101.pick_place "pick up the oat milk and put it in the ba
 arms\robot\so101\train.bat "pick up the gum and put it on the plate"
 ```
 
-`train_loop` steers the frozen pick routine (DSRL-style: learn the *inputs* of a base policy, not the policy): a
-Gaussian over offsets to grasp x/y/depth, wrist roll and drop x/y, updated after every labelled run (success pulls
-the mean toward what worked and narrows the search; failure widens it). State: `~/picky_runs/steer_policy.json`;
-every episode (scene/after frames, plan, offsets, label, gripper-after-close) in `~/picky_runs/<timestamp>/` for later
-BC / DSRL on a learned policy. Config in `~/.config/picky/env` (SO101_PORT, SO101_CAMERA, PERCEPTRON_API_KEY).
+Learning is from **successes only** (failures are logged, never learned from). `pick_routine` runs the learned steering and asks for a label at the end (it suggests one by checking with the camera whether the object is now inside the destination: Enter accepts, s / f overrides); `train_loop` also explores around it. Steering = offsets to grasp x/y/depth, wrist roll and drop x/y on top of the frozen camera-guided routine (DSRL-style). State: `~/picky_runs/steer_policy.json`; episodes in `~/picky_runs/<timestamp>/`; every success is also a replayable recipe: `python -m arms.robot.so101.pick_routine --replay gum_to_plate` (or `success_<timestamp>`, `last_run`). Close the Windows Camera app first - it locks the webcam. Config in `~/.config/picky/env` (SO101_PORT, SO101_CAMERA, PERCEPTRON_API_KEY).
 
 ## First successful pick (2026-10-17, team SO-101)
 
