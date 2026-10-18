@@ -26,7 +26,14 @@ from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
-from contracts.bridge import ITEM_TO_STOP_STATUS, ExecMode, ToolStepOutcome, brain_tool_error, mirror_brain_step
+from contracts.bridge import (
+    ITEM_TO_STOP_STATUS,
+    MIRROR_MODEL,
+    ExecMode,
+    ToolStepOutcome,
+    brain_tool_error,
+    mirror_brain_step,
+)
 from contracts.common import STAFF_USER_ID, utcnow
 from contracts.events import make_event, plan_envelope
 from contracts.evidence import SlotTruth
@@ -264,7 +271,31 @@ class PlanLoop:
     # =================================================================================================================
     async def run_goal(self, robot_id: str, goal: Goal) -> PlanOutcome:
         plan = await self.s.require("planner").plan(PlanRequest(robot_id=robot_id, goal=goal))
+        await self._plan_ready(plan)
         return await self.run_plan(plan)
+
+    async def _plan_ready(self, plan: StepPlan) -> None:
+        """One ``brain.step(kind='thought')`` the moment the plan arrives ('Plan ready: 73 steps in 16.4 s by
+        gemini-3.5-flash'), so the robot view does not sit silent between 'planning' and the first step."""
+        events = getattr(self.s, "events", None)
+        if events is None or not self.mirror_brain_steps:
+            return
+        bs = BrainStep(
+            step_id=f"{plan.plan_id}:ready",
+            robot_id=plan.robot_id,
+            goal_id=None if plan.goal_id.startswith("adhoc-") else plan.goal_id,
+            trip_id=plan.trip_id,
+            store_id=plan.store_id,
+            kind="thought",
+            text=plan_ready_text(plan),
+            model=plan.planner.model or MIRROR_MODEL,
+        )
+        if self.on_brain_step is not None:
+            try:
+                self.on_brain_step(bs)
+            except Exception as exc:  # noqa: BLE001 - the brain's ring is a view; it never stops a run
+                log.warning("on_brain_step hook failed: %s", exc)
+        await self._publish(make_event("brain.step", source="agent", **plan_envelope(plan), step=bs))
 
     async def run_plan(self, plan: StepPlan, *, policy: RetryPolicy | None = None) -> PlanOutcome:
         errors = plan_errors(plan)
@@ -2562,6 +2593,17 @@ def _float_setting(name: str, default: float) -> float:
         log.warning("%s is not a number; using %s", name.upper(), default)
         return default
     return value if value > 0 else default
+
+
+def plan_ready_text(plan: StepPlan) -> str:
+    """'Plan ready: 73 steps in 16.4 s by gemini-3.5-flash' (LLM) or '... by the scripted planner (<fallback>)'."""
+    info = plan.planner
+    took = f" in {info.latency_ms / 1000:.1f} s" if info.latency_ms > 0 else ""
+    if info.origin == "llm" and info.model:
+        by = info.model
+    else:
+        by = "the scripted planner" + (f" ({info.fallback_reason})" if info.fallback_reason else "")
+    return f"Plan ready: {len(plan.steps)} steps{took} by {by}."
 
 
 def plan_timeout_from_settings() -> float:

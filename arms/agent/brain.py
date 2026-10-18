@@ -31,6 +31,7 @@ from typing import Any
 from arms.agent.brain_exec import ACTIVE_ITEM_STATUSES, BrainExecutor, apply_update_locally
 from arms.agent.brain_script import ScriptedRunner
 from arms.agent.loop import PlanLoop, resolve_exec_mode
+from arms.agent.planner import LlmPlanner
 from contracts.bridge import MIRROR_MODEL, goal_update_from_outcome
 from contracts.common import RobotId, Timestamp, UserId, utcnow
 from contracts.events import goal_envelope, make_event
@@ -287,9 +288,7 @@ class _BrainBase:
             runner.on_brain_step = self._record_mirror
         rt.goal, rt.iterations, rt.inbox, rt.executor = goal, 0, [], None
         rt.state, rt.mode, rt.model, rt.plan_mode = "thinking", SCRIPTED, MIRROR_MODEL, True
-        await self._emit(
-            robot_id, "thought", f"Planning '{goal.title}' as verified steps (plan -> VLA -> verifier).", goal=goal
-        )
+        await self._emit(robot_id, "thought", self._planning_text(goal), goal=goal)
         rt.state = "acting"
         try:
             outcome = await runner.run_goal(robot_id, goal)
@@ -319,6 +318,14 @@ class _BrainBase:
         rt.goal = final if not final.terminal else None
         await self._emit(robot_id, "message", outcome.summary, goal=final)
         return True, final
+
+    def _planning_text(self, goal: Goal) -> str:
+        """Published BEFORE the planner call (an LLM draft takes 10-20 s), so the robot view is never silent."""
+        stops = len({i.stop_id or i.item_id for i in goal.items})
+        what = f"{stops} stop{'' if stops == 1 else 's'} for '{goal.title}'"
+        who = _llm_planner_label(getattr(self._services, "planner", None))
+        head = f"{who} is planning {what}" if who else f"Planning {what}"
+        return f"{head} as verified steps (plan -> VLA -> verifier)…"
 
     async def _finish_plan_goal(self, goal: Goal, outcome: Any, update: Any) -> Goal:
         fleet = self._services.fleet
@@ -733,3 +740,20 @@ def _compact(result: Any) -> Any:
                 data["decision"] = {k: dec[k] for k in ("verdict", "reasons", "messages") if k in dec}
         return data
     return result
+
+
+def _llm_planner_label(planner: Any) -> str | None:
+    """'Gemini' / 'Claude' when an LLM drafts the plan; None for the scripted planner (or an LLM without a key)."""
+    if not isinstance(planner, LlmPlanner):
+        return None
+    try:
+        if not planner.llm_ready():
+            return None
+        model = (planner.model_name() or "").lower()
+    except Exception:  # noqa: BLE001 - a display label never blocks a goal
+        return None
+    if model.startswith("gemini"):
+        return "Gemini"
+    if model.startswith("claude"):
+        return "Claude"
+    return "The LLM planner"
