@@ -16,6 +16,9 @@ Owner: TBD · Branch: `arm/trust`
 - [x] **P0** Recommendation transparency log (upsert on `rec_id`, `sponsored` visible)
 - [ ] **P1** Persist ledger to Postgres (`contracts/db/schema.sql`); today it is in memory
 - [ ] **P1** Visa sandbox provider (`visa_sandbox`) if access appears; Stripe stays the fallback
+- [ ] **P1** Back the web app's Permissions page (approved memory + mandate + audit view) via `GET/PUT /api/users/{id}/profile`, `.../mandate`, `GET /api/trust/ledger`; pending-memory approval (`remember(fact)`) is P2 / v0.3
+- [ ] **P1** Cart Whisperer (v0.3): accepts, and declined SKIP / WAIT ("buy anyway"), are evaluated like any cart change; transparency entries for suggestions (`docs/cart-whisperer.md` §13)
+- [ ] **P1** Pickup mode ("robot shops, I pick up"): every off-list item asks; checkout never auto-approves. The web app's separate tech mandate (`im_maya_tech_001`) is a v0.3 contracts question (per-category caps or several mandates per user)
 - [ ] **P2** Ed25519 (PyNaCl) signatures + RFC 9421 agent request signing (TAP-style identity)
 - [ ] **P2** Stripe Shared Payment Tokens with `usage_limits` from the IntentMandate; passkey step-up
 

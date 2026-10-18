@@ -1,4 +1,4 @@
--- Picky database schema (contracts v0.1.0). Postgres 17 + pgvector (Docker image pgvector/pgvector:pg17).
+-- Picky database schema (contracts v0.2.0). Postgres 17 + pgvector (Docker image pgvector/pgvector:pg17).
 -- Mirrors the pydantic models in contracts/*. Money columns are INTEGER cents. Geometry is meters / radians in the
 -- store world frame. Seeded from data/ by `make seed` (drop + recreate; no migrations during the hackathon).
 -- Nested model fields that are not queried are stored as JSONB with the model name in a comment.
@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS slots (
     approach_y        DOUBLE PRECISION NOT NULL,
     approach_theta    DOUBLE PRECISION NOT NULL DEFAULT 0,
     facings           INTEGER NOT NULL DEFAULT 1,
-    capacity          INTEGER NOT NULL DEFAULT 12,
+    capacity          INTEGER NOT NULL DEFAULT 12 CHECK (capacity >= 0),
+    low_threshold     INTEGER CHECK (low_threshold >= 0 AND low_threshold <= capacity),  -- NULL = default_low_threshold
     price_cents       INTEGER CHECK (price_cents >= 0),        -- store override; NULL = products.price_cents
     shelf_tag_cents   INTEGER CHECK (shelf_tag_cents >= 0),    -- physical tag if different (mispricing)
     PRIMARY KEY (store_id, slot_id)
@@ -142,11 +143,63 @@ CREATE TABLE IF NOT EXISTS scans (
     pose_y           DOUBLE PRECISION,
     pose_theta       DOUBLE PRECISION,
     frame_id         TEXT,
+    camera_id        TEXT,                                   -- '<robot_id>.front'
+    robot_id         TEXT,                                   -- robot that scanned
+    goal_id          TEXT,
     latency_ms       REAL NOT NULL DEFAULT 0,
     notes            TEXT NOT NULL DEFAULT '',
     ts               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS scans_store_ts_idx ON scans (store_id, ts DESC);
+
+-- Category taxonomy (data/categories.yaml -> contracts.planogram.CategoriesFile). products.category = a top-level id.
+CREATE TABLE IF NOT EXISTS categories (
+    category_id  TEXT PRIMARY KEY,                           -- lowercase snake_case: 'produce', 'personal_care'
+    name         TEXT NOT NULL,                              -- 'Dairy & Eggs'
+    parent_id    TEXT REFERENCES categories (category_id),   -- NULL = top-level (max depth 2)
+    description  TEXT NOT NULL DEFAULT '',
+    icon         TEXT,
+    color        TEXT,
+    aliases      TEXT[] NOT NULL DEFAULT '{}',
+    sort         INTEGER NOT NULL DEFAULT 0
+);
+
+-- Stock history (contracts.catalog.StockMovement): append-only, every pick / scan / restock / adjustment.
+CREATE TABLE IF NOT EXISTS stock_movements (
+    movement_id  TEXT PRIMARY KEY,
+    store_id     TEXT NOT NULL REFERENCES stores (store_id) ON DELETE CASCADE,
+    sku          TEXT NOT NULL REFERENCES products (sku),
+    slot_id      TEXT,
+    lot_id       TEXT,
+    delta        INTEGER NOT NULL,                           -- signed units applied
+    qty_before   INTEGER NOT NULL CHECK (qty_before >= 0),   -- SKU total in the store
+    qty_after    INTEGER NOT NULL CHECK (qty_after >= 0),
+    reason       TEXT NOT NULL CHECK (reason IN ('pick', 'scan', 'restock', 'damage', 'manual')),
+    actor        TEXT NOT NULL,                              -- 'robot:<id>' | 'staff:<name>' | 'user:<id>' | 'system'
+    ref_id       TEXT,                                       -- scan_id / goal_id / trip_id
+    note         TEXT NOT NULL DEFAULT '',
+    ts           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS stock_movements_store_idx ON stock_movements (store_id, ts DESC);
+CREATE INDEX IF NOT EXISTS stock_movements_sku_idx ON stock_movements (store_id, sku, ts DESC);
+
+-- Low / out-of-stock alerts (contracts.catalog.StockAlert); one row per store+sku (alert_id = '<store>:<sku>').
+CREATE TABLE IF NOT EXISTS stock_alerts (
+    alert_id       TEXT PRIMARY KEY,
+    store_id       TEXT NOT NULL REFERENCES stores (store_id) ON DELETE CASCADE,
+    sku            TEXT NOT NULL REFERENCES products (sku),
+    status         TEXT NOT NULL CHECK (status IN ('low', 'out')),
+    qty            INTEGER NOT NULL CHECK (qty >= 0),
+    low_threshold  INTEGER NOT NULL CHECK (low_threshold >= 0),
+    capacity       INTEGER NOT NULL CHECK (capacity >= 0),
+    message        TEXT NOT NULL DEFAULT '',
+    trigger        TEXT CHECK (trigger IN ('pick', 'scan', 'restock', 'damage', 'manual')),
+    actor          TEXT,
+    active         BOOLEAN NOT NULL DEFAULT TRUE,
+    raised_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    cleared_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS stock_alerts_active_idx ON stock_alerts (store_id) WHERE active;
 
 -- ------------------------------------------------------------------------------------------------ users
 CREATE TABLE IF NOT EXISTS users (
@@ -242,6 +295,10 @@ CREATE TABLE IF NOT EXISTS trips (
     route          JSONB,                                    -- contracts.routing.Route
     snapshot       JSONB,                                    -- full contracts.trip.Trip (source of truth for resume,
                                                              -- incl. stop_status and followup)
+    robot_id       TEXT,                                     -- robot executing it (fleet assignment)
+    goal_id        TEXT,                                     -- the fleet shop goal
+    request_id     TEXT,                                     -- NL request that created it
+    auto_execute   BOOLEAN NOT NULL DEFAULT FALSE,           -- request-created: no login step
     error          TEXT,
     created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -308,10 +365,13 @@ CREATE TABLE IF NOT EXISTS transparency (
 
 CREATE TABLE IF NOT EXISTS approvals (
     approval_id    TEXT PRIMARY KEY,
-    trip_id        TEXT NOT NULL REFERENCES trips (trip_id) ON DELETE CASCADE,
+    trip_id        TEXT REFERENCES trips (trip_id) ON DELETE CASCADE,  -- NULL only for robot questions on non-trip goals
+    goal_id        TEXT,                                     -- robot brain goal that asks (ask_user)
+    robot_id       TEXT,
+    store_id       TEXT,                                     -- staff view filter
     user_id        TEXT NOT NULL REFERENCES users (user_id),
     kind           TEXT NOT NULL CHECK (kind IN ('recommendation', 'over_threshold', 'substitution', 'online_order',
-                     'checkout', 'pick_choice')),
+                     'checkout', 'pick_choice', 'question')),
     title          TEXT NOT NULL,
     body           TEXT NOT NULL DEFAULT '',
     amount_cents   INTEGER CHECK (amount_cents >= 0),
@@ -389,3 +449,131 @@ CREATE TABLE IF NOT EXISTS audit_log (
     ts         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS audit_trip_idx ON audit_log (trip_id, seq);
+
+-- ------------------------------------------------------------------------------------------------ fleet (v0.2)
+-- Fleet robots (data/fixtures/robots.yaml -> contracts.planogram.RobotSpec). Live state is in memory (RobotState).
+CREATE TABLE IF NOT EXISTS robots (
+    robot_id         TEXT PRIMARY KEY,                       -- 'rover-ave-1'
+    name             TEXT NOT NULL,                          -- 'Pico'
+    kind             TEXT NOT NULL DEFAULT 'rover_so101' CHECK (kind IN ('rover_so101')),
+    store_id         TEXT NOT NULL REFERENCES stores (store_id),
+    dock_x           DOUBLE PRECISION NOT NULL,
+    dock_y           DOUBLE PRECISION NOT NULL,
+    dock_theta       DOUBLE PRECISION NOT NULL DEFAULT 0,
+    battery_pct      REAL NOT NULL DEFAULT 100 CHECK (battery_pct BETWEEN 0 AND 100),  -- at boot / reset
+    basket_capacity  INTEGER NOT NULL DEFAULT 12 CHECK (basket_capacity >= 1),
+    max_speed_mps    REAL NOT NULL DEFAULT 0.8,
+    cameras          TEXT[] NOT NULL DEFAULT '{front,wrist,basket}',
+    color            TEXT
+);
+CREATE INDEX IF NOT EXISTS robots_store_idx ON robots (store_id);
+
+-- Every camera (contracts.cameras.CameraInfo): robot cameras '<robot_id>.<kind>' + store ceiling '<store>.ceiling-<n>'.
+CREATE TABLE IF NOT EXISTS cameras (
+    camera_id   TEXT PRIMARY KEY,
+    kind        TEXT NOT NULL CHECK (kind IN ('front', 'wrist', 'basket', 'ceiling')),
+    name        TEXT NOT NULL,
+    store_id    TEXT REFERENCES stores (store_id),
+    robot_id    TEXT REFERENCES robots (robot_id) ON DELETE CASCADE,   -- NULL for ceiling cameras
+    mount       JSONB NOT NULL DEFAULT '{}'::jsonb           -- contracts.cameras.CameraMount
+);
+
+-- Natural-language requests (contracts.fleet.RequestPlan).
+CREATE TABLE IF NOT EXISTS requests (
+    request_id      TEXT PRIMARY KEY,
+    user_id         TEXT NOT NULL,
+    text            TEXT NOT NULL,
+    channel         TEXT NOT NULL DEFAULT 'web' CHECK (channel IN ('web', 'voice', 'photon')),
+    role            TEXT NOT NULL DEFAULT 'shopper' CHECK (role IN ('shopper', 'staff')),
+    status          TEXT NOT NULL CHECK (status IN ('received', 'planned', 'executing', 'completed', 'failed',
+                      'needs_input', 'rejected')),
+    interpretation  JSONB,                                   -- contracts.fleet.RequestDraft
+    store_choices   JSONB NOT NULL DEFAULT '[]'::jsonb,      -- list[contracts.fleet.StoreChoice]
+    trip_ids        TEXT[] NOT NULL DEFAULT '{}',
+    budget_split    JSONB NOT NULL DEFAULT '{}'::jsonb,      -- {store_id: cents} (fleet.split_budget)
+    replies         TEXT[] NOT NULL DEFAULT '{}',            -- answers to clarifying questions (in_reply_to)
+    reply           TEXT NOT NULL DEFAULT '',
+    error           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS requests_user_idx ON requests (user_id, created_at DESC);
+
+-- Robot goals (contracts.fleet.Goal), owned by the fleet.
+CREATE TABLE IF NOT EXISTS goals (
+    goal_id           TEXT PRIMARY KEY,
+    kind              TEXT NOT NULL CHECK (kind IN ('shop', 'fetch', 'shelf_scan', 'return_to_dock')),
+    status            TEXT NOT NULL CHECK (status IN ('pending', 'assigned', 'active', 'waiting', 'completed',
+                        'failed', 'cancelled')),
+    store_id          TEXT NOT NULL REFERENCES stores (store_id),
+    robot_id          TEXT REFERENCES robots (robot_id),     -- current robot (last assignment)
+    title             TEXT NOT NULL,
+    instructions      TEXT NOT NULL DEFAULT '',
+    priority          TEXT NOT NULL DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+    end_at            TEXT NOT NULL DEFAULT 'checkout' CHECK (end_at IN ('checkout', 'dock', 'stay')),
+    request_id        TEXT REFERENCES requests (request_id),
+    trip_id           TEXT,                                  -- kind='shop'
+    user_id           TEXT,
+    items             JSONB NOT NULL DEFAULT '[]'::jsonb,    -- list[contracts.fleet.GoalItem]
+    categories        TEXT[] NOT NULL DEFAULT '{}',          -- shelf_scan
+    aisle_ids         TEXT[] NOT NULL DEFAULT '{}',
+    slot_ids          TEXT[] NOT NULL DEFAULT '{}',
+    scanned_slot_ids  TEXT[] NOT NULL DEFAULT '{}',
+    progress          REAL NOT NULL DEFAULT 0 CHECK (progress BETWEEN 0 AND 1),
+    progress_note     TEXT NOT NULL DEFAULT '',
+    summary           TEXT,
+    error             TEXT,
+    failure_code      TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at        TIMESTAMPTZ,
+    finished_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS goals_store_status_idx ON goals (store_id, status);
+CREATE INDEX IF NOT EXISTS goals_robot_idx ON goals (robot_id, created_at DESC);
+
+-- One row per assignment attempt (contracts.fleet.Assignment).
+CREATE TABLE IF NOT EXISTS goal_assignments (
+    assignment_id  TEXT PRIMARY KEY,
+    goal_id        TEXT NOT NULL REFERENCES goals (goal_id) ON DELETE CASCADE,
+    robot_id       TEXT NOT NULL REFERENCES robots (robot_id),
+    store_id       TEXT NOT NULL,
+    attempt        INTEGER NOT NULL DEFAULT 1 CHECK (attempt >= 1),
+    score          REAL NOT NULL,
+    breakdown      JSONB NOT NULL DEFAULT '{}'::jsonb,       -- {idle, battery, distance}
+    reason         TEXT NOT NULL,
+    candidates     JSONB NOT NULL DEFAULT '[]'::jsonb,       -- list[contracts.fleet.AssignmentCandidate]
+    pinned         BOOLEAN NOT NULL DEFAULT FALSE,
+    outcome        TEXT NOT NULL DEFAULT 'active' CHECK (outcome IN ('active', 'completed', 'failed', 'cancelled',
+                     'reassigned')),
+    note           TEXT NOT NULL DEFAULT '',
+    assigned_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ended_at       TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS goal_assignments_goal_idx ON goal_assignments (goal_id, attempt);
+
+-- Robot brain trace (contracts.fleet.BrainStep): what each robot thought / did / saw.
+CREATE TABLE IF NOT EXISTS brain_steps (
+    step_id       TEXT PRIMARY KEY,
+    robot_id      TEXT NOT NULL REFERENCES robots (robot_id),
+    goal_id       TEXT REFERENCES goals (goal_id) ON DELETE CASCADE,
+    trip_id       TEXT,
+    store_id      TEXT,
+    step_no       INTEGER NOT NULL DEFAULT 0,                -- per-robot counter (BrainStep.step_no; not the bus seq)
+    kind          TEXT NOT NULL CHECK (kind IN ('thought', 'tool_call', 'tool_result', 'observation', 'message',
+                    'status', 'error')),
+    role          TEXT NOT NULL DEFAULT 'robot' CHECK (role IN ('robot', 'user', 'system')),
+    text          TEXT NOT NULL DEFAULT '',
+    tool          TEXT,
+    tool_use_id   TEXT,
+    input         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    output        JSONB,
+    ok            BOOLEAN NOT NULL DEFAULT TRUE,
+    observation   JSONB,                                     -- contracts.cameras.VisionObservation
+    camera_id     TEXT,
+    duration_ms   REAL NOT NULL DEFAULT 0,
+    model         TEXT,                                      -- 'claude-sonnet-5-5' | 'scripted'
+    ts            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS brain_steps_robot_idx ON brain_steps (robot_id, ts DESC);
+CREATE INDEX IF NOT EXISTS brain_steps_goal_idx ON brain_steps (goal_id, ts DESC);

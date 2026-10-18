@@ -4,6 +4,10 @@ How the pieces fit at runtime. The rules live in [`CLAUDE.md`](../CLAUDE.md) (§
 interfaces live in [`contracts/`](../contracts). This page is the map. Event names below are illustrative; the exact
 set is the discriminated union in `contracts/events.py`.
 
+> **Partly out of date:** the diagrams below predate the v0.2 fleet design (NL request → fleet manager across stores →
+> per-robot managing LLM; rovers with a lift + SO-101 arm on the Isaac worker on "vhagar" or the 2D fake). For that
+> flow, `CLAUDE.md` §2 and `contracts/api.md` are current.
+
 ## 1. The pipeline
 
 Every arm is one stage of one flow. `arms/gateway` runs it as a trip state machine and is the only place arms are
@@ -85,7 +89,7 @@ sequenceDiagram
   RT-->>GW: Route (+ list-only baseline for comparison)
   GW->>Bus: route.planned
   GW->>TR: pre-check projected cart vs IntentMandate
-  Maya->>GW: logs in to robot (awaiting_login → executing)
+  Maya->>GW: manual trips only - I'm at the robot in the web app, POST login with user_id + robot_id (awaiting_login → executing). Request-created trips start by themselves, and there is no robot screen
   loop each stop
     GW->>RB: navigate(waypoints)
     RB->>Bus: robot.state (pose stream)
