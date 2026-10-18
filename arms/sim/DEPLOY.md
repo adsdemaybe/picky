@@ -244,7 +244,7 @@ left → right). The unit stays in the scene (`on_counter`) until the handoff's 
 
 - **Redeploy the worker** from this branch (`git pull` on vhagar, restart the tmux session as in section 5). A worker
   started from an older checkout still connects (0.2.x), but its hello lacks `basket_unload`: the gateway then skips
-  the per-unit unload and the handoff unloads the basket at once (the 0.2.3 behaviour). `GET /api/sim/status` shows the
-  worker's capabilities.
+  the per-unit unload and the handoff unloads the basket at once (the 0.2.3 behaviour). `GET /api/fleet/robots/{id}/vla`
+  shows `basket_unload: true` on the T0 tier when the connected worker has it.
 - Nothing else to configure; `PICKY_UNLOAD_BY_ARM=false` on the gateway turns the unload sequence off.
 - Smoke test without a GPU: `uv run pytest arms/sim/tests/test_worker_unload.py` (NullBackend).
