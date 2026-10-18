@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
 import { AskSheet } from "@/components/AskPanel";
 import { MotionProvider } from "@/components/motion";
-import { BottomTabs, TopBar } from "@/components/Shell";
+import { BottomTabs, Main, TopBar } from "@/components/Shell";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
@@ -24,7 +24,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <MotionProvider>
           <TooltipProvider delayDuration={200}>
             <TopBar />
-            <main className="mx-auto max-w-[1240px] px-4 pt-6 pb-28 md:px-8 md:pt-8 md:pb-16">{children}</main>
+            <Main>{children}</Main>
             <BottomTabs />
             <AskSheet />
             <Toaster />

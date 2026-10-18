@@ -30,6 +30,15 @@ const NAV = [
 // phones get five tabs; Ask stays one tap away in the search box
 const MOBILE_NAV = NAV.filter((n) => n.href !== "/ask");
 
+/** The robot's own touch screen (/robot/<id>/screen) runs full-bleed: no app nav, no page padding. */
+export const isRobotScreen = (path: string | null) => !!path && /^\/robot\/[^/]+\/screen/.test(path);
+
+export function Main({ children }: { children: React.ReactNode }) {
+  const path = usePathname();
+  if (isRobotScreen(path)) return <main>{children}</main>;
+  return <main className="mx-auto max-w-[1240px] px-4 pt-6 pb-28 md:px-8 md:pt-8 md:pb-16">{children}</main>;
+}
+
 const QUESTION = /\?$|^(is|are|can|could|should|where|what|how|why|when|do|does|did|will|am|show|tell|help)\b/i;
 
 function Omnibox({ className }: { className?: string }) {
@@ -68,6 +77,7 @@ export function TopBar() {
   const path = usePathname();
   const phase = useTrip((s) => s.phase);
   const live = phase === "shopping" || phase === "checkout" || phase === "waiting_login";
+  if (isRobotScreen(path)) return null;
   return (
     <header className="sticky top-0 z-30 border-b border-border/70 bg-background/85 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-[1240px] items-center gap-6 px-4 md:px-8">
@@ -145,6 +155,7 @@ export function BottomTabs() {
   const path = usePathname();
   const phase = useTrip((s) => s.phase);
   const live = phase === "shopping" || phase === "checkout" || phase === "waiting_login";
+  if (isRobotScreen(path)) return null;
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Main">
       <ul className="grid grid-cols-5">

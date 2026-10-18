@@ -75,6 +75,16 @@ export const gw = {
   /** newest first; spans robots after a reassignment */
   goalSteps: (goalId: string, limit = 50) => req<BrainStep[]>(`/api/goals/${enc(goalId)}/steps${qs({ limit })}`),
   stopRobot: (id: string) => req<RobotInfo>(`/api/fleet/robots/${enc(id)}/stop`, { method: "POST", body: {} }),
+  /** talk to one robot's brain (its steps also stream as brain.step) */
+  robotMessage: (id: string, b: S["RobotMessageRequest"]) => req<S["BrainReply"]>(`/api/fleet/robots/${enc(id)}/messages`, { method: "POST", body: b }, 30_000),
+  /** a manual goal pinned to that robot */
+  robotGoal: (id: string, b: S["CreateGoalRequest"]) => req<S["Goal"]>(`/api/fleet/robots/${enc(id)}/goals`, { method: "POST", body: b }),
+  goal: (id: string) => req<S["Goal"]>(`/api/goals/${enc(id)}`),
+  /** newest first */
+  goals: (q: { robot_id?: string; store_id?: string; trip_id?: string; kind?: string; limit?: number }) => req<S["Goal"][]>(`/api/goals${qs(q)}`),
+  /** pending approvals (filters AND together) */
+  approvals: (q: { trip_id?: string; robot_id?: string; goal_id?: string; store_id?: string; user_id?: string }) => req<S["ApprovalRequest"][]>(`/api/approvals${qs(q)}`),
+  search: (q: string, storeId?: string, limit = 8) => req<S["SearchHit"][]>(`/api/products/search${qs({ q, store_id: storeId, limit })}`),
   planogram: (storeId: string) => req<S["Planogram"]>(`/api/stores/${enc(storeId)}/planogram`),
   product: (sku: string) => req<S["SearchHit"]>(`/api/products/${enc(sku)}`),
   feedback: (userId: string, b: S["Feedback"]) => req<ProfileUpdate>(`/api/users/${enc(userId)}/feedback`, { method: "POST", body: b }),

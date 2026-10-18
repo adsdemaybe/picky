@@ -1,5 +1,5 @@
 "use client";
-import { Activity, Bot, Camera as CameraIcon, ChevronDown, Expand, MonitorPlay, Plug, PlugZap, Radio, Server, Unplug } from "lucide-react";
+import { Activity, Bot, Camera as CameraIcon, ChevronDown, Expand, MonitorPlay, Plug, PlugZap, Radio, Server, Tablet, Unplug } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -20,6 +20,13 @@ const MODES: { id: Mode; label: string; icon: typeof Bot; help: string }[] = [
   { id: "sim", label: "Simulated", icon: MonitorPlay, help: "Cameras drawn from the in-browser trip. Works with no backend." },
   { id: "gateway", label: "Robot gateway", icon: Server, help: "Frames and robot state from the Picky gateway over WebSocket." },
   { id: "stream", label: "Direct streams", icon: Radio, help: "Point each camera at an MJPEG or video URL from the robot." },
+];
+
+/** Fleet robots (data/fixtures/robots.yaml; fixed ids in contracts/api.md). */
+const ROBOT_SCREENS = [
+  { id: "rover-ave-1", name: "Pico" },
+  { id: "rover-ave-2", name: "Rhea" },
+  { id: "rover-hill-1", name: "Hazel" },
 ];
 
 const CONN_STYLE: Record<Conn, { label: string; cls: string }> = {
@@ -121,6 +128,23 @@ export default function LivePage() {
               </button>
             ))}
           </div>
+
+          {GATEWAY_URL && (
+            <Panel className="flex flex-wrap items-center gap-3 p-4">
+              <Tablet className="size-6 text-leaf" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <div className="text-[15px] font-semibold">Robot screens</div>
+                <p className="text-[13.5px] text-muted-foreground">The touch screen on each rover: chat, find a product, check out in person.</p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {ROBOT_SCREENS.map((r) => (
+                  <Button key={r.id} asChild variant={feed.robotId === r.id ? "default" : "outline"} size="sm">
+                    <Link href={`/robot/${r.id}/screen`}>{r.name}</Link>
+                  </Button>
+                ))}
+              </div>
+            </Panel>
+          )}
 
           {approval && (
             <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-4 rounded-2xl bg-amber-wash p-4 ring-2 ring-amber">
