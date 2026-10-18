@@ -66,11 +66,15 @@ export function TmoHeader() {
         </div>
       </div>
       <div className="bg-magenta-deep px-4 py-1 text-center text-[11px] font-medium text-white/85 shadow-[0_0_0_100vmax_var(--color-magenta-deep)] [clip-path:inset(0_-100vmax)] md:text-[11.5px]">
-        Demo · synthetic shopper, devices and promo calendar · products and prices from t-mobile.com (Oct 17, 2026) · not affiliated with T-Mobile
+        <span className="md:hidden">Demo · synthetic account · real t-mobile.com prices (Oct 17) · not affiliated</span>
+        <span className="hidden md:inline">Demo · synthetic shopper, devices and promo calendar · products and prices from t-mobile.com (Oct 17, 2026) · not affiliated with T-Mobile</span>
       </div>
     </header>
   );
 }
+
+/** "2026-11-27" -> "Fri, Nov 27" */
+export const niceDate = (iso: string) => new Date(`${iso}T12:00:00-07:00`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "America/Los_Angeles" });
 
 const KIND: Record<Suggestion["kind"], { label: string; cls: string; Icon: typeof Ban }> = {
   skip: { label: "Skip it", cls: "bg-tomato-wash text-tomato", Icon: Ban },
@@ -128,7 +132,7 @@ export function WhisperCard({ s, onAccept, onDecline, compact = false }: { s: Su
             {s.action === "add" && <span className="text-muted-foreground">{s.detour_m === 0 ? "+0 m, on your route" : `+${s.detour_m} m detour`}</span>}
             {s.remind_on && (
               <span className="inline-flex items-center gap-1 text-muted-foreground">
-                <Clock className="size-3.5" aria-hidden /> remind {s.remind_on}
+                <Clock className="size-3.5" aria-hidden /> remind {niceDate(s.remind_on)}
               </span>
             )}
           </div>

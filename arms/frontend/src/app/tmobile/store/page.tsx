@@ -23,7 +23,7 @@ import { useTmoCart } from "@/lib/tmoCart";
 import { cn } from "@/lib/utils";
 import { applySuggestion, cartTotal, shortName, suggest, unitPrice, type Suggestion } from "@/lib/whisperer";
 import { useWhisper } from "@/lib/whisperStore";
-import { WhisperList } from "../bits";
+import { niceDate, WhisperList } from "../bits";
 import { usePhrasing } from "../phrasing";
 import { Face, type FaceMode } from "./face";
 import { StoreFloor } from "./map";
@@ -289,7 +289,7 @@ export default function InStore() {
   const accept = (s: Suggestion) => {
     w.accept(s);
     useTmoCart.getState().set({ cart: applySuggestion(useTmoCart.getState().cart, s) }, "store");
-    toast(s.action === "remind" ? `I'll remind you on ${s.remind_on}` : "Done", { description: s.title });
+    toast(s.action === "remind" ? `I'll remind you on ${niceDate(s.remind_on!)}` : "Done", { description: s.title });
   };
   const decline = (s: Suggestion) => {
     w.decline(s);

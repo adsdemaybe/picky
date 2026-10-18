@@ -10,7 +10,7 @@ import { productBySku } from "@/lib/data";
 import { useTrip } from "@/lib/trip";
 import { suggest, unitPrice, type Suggestion, type WLine } from "@/lib/whisperer";
 import { useWhisper } from "@/lib/whisperStore";
-import { MetricsStrip, WhisperList } from "../bits";
+import { MetricsStrip, niceDate, WhisperList } from "../bits";
 import { usePhrasing } from "../phrasing";
 
 // In-trip demo beat (docs/cart-whisperer.md §11b): the shopper asks the robot to grab the $9.99 clearance case too.
@@ -87,7 +87,7 @@ export default function TmoTrip() {
           <MetricsStrip m={w.metrics} />
         </div>
         {w.reminders.length > 0 && (
-          <p className="mt-3 text-[13px] text-muted-foreground">Reminders: {w.reminders.map((r) => `${productBySku[r.sku]?.name ?? r.sku} on ${r.on}`).join(" · ")}</p>
+          <p className="mt-3 text-[13px] text-muted-foreground">Reminders: {w.reminders.map((r) => `${productBySku[r.sku]?.name ?? r.sku} on ${niceDate(r.on)}`).join(" · ")}</p>
         )}
       </Panel>
       <TripPage />

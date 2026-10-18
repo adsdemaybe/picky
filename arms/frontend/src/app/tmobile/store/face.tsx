@@ -31,17 +31,20 @@ export function Face({ mode, size = 180 }: { mode: FaceMode; size?: number }) {
             }
             transition={mode === "thinking" ? { duration: 2.4, repeat: Infinity, ease: "easeInOut" } : { type: "spring", stiffness: 200, damping: 18 }}
           >
+            {/* blink by squashing the eye around its own center (scaleY, not the y attribute) */}
             <motion.rect
               x={cx - 15}
               y={44}
               width={30}
+              height={36}
               rx={13}
               fill="var(--color-magenta)"
+              style={{ transformBox: "fill-box", transformOrigin: "center" }}
               initial={false}
-              animate={{ height: mode === "listening" ? [38, 38] : [34, 34, 3, 34, 34], y: mode === "listening" ? [40, 40] : [46, 46, 62, 46, 46] }}
+              animate={{ scaleY: mode === "listening" ? 1.12 : [1, 1, 0.08, 1, 1] }}
               transition={mode === "listening" ? { duration: 0.2 } : { duration: 4.2, times: [0, 0.9, 0.93, 0.96, 1], repeat: Infinity, delay: i * 0.03 }}
             />
-            <rect x={cx - 6} y={50} width={8} height={8} rx={4} fill="white" opacity={0.85} />
+            <rect x={cx - 7} y={50} width={8} height={8} rx={4} fill="white" opacity={0.85} />
           </motion.g>
         ))}
         {/* mouth */}

@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { applySuggestion, cartTotal, suggest, targetDevice, unitPrice, type Suggestion, type WLine } from "@/lib/whisperer";
 import { useTmoCart } from "@/lib/tmoCart";
 import { useWhisper } from "@/lib/whisperStore";
-import { MetricsStrip, WhisperList } from "../bits";
+import { MetricsStrip, niceDate, WhisperList } from "../bits";
 import { usePhrasing } from "../phrasing";
 
 const PRESETS = [
@@ -108,7 +108,7 @@ export default function TmoShop() {
   const accept = (s: Suggestion) => {
     w.accept(s);
     setCart((c) => applySuggestion(c, s));
-    if (s.action === "remind") toast(`I'll text you on ${s.remind_on}`, { description: s.title });
+    if (s.action === "remind") toast(`I'll text you on ${niceDate(s.remind_on!)}`, { description: s.title });
     else if (s.action === "none") toast("Noted. Nothing added.");
   };
   const decline = (s: Suggestion) => {
@@ -180,7 +180,7 @@ export default function TmoShop() {
                 const deal = slotsOf("store_tmobile")[l.sku]?.deal;
                 const promo = linePromoFor(l.sku);
                 return (
-                  <li key={l.sku} className="flex items-start gap-3 py-3">
+                  <li key={l.sku} className="flex flex-wrap items-start gap-x-3 gap-y-1 py-3">
                     <ProductTile color={p.label_color} category={p.category} name={p.name} size={40} />
                     <div className="min-w-0 flex-1">
                       <div className="line-clamp-2 text-[14.5px] leading-tight font-semibold">{p.name}</div>
@@ -188,16 +188,19 @@ export default function TmoShop() {
                       {deal && <div className="text-[12.5px] font-semibold text-leaf-deep">{deal.reason}</div>}
                       {promo && <div className="text-[12.5px] text-muted-foreground">Line offer: {promo.headline}{promo.requires ? ` (needs a ${promo.requires.replace(/_/g, " ")})` : ""}</div>}
                     </div>
-                    <div className="flex items-center gap-1">
-                      <Button size="icon" variant="ghost" className="size-7" onClick={() => setQty(l.sku, l.qty - 1)} aria-label="Fewer">
-                        {l.qty === 1 ? <Trash2 className="size-3.5" /> : <Minus className="size-3.5" />}
-                      </Button>
-                      <span className="w-5 text-center text-[14px] tabular">{l.qty}</span>
-                      <Button size="icon" variant="ghost" className="size-7" onClick={() => setQty(l.sku, l.qty + 1)} aria-label="More">
-                        <Plus className="size-3.5" />
-                      </Button>
+                    {/* phones: quantity + price on their own row under the name; wider screens: inline */}
+                    <div className="flex w-full items-center justify-between pl-[52px] sm:w-auto sm:gap-3 sm:pl-0">
+                      <div className="flex items-center gap-1">
+                        <Button size="icon" variant="ghost" className="size-7" onClick={() => setQty(l.sku, l.qty - 1)} aria-label="Fewer">
+                          {l.qty === 1 ? <Trash2 className="size-3.5" /> : <Minus className="size-3.5" />}
+                        </Button>
+                        <span className="w-5 text-center text-[14px] tabular">{l.qty}</span>
+                        <Button size="icon" variant="ghost" className="size-7" onClick={() => setQty(l.sku, l.qty + 1)} aria-label="More">
+                          <Plus className="size-3.5" />
+                        </Button>
+                      </div>
+                      <Money cents={l.qty * unitPrice(l.sku)} className="w-[72px] shrink-0 text-right text-[14.5px] font-semibold" />
                     </div>
-                    <Money cents={l.qty * unitPrice(l.sku)} className="w-[72px] shrink-0 text-right text-[14.5px] font-semibold" />
                   </li>
                 );
               })}

@@ -7,6 +7,7 @@ import { mayaDevices, tmobileProducts, tmobileStore, wireless } from "@/data/sto
 import { productBySku } from "@/lib/data";
 import { fmt } from "@/lib/money";
 import { suggest } from "@/lib/whisperer";
+import { niceDate } from "./bits";
 
 export default function TmoHome() {
   const ph = mayaDevices.phone;
@@ -71,7 +72,7 @@ export default function TmoHome() {
               {mayaDevices.owns.map((o) => (
                 <li key={o.sku} className="flex items-center gap-2">
                   <BatteryCharging className="size-4 text-muted-foreground" aria-hidden />
-                  {o.name} <span className="text-muted-foreground">· {o.bought}</span>
+                  {o.name} <span className="text-muted-foreground">· bought {niceDate(o.bought)}</span>
                 </li>
               ))}
             </ul>
@@ -139,7 +140,7 @@ export default function TmoHome() {
           <ul className="mt-1 space-y-1 text-[13.5px]">
             {wireless.upcoming_promos.map((u) => (
               <li key={u.sku}>
-                <span className="font-semibold">{productBySku[u.sku]?.name}</span>: {fmt(u.was_cents)} → {fmt(u.price_cents)} from {u.starts}
+                <span className="font-semibold">{productBySku[u.sku]?.name}</span>: {fmt(u.was_cents)} → {fmt(u.price_cents)} from {niceDate(u.starts)}
               </li>
             ))}
           </ul>
