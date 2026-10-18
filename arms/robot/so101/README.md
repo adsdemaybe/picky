@@ -145,6 +145,103 @@ flat is wider than the jaws can open.
 - URDF ↔ LeRobot joint mapping (`joint_sign` / `joint_offset_deg`) is still unverified on hardware: dry-run and
   check the printed hover pose before the first real pick.
 
+## Connect the real SO-101 to the app
+
+`bridge.py` connects the rig to the gateway **exactly like the Isaac sim worker**: outbound websocket to
+`<PICKY_GATEWAY_URL>/ws/sim`, `SimHello` with `PICKY_SIM_TOKEN` and `contracts_version` 0.2.x (the gateway accepts any
+0.2), then one `CommandResult` per `SimCommand`, `RobotState` on change and camera frames for `SetStreamsCmd`
+(front camera at 2 fps by default). It reconnects with backoff on its own.
+
+**1. Once, on the laptop wired to the arm** (the robot venv already has OpenCV, LeRobot, ikpy, perceptron):
+
+```bat
+..\.venv-robot\Scripts\python -m pip install "websockets>=13" "pydantic>=2.8" "pydantic-settings>=2.4" pyyaml pillow
+```
+
+Add to `~/.config/picky/env` (next to `PERCEPTRON_API_KEY`, `SO101_PORT`, `SO101_CAMERA`):
+
+```
+PICKY_GATEWAY_URL=http://localhost:8100
+PICKY_SIM_TOKEN=<the token the vhagar gateway runs with>
+```
+
+**2. Reach the vhagar gateway** (it listens on vhagar's loopback): keep `ssh -N -L 8100:localhost:8100 vhagar` open in
+a second terminal. A tailnet URL (`http://<vhagar tailnet IP>:8100`) works only if the gateway was started with
+`GATEWAY_HOST=0.0.0.0`.
+
+**3. Run it from the repo root** (`python` = `..\.venv-robot\Scripts\python` on Windows, `~/lerobot/.venv/bin/python`
+on the Mac; on macOS run it from Terminal.app so it may use the camera):
+
+```bash
+python -m arms.robot.so101.bridge --dry                                    # real camera + plan, NO arm motion
+python -m arms.robot.so101.bridge --confirm                                # the real arm, y/N before every motion
+python -m arms.robot.so101.bridge --stand-in rover-hill-1 --default-prop gum --confirm   # drive Hazel's goals
+python -m arms.robot.so101.bridge --dry --camera fake                      # no hardware at all (Mac test)
+```
+
+Options: `--camera fake | image:<file or folder> | <index or name>` (default `SO101_CAMERA`), `--wrist-camera <index>`
+(adds `<robot>.wrist`), `--dest plate` (what picks are dropped into), `--map SKU=gum` (SKU -> the prop on the table),
+`--default-prop gum` (prop for every unmapped SKU; otherwise the catalog name is grounded), `--gateway`, `--token`.
+
+**Two modes.**
+
+| | standalone (default) | `--stand-in rover-hill-1` |
+|---|---|---|
+| hosts | store `store_table`, robot `so101-real`, camera `so101-real.front` | the fleet robot + its store (`store_hill`) |
+| app shows | worker in `GET /api/sim/status`, camera in `GET /api/cameras` (frames: see gaps); no goals | the live page of a Capitol Hill order: "Store ceiling camera" and "What the robot sees" = the table camera, Hazel's plan / brain steps / basket / receipt driven by the real arm; `isaac_store_ids` includes `store_hill` |
+| needs | a gateway change before frames / commands flow (see gaps) | the Isaac worker must NOT host that store (`PICKY_SIM_STORES=store_ave` on vhagar) |
+
+In stand-in mode the bridge advertises the store `loaded=false`; the robot arm then sends the store-level `ResetCmd`
+with the planogram, products and robots (the bridge keeps the SKU names, the slots and Hazel's dock) and routes
+`store_hill` to the bridge. Tested on a Mac against the `feat/judges-demo` gateway with `--dry --camera fake`: the
+request "get me salsa and tortilla chips" at Capitol Hill went fleet -> Hazel -> bridge (navigate, scan, pick, place);
+a fetch goal pinned with `POST /api/fleet/robots/rover-hill-1/goals` completed through the bridge; and with Playwright
+the web app's `/watch` page followed a Capitol Hill order end to end (both camera panels showed the bridge's frames,
+basket filled, receipt shown).
+
+**Command mapping** (the arm is stationary; the plate next to it is the basket):
+
+| command | real rig |
+|---|---|
+| `navigate` | instant success, reported pose = last waypoint (logged once: "stationary arm") |
+| `scan` | real table frame; `instances` = the catalog's units of that slot (bookkeeping, not vision) |
+| `pick` | Perceptron grounding of the product (or its `--map` / `--default-prop` prop) + IK plan (`pick_routine.plan`, learned steering) + hover / straddle / close / short lift. Not found -> `no_instance`; unreachable -> `grasp_failed` |
+| `place_in_basket` | lift high, carry, lower onto the plate, release, retreat, home |
+| `unload_basket` | bookkeeping only (a person empties the plate) |
+| `capture` | real frame (`basket` / unknown kinds of this robot, and the hosted store's `<store>.ceiling-<n>` cameras, alias the table camera) |
+| `stop` | halts at the next interpolation step; the running motion answers `cancelled`, the arm holds its pose |
+| `reset` | robot: home + empty basket; store: adopt the gateway's planogram / products (no motion) |
+| `set_streams`, `list_instances`, `set_slot_stock` | as the Isaac worker |
+| `arm_joints`, `arm_ik`, anything else | `ok=false, error_code="internal"` (typed error, never dropped) |
+
+**Safety.** `--confirm` asks `execute? [y/N]` in the bridge terminal before every motion (connect + home, each pick,
+each place, reset); no answer in 20 s = no (`--confirm-timeout`). Type `s` + Enter at any time to stop the arm; a
+gateway `stop` (fleet stop button) does the same; losing the gateway link also halts the arm; Ctrl-C / `q` halts,
+homes and releases the bus. **Privacy:** every real frame is face-blurred on the laptop (OpenCV Haar cascades; whole
+frame pixelated if the detector is missing) before it is streamed or sent to Perceptron, because the gateway lists
+worker cameras as rendered and does not face-check them.
+
+**Known gaps (need the gateway or physical work):**
+- Standalone `so101-real` is listed but its camera shows "offline (unknown_robot)": the gateway robot arm only drives
+  robots in `data/fixtures/robots.yaml` and drops other workers' frames. Use stand-in mode. Camera fix on the gateway
+  (about 20 lines in `arms/robot/service.py`, checked against a local gateway copy): in `capture_camera`, a robot that is
+  not in robots.yaml but is hosted by a worker gets a `CaptureCmd(camera_id=...)` on that worker, and `_on_message`
+  also pushes that robot's streamed frames. Goals on a standalone robot also need the fleet to know it (its robots come
+  only from robots.yaml), which is a bigger change. Stand-in mode avoids both.
+- No chase camera (`<robot>.director`) in stand-in mode: the app shows "Chase camera offline". The `arm/robot` branch
+  is still on contracts 0.2.0, where `director` isn't a camera kind yet. Announce it (an alias of the table camera)
+  after `arm/robot` merges `main`'s 0.2.3 contracts.
+- The app labels the bridge's frames "Live · Isaac Sim": `contracts.cameras.CameraSource` is `isaac | fake | none`,
+  with no value for a physical camera. Labelling them honestly (e.g. "Live · real SO-101") needs a contracts change
+  (`CameraSource` + `"real"`), so that the bridge's `CameraInfo.source` and the app's badge can say so.
+- The gateway waits 15 s for a `pick` / `place_in_basket` (`SIM_DEFAULT_TIMEOUT_S`); a real pick is ~10-20 s and
+  `--confirm` adds your reaction time. A late result is dropped and the brain sees `timeout`. Fix on the gateway: a
+  longer timeout for workers advertising the `real_hardware` capability.
+- When the bridge connects after Isaac, its `SimHello` replaces the robot arm's capability set, so Isaac's
+  `arm_joints` / `arm_ik` look unavailable until Isaac reconnects (gateway keeps one capability set, not one per worker).
+- Not yet run on the arm: the split pick (grip + short lift) / place (carry + release) path, timing, and the Haar
+  blur on the real camera.
+
 ## Stretch: SmolVLA
 
 ```bash

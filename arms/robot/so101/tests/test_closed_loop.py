@@ -1,4 +1,7 @@
 import numpy as np
+import pytest
+
+pytest.importorskip("cv2")  # the rig modules import OpenCV (robot venv); base deps skip
 
 from arms.robot.so101 import closed_loop
 from arms.robot.so101.judge import Verdict, parse

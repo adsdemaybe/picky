@@ -1,6 +1,8 @@
 import numpy as np
 import pytest
 
+pytest.importorskip("cv2")  # the rig modules import OpenCV (robot venv); base deps skip
+
 from arms.robot.so101.train_loop import DROP_ACTIONS, GRASP_ACTIONS, QPolicy
 
 
