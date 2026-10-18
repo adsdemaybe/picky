@@ -57,6 +57,7 @@ ROVER_COLLIDERS = ("chassis", "mast", "basket_floor", "basket_front", "basket_ba
 WHEEL_RADIUS_M = 0.06
 STOW_EXT_M = 0.13
 SYNC_MIN_S = 0.03
+PHYSICS_BUDGET_S = 0.012  # max wall time spent stepping physics per sync
 HOLD_RADIUS_M = 0.09  # a grasped unit whose center stays this close to the fingertips is still held
 
 
@@ -426,11 +427,14 @@ class MujocoPhysicsBackend(MujocoBackend):
         n = min(MAX_STEPS_PER_SYNC, int((now - self._last_step) / TIMESTEP_S))
         if n <= 0:
             return
-        self._last_step += n * TIMESTEP_S
-        if now - self._last_step > 0.5:
-            self._last_step = now  # can't keep up: run slower than real time instead of spiralling
-        for _ in range(n):
+        # fixed CPU budget per tick: with thousands of stocked units a step costs ms, and trying to keep real time
+        # would starve the worker loop (navigation, streams). Physics then runs slower than real time instead.
+        t0 = time.monotonic()
+        done = 0
+        while done < n and (done == 0 or time.monotonic() - t0 < PHYSICS_BUDGET_S):
             self._mj.mj_step(self._model, self._data)
+            done += 1
+        self._last_step = now if done < n else self._last_step + n * TIMESTEP_S
         self._detect_grasps()
 
     def _forward_for_render(self) -> None:
