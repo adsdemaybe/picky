@@ -123,6 +123,22 @@ export PICKY_SIM_ASSET_DIR=/data/$USER/picky-sim-assets           # optional (de
 Without the fetch step everything still works and renders as boxes. Model credits: `ATTRIBUTION.md` next to the models
 (all CC-BY 4.0; author + Sketchfab URL per model in `visuals.yaml`).
 
+Wireless accessory boxes use retail package art (`labels.package_image`: brand, a product window drawn per kind, name,
+small price sticker and a still-decodable EAN-13) on the whole front face; grocery labels are unchanged.
+
+### Physics demo (standalone, opt-in)
+
+`arms/sim/tools/live_physics_demo.py` runs `store_tmobile` under PhysX with the #19 LeKiwi + SO-101 rover as a real
+articulation: it drives on its base joints along the routing visibility-graph paths, picks phones out of static U-slot
+holders top-down (`tools/physics_ik.py`; a FixedJoint locks the phone to the gripper only once the closed jaws are on
+it), lowers them into a 32 x 24 x 16 cm basket (front-left of the deck, where the folded arm reaches at pan -110 deg)
+and lets go softly; checkout empties the basket. Other units get static colliders. It is not wired into the worker /
+gateway (picks there stay the magic grasp); low render quality: `tools/low_quality.py`.
+
+```bash
+PICKY_ROVER_USD=.../picky_rover.usda PYTHONPATH=.:arms/sim/tools python arms/sim/tools/live_physics_demo.py  # Isaac python
+```
+
 ## Known limitations
 
 - Store visuals: the phone models are close stand-ins from Objaverse (iPhone 13 Pro Max for every iPhone, Galaxy S22
