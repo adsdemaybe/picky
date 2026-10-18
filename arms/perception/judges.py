@@ -1,0 +1,338 @@
+"""Deterministic judges: provider answers (``VisionAnswer``) -> ``AtomVerdict`` per camera atom.
+
+The vision model only reports what it sees (boxes, points, yes/no, text); CODE decides pass / fail / uncertain here
+(CLAUDE.md section 7: the model proposes, code decides). Rules (``verify.PERCEPTRON_CALLS``):
+
+- gripper_holding / gripper_empty: two cues on the wrist frame. (1) a detected box over the jaws
+  (``GRIPPER_ROI_WRIST``: IoU > ``HELD_ROI_MIN_IOU``, or at least half of the box inside the ROI, so a small lime held
+  in the jaws counts) and (2) the answer to "is the gripper empty?". Both agree -> confidence 0.9 (may override robot
+  state), one cue -> 0.7 (never overrides state), cues disagree -> uncertain. The held box's ``mention`` names the
+  product (``match_mention_to_sku``; ambiguous = unknown, never a match).
+- label_matches: OCR text contains ``expect_text`` (casefold) -> pass; text read but no match -> fail (evidence =
+  the text); nothing read -> uncertain.
+- basket_delta / basket_contains: per-SKU box counts on the basket frame (before-count from the baseline's basket
+  frame, else the baseline's state counts at lower confidence).
+- item_on_shelf: visible count >= min_count -> pass; fewer -> uncertain, never fail (back rows are hidden; the scan
+  step is the out-of-stock authority). slot_visible: the slot's product in view -> pass, else uncertain.
+- shelf_tag_reads: OCR -> ``parse_price_cents`` == expected cents.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+
+from contracts.common import Sku
+from contracts.evidence import FrameRef
+from contracts.grounding import GRIPPER_ROI_WRIST, HELD_ROI_MIN_IOU, Evidence, VerifyMethod, box_iou
+from contracts.plan import (
+    Atom,
+    BasketContains,
+    BasketDelta,
+    GripperEmpty,
+    GripperHolding,
+    ItemOnShelf,
+    LabelMatches,
+    ShelfTagReads,
+    SlotVisible,
+)
+from contracts.verify import (
+    AtomVerdict,
+    VerifyBaseline,
+    VisionAnswer,
+    count_boxes_by_sku,
+    match_mention_to_sku,
+    parse_price_cents,
+)
+
+from .vision.common import answer_ok, overlap_fraction, parse_yes_no, yes_no_evidence
+
+TWO_CUES_CONFIDENCE = 0.9
+ONE_CUE_CONFIDENCE = 0.7
+UNKNOWN_ITEM_CONFIDENCE = 0.65
+"""Holding SOMETHING the model could not name: passes only together with robot state (below override)."""
+HELD_IN_ROI_FRACTION = 0.5
+COUNT_PASS_CONFIDENCE = 0.8
+COUNT_FAIL_CONFIDENCE = 0.7
+STATE_BEFORE_CONFIDENCE = 0.6
+TEXT_MATCH_CONFIDENCE = 0.85
+TEXT_MISMATCH_CONFIDENCE = 0.75
+MIN_TEXT_CHARS = 3
+MIN_EMPTY_CONFIDENCE = 0.5
+GENERIC_HELD_CLASS = "other grocery item"
+
+
+@dataclass
+class CameraAnswers:
+    """Provider answers about ONE camera frame (None = not asked; ``call.error_code`` set = asked and failed)."""
+
+    kind: str
+    frame: FrameRef
+    held: VisionAnswer | None = None
+    empty: VisionAnswer | None = None
+    label: VisionAnswer | None = None
+    items: VisionAnswer | None = None
+    items_before: VisionAnswer | None = None
+    before_frame: FrameRef | None = None
+    tag: VisionAnswer | None = None
+    names: dict[Sku, str] = field(default_factory=dict)
+
+
+def _av(
+    path: str,
+    atom: Atom,
+    outcome: str,
+    reason: str,
+    conf: float,
+    method: VerifyMethod,
+    evidence: list[Evidence] | None = None,
+    observed: dict | None = None,
+) -> AtomVerdict:
+    return AtomVerdict(
+        path=path,
+        op=atom.op,
+        outcome=outcome,  # type: ignore[arg-type]
+        confidence=conf,
+        reason=reason,
+        decided_by="provider",
+        method=method,
+        evidence=evidence or [],
+        observed=observed or {},
+    )
+
+
+def usable_count(ans: VisionAnswer | None) -> bool:
+    """A detect answer good enough to COUNT from: it succeeded, and it either found boxes or confidently found none
+    (an empty answer at low confidence = a blank / blocked view, not an empty basket)."""
+    return answer_ok(ans) and ans is not None and (bool(ans.boxes) or ans.confidence >= MIN_EMPTY_CONFIDENCE)
+
+
+def _with_frame(boxes: list[Evidence], frame: FrameRef, **upd: object) -> list[Evidence]:
+    return [b.model_copy(update={"frame": frame, **upd}) for b in boxes]
+
+
+def _match(mention: str, names: Mapping[Sku, str]) -> Sku | None:
+    return match_mention_to_sku(mention, names)
+
+
+# ---- gripper ---------------------------------------------------------------------------------------------------------
+def held_boxes(ans: CameraAnswers) -> list[Evidence]:
+    """Boxes over the gripper jaws (wrist: the ROI rule; other cameras: every box)."""
+    if not answer_ok(ans.held) or ans.held is None:
+        return []
+    out = []
+    for b in ans.held.boxes:
+        if b.box is None:
+            continue
+        if ans.kind != "wrist":
+            out.append(b)
+        elif box_iou(b.box, GRIPPER_ROI_WRIST) > HELD_ROI_MIN_IOU or (
+            overlap_fraction(b.box, GRIPPER_ROI_WRIST) >= HELD_IN_ROI_FRACTION
+        ):
+            out.append(b)
+    return out
+
+
+def gripper_reading(ans: CameraAnswers) -> tuple[str | None, float, Sku | None, list[Evidence], str]:
+    """-> (state 'holding' | 'empty' | 'conflict' | None, confidence, held SKU, evidence, why)."""
+    boxes = held_boxes(ans)
+    cues: list[tuple[str, str]] = []
+    evidence: list[Evidence] = []
+    if answer_ok(ans.held):
+        cues.append(("holding" if boxes else "empty", "a box over the jaws" if boxes else "no box over the jaws"))
+    said: bool | None = None
+    if answer_ok(ans.empty) and ans.empty is not None:
+        said = ans.empty.yes if ans.empty.yes is not None else parse_yes_no(ans.empty.text)
+        if said is not None:
+            cues.append(("empty" if said else "holding", f"'gripper empty?' -> {'yes' if said else 'no'}"))
+            evidence.append(
+                Evidence(
+                    kind="text",
+                    role="held",
+                    frame=ans.frame,
+                    mention="gripper",
+                    text=yes_no_evidence(ans.empty.text) or ("empty" if said else "holding"),
+                    confidence=ans.empty.confidence,
+                )
+            )
+    if not cues:
+        return None, 0.0, None, evidence, "no usable camera answer"
+    held_sku: Sku | None = None
+    if boxes:
+        best = max(boxes, key=lambda b: box_iou(b.box, GRIPPER_ROI_WRIST) if b.box else 0.0)
+        held_sku = _match(best.mention, ans.names)
+        evidence[:0] = _with_frame([best], ans.frame, role="held", sku=held_sku)
+    if ans.kind == "wrist":
+        evidence.append(
+            Evidence(kind="box", role="gripper_roi", frame=ans.frame, box=GRIPPER_ROI_WRIST, mention="jaws")
+        )
+    states = {s for s, _ in cues}
+    why = "; ".join(w for _, w in cues)
+    if len(states) > 1:
+        return "conflict", 0.5, held_sku, evidence, f"camera cues disagree ({why})"
+    conf = TWO_CUES_CONFIDENCE if len(cues) >= 2 else ONE_CUE_CONFIDENCE
+    return next(iter(states)), conf, held_sku, evidence, why
+
+
+def judge_gripper(
+    path: str, atom: GripperHolding | GripperEmpty, ans: CameraAnswers, method: VerifyMethod
+) -> AtomVerdict | None:
+    """Reason = one UI line ('Wrist camera: gripper is empty (expected Sol de Casa Mild Chunky Salsa)'); the cues
+    behind it go to ``observed['cues']``."""
+    state, conf, held_sku, evidence, why = gripper_reading(ans)
+    if state is None:
+        return None
+    cam = f"{ans.kind.capitalize()} camera"
+    label = ans.names.get(held_sku, held_sku) if held_sku else None
+    observed = {"held_sku": held_sku if state == "holding" else None, "cues": why}
+
+    def v(outcome: str, reason: str, c: float = conf) -> AtomVerdict:
+        return _av(path, atom, outcome, reason, c, method, evidence, observed)
+
+    if state == "conflict":
+        return v("uncertain", f"{cam}: {why}")
+    if isinstance(atom, GripperEmpty):
+        if state == "empty":
+            return v("pass", f"{cam}: gripper empty")
+        return v("fail", f"{cam}: still holding {label or 'something'}")
+    want = ans.names.get(atom.sku, atom.sku) if atom.sku else None
+    if state == "empty":
+        return v("fail", f"{cam}: gripper is empty" + (f" (expected {want})" if want else ""))
+    if atom.sku is None or held_sku == atom.sku:
+        return v("pass", f"{cam}: holding {label or want or 'the item'}")
+    if held_sku is not None:
+        return v("fail", f"{cam}: holding {label}, not {want}")
+    return v("pass", f"{cam}: holding an item it could not name", min(conf, UNKNOWN_ITEM_CONFIDENCE))
+
+
+# ---- label -----------------------------------------------------------------------------------------------------------
+def judge_label(path: str, atom: LabelMatches, ans: CameraAnswers, method: VerifyMethod) -> AtomVerdict | None:
+    if not answer_ok(ans.label) or ans.label is None:
+        return None
+    text = (ans.label.text or "").strip()
+    if len(text) < MIN_TEXT_CHARS:
+        return _av(path, atom, "uncertain", "label unreadable", 0.3, method)
+    ok = atom.expect_text.casefold() in text.casefold()
+    ev = Evidence(
+        kind="text", role="label", frame=ans.frame, text=text, sku=atom.sku if ok else None, matches_expectation=ok
+    )
+    if ok:
+        return _av(path, atom, "pass", f"label reads {text!r}", TEXT_MATCH_CONFIDENCE, method, [ev], {"label": text})
+    return _av(
+        path,
+        atom,
+        "fail",
+        f"label reads {text!r}, expected {atom.expect_text!r}",
+        TEXT_MISMATCH_CONFIDENCE,
+        method,
+        [ev],
+        {"label": text},
+    )
+
+
+# ---- basket ----------------------------------------------------------------------------------------------------------
+def _basket_counts(ans: CameraAnswers) -> tuple[dict[Sku, int] | None, list[Evidence]]:
+    if not usable_count(ans.items) or ans.items is None:
+        return None, []
+    counts = count_boxes_by_sku(ans.items.boxes, ans.names)
+    ev = []
+    for b in ans.items.boxes:
+        sku = b.sku or _match(b.mention, ans.names)
+        ev.append(b.model_copy(update={"frame": ans.frame, "role": "basket_item", "sku": sku}))
+    return counts, ev
+
+
+def judge_basket_delta(
+    path: str, atom: BasketDelta, ans: CameraAnswers, baseline: VerifyBaseline | None, method: VerifyMethod
+) -> AtomVerdict | None:
+    after, ev = _basket_counts(ans)
+    if after is None:
+        return None
+    if usable_count(ans.items_before) and ans.items_before is not None:
+        before = count_boxes_by_sku(ans.items_before.boxes, ans.names)
+        src, pass_c, fail_c = "camera before/after", COUNT_PASS_CONFIDENCE, COUNT_FAIL_CONFIDENCE
+    elif baseline is not None:
+        before = dict(baseline.basket_counts)
+        src, pass_c, fail_c = "camera after vs state before", STATE_BEFORE_CONFIDENCE, STATE_BEFORE_CONFIDENCE
+    else:
+        return _av(path, atom, "uncertain", "no baseline for a relative check", 0.0, method, ev)
+    d = after.get(atom.sku, 0) - before.get(atom.sku, 0)
+    ok = d == atom.delta
+    name = ans.names.get(atom.sku, atom.sku)
+    reason = f"camera: basket {d:+d} {name} (want {atom.delta:+d}; {src})"
+    return _av(path, atom, "pass" if ok else "fail", reason, pass_c if ok else fail_c, method, ev[:6], {"delta": d})
+
+
+def judge_basket_contains(
+    path: str, atom: BasketContains, ans: CameraAnswers, method: VerifyMethod
+) -> AtomVerdict | None:
+    have, ev = _basket_counts(ans)
+    if have is None:
+        return None
+    ok = all(have.get(s, 0) >= n for s, n in atom.counts.items())
+    if atom.exact:
+        ok = ok and {s: n for s, n in have.items() if n} == {s: n for s, n in atom.counts.items() if n}
+    reason = f"camera: basket {dict(sorted(have.items()))}"
+    conf = COUNT_PASS_CONFIDENCE if ok else COUNT_FAIL_CONFIDENCE
+    return _av(path, atom, "pass" if ok else "fail", reason, conf, method, ev[:6], {"basket": have})
+
+
+# ---- shelf -----------------------------------------------------------------------------------------------------------
+def judge_item_on_shelf(path: str, atom: ItemOnShelf, ans: CameraAnswers, method: VerifyMethod) -> AtomVerdict | None:
+    if not usable_count(ans.items) or ans.items is None:
+        return None
+    counts = count_boxes_by_sku(ans.items.boxes, ans.names)
+    n = counts.get(atom.sku, 0)
+    ev = [
+        b.model_copy(update={"frame": ans.frame, "role": "target", "sku": atom.sku})
+        for b in ans.items.boxes
+        if (b.sku or _match(b.mention, ans.names)) == atom.sku
+    ][:6]
+    name = ans.names.get(atom.sku, atom.sku)
+    if n >= atom.min_count:
+        return _av(path, atom, "pass", f"camera: {n} x {name} visible", COUNT_PASS_CONFIDENCE, method, ev, {"count": n})
+    return _av(
+        path, atom, "uncertain", f"camera: only {n} x {name} visible (back rows hidden)", 0.5, method, ev, {"count": n}
+    )
+
+
+def judge_slot_visible(
+    path: str, atom: SlotVisible, ans: CameraAnswers, slot_sku: Sku | None, method: VerifyMethod
+) -> AtomVerdict | None:
+    if not usable_count(ans.items) or ans.items is None:
+        return None
+    hits = [b for b in ans.items.boxes if slot_sku is None or (b.sku or _match(b.mention, ans.names)) == slot_sku]
+    if hits:
+        ev = _with_frame(hits[:4], ans.frame, role="slot")
+        return _av(path, atom, "pass", "camera: the slot's product is in view", COUNT_PASS_CONFIDENCE, method, ev)
+    return _av(path, atom, "uncertain", "camera: the slot's product is not visible", 0.4, method)
+
+
+def judge_shelf_tag(path: str, atom: ShelfTagReads, ans: CameraAnswers, method: VerifyMethod) -> AtomVerdict | None:
+    if not answer_ok(ans.tag) or ans.tag is None:
+        return None
+    text = (ans.tag.text or "").strip()
+    cents = parse_price_cents(text)
+    ev = [
+        Evidence(kind="text", role="label", frame=ans.frame, text=text or None, matches_expectation=cents == atom.cents)
+    ]
+    if cents is None:
+        return _av(path, atom, "uncertain", "shelf tag unreadable", 0.3, method, ev)
+    ok = cents == atom.cents
+    conf = TEXT_MATCH_CONFIDENCE if ok else TEXT_MISMATCH_CONFIDENCE
+    return _av(path, atom, "pass" if ok else "fail", f"camera: tag reads {cents}c", conf, method, ev, {"cents": cents})
+
+
+__all__ = [
+    "GENERIC_HELD_CLASS",
+    "CameraAnswers",
+    "gripper_reading",
+    "held_boxes",
+    "judge_basket_contains",
+    "judge_basket_delta",
+    "judge_gripper",
+    "judge_item_on_shelf",
+    "judge_label",
+    "judge_shelf_tag",
+    "judge_slot_visible",
+]
