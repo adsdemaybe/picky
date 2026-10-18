@@ -4,7 +4,7 @@
 import { Check, MinusCircle, RotateCcw, ShoppingBag, Sparkles } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Panel, ProductTile } from "@/components/picky";
 import { Button } from "@/components/ui/button";
@@ -119,6 +119,9 @@ export default function Matchmaker() {
   const complete = !current;
   const result = useMemo(() => (complete ? match({ lines: d.lines!, budget_monthly_cents: d.budget_monthly_cents!, priorities: d.priorities ?? ["price"], usage: d.usage!, keep_phone: !!d.keep_phone, keep_second_phone: d.keep_second_phone, switching: d.switching, age_55: d.age_55, trade_in: d.trade_in }) : null), [complete, d]);
   const add = useTmoCart((s) => s.add);
+  const results = useRef<HTMLDivElement>(null);
+  // on phones the bundles sit under the chat: bring them into view once a shopper is picked
+  const showResults = () => setTimeout(() => window.innerWidth < 1024 && results.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
 
   const pick = (o: Opt) => {
     if (!current) return;
@@ -141,7 +144,7 @@ export default function Matchmaker() {
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[13px] font-medium text-muted-foreground">Try a shopper:</span>
         {DATA.matchmaker_presets.map((p) => (
-          <button key={p.id} onClick={() => (setD(fromPreset(p)), setPreset(p), setPending(null))} className={cn("cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-medium ring-1", preset?.id === p.id ? "bg-magenta-wash text-magenta ring-magenta" : "ring-foreground/10 hover:bg-muted")}>
+          <button key={p.id} onClick={() => (setD(fromPreset(p)), setPreset(p), setPending(null), showResults())} className={cn("cursor-pointer rounded-full px-3 py-1.5 text-[13px] font-medium ring-1", preset?.id === p.id ? "bg-magenta-wash text-magenta ring-magenta" : "ring-foreground/10 hover:bg-muted")}>
             {p.label}
           </button>
         ))}
@@ -197,7 +200,7 @@ export default function Matchmaker() {
           </div>
         </Panel>
 
-        <div className="flex flex-col gap-3">
+        <div ref={results} className="flex scroll-mt-32 flex-col gap-3">
           {!result ? (
             <Panel className="flex min-h-[300px] flex-col items-center justify-center gap-2 p-8 text-center text-muted-foreground">
               <Sparkles className="size-8 text-magenta" aria-hidden />

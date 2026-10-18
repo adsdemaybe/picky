@@ -26,7 +26,7 @@ export default function HouseholdMix() {
           <button key={x.h.id} role="tab" aria-selected={x.h.id === id} onClick={() => setId(x.h.id)} className={cn("flex cursor-pointer items-center gap-2 rounded-full px-3.5 py-2 text-[13.5px] font-semibold ring-1", x.h.id === id ? "bg-foreground text-background ring-foreground" : "bg-card ring-foreground/10 hover:bg-muted")}>
             <Users className="size-4" aria-hidden />
             {x.h.name}
-            <span className={cn("rounded-full px-2 py-0.5 text-[11px]", x.saves_cents > 0 ? "bg-leaf-wash text-leaf-deep" : "bg-amber-wash text-amber-ink")}>{x.saves_cents > 0 ? `−${money0(x.saves_cents)}/mo` : `+${money0(-x.saves_cents)}/mo`}</span>
+            <span className={cn("rounded-full px-2 py-0.5 text-[11px] whitespace-nowrap", x.saves_cents > 0 ? "bg-leaf-wash text-leaf-deep" : "bg-amber-wash text-amber-ink")}>{x.saves_cents > 0 ? `−${money0(x.saves_cents)}/mo` : `+${money0(-x.saves_cents)}/mo`}</span>
           </button>
         ))}
       </div>

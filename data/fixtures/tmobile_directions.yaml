@@ -257,7 +257,7 @@ households:
   streaming: [{name: 'Streaming service A', monthly_cents: 1799}, {name: 'Streaming service B', monthly_cents: 999}]
   note: 'Paying for Premium, but every line uses under 25 GB.'
 - id: nguyen
-  name: 'Nguyen household (three separate accounts)'
+  name: 'Nguyen household (3 accounts)'
   separate: true
   streaming: [{name: 'Streaming service A', monthly_cents: 1799}]
   note: 'Three adults in one apartment, each paying on their own.'
