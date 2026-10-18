@@ -17,9 +17,9 @@ Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_fac
 - [x] **P0** Basket verified at drop (multiset diff vs expected)
 - [x] **P1** Barcode read (zxing-cpp) on crops → SKU (service.py, TODO 2 done; needs extra)
 - [ ] **P1** SigLIP 2 embedding match vs our label textures (TODO 3)
-- [ ] **P1** Claude vision (`claude-haiku-5-5`) pick-from-candidates on blurred crops (TODO 4)
+- [ ] **P1** LLM vision (`utils.llm` fast model: `gemini-3.8-flash`) pick-from-candidates on blurred crops (TODO 4)
 - [x] **P1** Face-free freshness thumbnails cropped from the blurred frame (TODO 5 done; needs pillow)
-- [ ] **P2** Freshness from pixels (multi-image Claude rank blended 0.6/0.4 with HSV heuristic) (TODO 6)
+- [ ] **P2** Freshness from pixels (multi-image LLM rank blended 0.6/0.4 with HSV heuristic) (TODO 6)
 - [ ] **P2** Basket verify from pixels (cascade per basket crop) (TODO 7)
 - [ ] **P2** Shelf-tag OCR for mispricing (TODO 8)
 - [x] **P0** `ScanReport.lot_counts` (units per lot when the count is exact; v0.2) (fake)
@@ -33,11 +33,39 @@ Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_fac
 - [x] **P0** Offline cameras (no robot service, robot error, sim gone) → rendered "offline" card, never a 500 (fake)
 - [x] **P0** `observe` fake: ground-truth description (instances → items, counts, shelf tag, mispricing note, freshness;
       empty aimed slot; planogram near the robot when the frame has no instances) + keyword question answering (fake)
-- [ ] **P1** `observe` real: `claude-haiku-5-5` vision on the blurred JPEG via `utils.llm`, ground truth as hints and
-      fallback (built + unit-tested with a mocked client; not run live: no `ANTHROPIC_API_KEY` yet)
+- [ ] **P1** `observe` real: fast-model vision (`gemini-3.8-flash`) on the blurred JPEG via `utils.llm`, ground truth as hints and
+      fallback (built + unit-tested with a mocked client; not run live: no `GEMINI_API_KEY` yet)
+
+**Planner → VLA → verifier loop (contracts 0.2.1)** — the verifier + evidence cameras; Perceptron is the vision provider.
+- [x] **P0** `create_evidence_fake` → `FakeEvidenceCameras`: deterministic synthetic frames + exact ground-truth sidecar
+      per frame, camera faults (`camera_offline` / `camera_occluded` / `stale_frame`), retention ring (fake)
+- [x] **P0** `create_evidence` → `EvidenceRing`: real frames (aimed `RobotService.scan` for 'front' while idle, else
+      `CameraService.snapshot`), blurred before retention, re-stamped on the GATEWAY clock, kept with `instances`
+- [x] **P0** `create_verifier_fake` → `FakeVerifier`: exact verdicts from frame ground truth (`evaluate_on_truth` per
+      evidence frame), `verifier_unavailable` / `provider_down` / `low_confidence` faults, stale-frame rejection (fake)
+- [x] **P0** `create_verifier` → `PerceptionVerifier`: modes decide / shadow / gt_only (default per store backend),
+      state atoms free, camera atoms judged by code from provider answers, `combine_verdicts` fusion, total deadline,
+      fallback ground truth → robot state, breaker, attribution ("Perceptron perceptron-mk1.5" badge) (fake provider)
+- [x] **P0** `PerceptronVisionProvider` on the `perceptron` 0.4.0 SDK: detect / point / yes-no question / OCR / compare
+      / multilook, 0-1000 grid, blurred frames only, per-call `wait_for`, `RateLimitError.retry_after`, never raises
+      (mock-client tests + real-SDK tests over an in-process HTTP transport; not run live: no `PERCEPTRON_API_KEY` yet)
+- [x] **P1** Grounding: detect + point → box + grasp point → `instance_id` of the unit under the point (sim) (fake provider)
+- [x] **P1** `providers()` for `GET /api/verifier/providers` (calls, errors, p50, agreement with sim ground truth)
+- [ ] **P1** Calibrate `GRIPPER_ROI_WRIST` on the Isaac wrist camera, then flip Isaac stores to `decide` at >= 90 %
+      agreement (needs a key + vhagar)
+- [ ] **P2** General-VLM fallback provider (`PICKY_VISION_PROVIDER=gemini|claude`): not built (raises → fake verifier)
 
 ## Contract
 - Implements `contracts.services.PerceptionService` (`blur_faces`, `identify`, `rank_freshness`, `verify_basket`).
+- Loop (0.2.1, `LOOP_SERVICE_FACTORIES`): `Services.verifier` = `contracts.services.VerifierService` (`verify`, `ground`,
+  `baseline`, `capabilities`, `set_mode`; extra `providers()` → `list[verify.ProviderInfo]` for
+  `GET /api/verifier/providers`) and `Services.evidence` = `contracts.evidence.EvidenceCameras` (`capture_refs`,
+  `get_frame`; extra `ground_truth(frame_id)` → the frame's `GroundTruthSidecar`, gateway-internal). Inside the
+  verifier: `contracts.services.VisionProvider` = `PerceptronVisionProvider` (or `SidecarVisionProvider`). Publishes
+  nothing (the runner wraps verdicts in `step.verified` / `target.grounded`). Reads at call time: `services.robot`
+  (state, list_instances, scan, capture), `services.cameras` (snapshot), `services.perception` (blur_faces),
+  `services.catalog` (planogram, products), `services.truth` (robot arm; local rebuild when unwired),
+  `services.faults` (demo faults).
 - Implements `contracts.services.CameraService` via `create_cameras` / `create_cameras_fake` (`list_cameras`,
   `get_camera` (KeyError → 404; `<robot>.head` accepted as `front`), `snapshot`, `stream`, `observe`). Out:
   `contracts.cameras.CameraInfo`, blurred `CameraFrame`, `VisionObservation`. Gateway helpers exported from
@@ -52,13 +80,14 @@ Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_fac
   `utils.data` when catalog isn't wired. Cameras: `services.robot.capture_camera` / `frames(camera_id=...)`,
   `services.perception.blur_faces` (own blurrer if unwired), `services.sim_link.status()`; `utils.data.load_cameras`
   (built-in defaults with the fixed ids if robots.yaml is missing). Real `observe` goes through
-  `utils.llm.complete_json` (`kind="fast"` = claude-haiku-5-5; image block before text).
+  `utils.llm.complete_json` (`kind="fast"` = gemini-3.8-flash, claude-haiku-5-5 with `PICKY_LLM_PROVIDER=anthropic`;
+  image block before text).
 - Cheat sheet: [contracts/OVERVIEW.md](../../contracts/OVERVIEW.md) · models: [contracts/perception.py](../../contracts/perception.py)
 
 ## Stack (docs/research.md §9.2)
 | | Pick | Fallback |
 |---|---|---|
-| Identify | zxing-cpp → open_clip SigLIP 2 `hf-hub:timm/ViT-B-16-SigLIP2` → `claude-haiku-5-5` vision | ground-truth bypass; CLIP `ViT-B-32`/`laion2b_s34b_b79k` |
+| Identify | zxing-cpp → open_clip SigLIP 2 `hf-hub:timm/ViT-B-16-SigLIP2` → `utils.llm` fast-model vision (`gemini-3.8-flash`) | ground-truth bypass; CLIP `ViT-B-32`/`laion2b_s34b_b79k` |
 | Face blur | OpenCV YuNet `face_detection_yunet_2023mar.onnx` + Gaussian blur (20% pad) | synthetic-frame rule; MediaPipe BlazeFace |
 
 Gotchas: pin **`opencv-python-headless>=4.10,<5`** (5.x untested with 2023mar). SigLIP 2 needs `open-clip-torch>=2.31`,
@@ -79,13 +108,25 @@ undecodable frame becomes a placeholder card. `observe` sends only blurred frame
 
 ## Files
 - `__init__.py` — `create` → `RealPerception`, `create_fake` → `FakePerception`, `create_cameras` → `RealCameras`
-  (raises without `ANTHROPIC_API_KEY` so the gateway uses the fake), `create_cameras_fake` → `FakeCameras`
+  (raises without `GEMINI_API_KEY` so the gateway uses the fake), `create_cameras_fake` → `FakeCameras`
 - `cameras.py` — Cameras API (registry, snapshot / stream / observe, frame helpers, placeholder renderer)
 - `fake.py` — ground-truth bypass (base deps only), helpers `is_synthetic_frame`, `freshness_reason`
 - `service.py` — YuNet blur + cascade skeleton (barcode done; SigLIP/VLM TODO) over the ground-truth report
 - `tests/test_perception.py` — Protocol conformance + demo behavior (avocado top-3, mispricing, empty slot, basket diff)
 - `tests/test_cameras.py` — CameraService: registry (defaults, robots.yaml, sim overlay), snapshot scaling + privacy,
-  placeholders, live / stalled / legacy streams, fake observe, real observe with a mocked Claude client
+  placeholders, live / stalled / legacy streams, fake observe, real observe with a mocked LLM client
+- `evidence.py` — `EvidenceStore` (retention + sidecars + camera faults), `FakeEvidenceCameras`, `EvidenceRing`
+- `truth.py` — `LocalTruth`: `TruthSnapshot` from v0.2 Protocols when the robot arm's `TruthSource` is not wired
+- `verifier_fake.py` — `VerifierBase` (frames, per-frame truth, faults, baseline, ground-truth grounding) + `FakeVerifier`
+- `verifier.py` — `PerceptionVerifier` (modes, fusion, deadline, fallbacks, breaker, grounding) + `create_verifier`
+- `judges.py` — pure code: provider answers → camera-atom verdicts (gripper ROI + cue agreement, label, basket, shelf,
+  tag)
+- `vision/perceptron.py` — `PerceptronVisionProvider` (SDK 0.4.0); `vision/sidecar.py` — `SidecarVisionProvider`
+  (deterministic answers from sidecars); `vision/common.py` — blur guard, yes/no parsing, grid helpers, stats
+- `loop_config.py` — verifier env vars through `utils.config.settings`
+- `tests/loop_world.py` — mini planogram + robot + scripted faults / providers (no other arm imported);
+  `tests/test_loop_evidence.py`, `test_loop_verifier_fake.py`, `test_loop_verifier.py`, `test_perceptron_provider.py`
+  (mock client), `test_perceptron_sdk.py` (real SDK over `httpx.MockTransport`; skipped without the extra)
 
 ## How to run
 ```bash
@@ -95,11 +136,24 @@ uv sync --extra perception                          # opencv, pillow, zxing-cpp 
 curl -L -o models/face_detection_yunet_2023mar.onnx \
   https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
 PICKY_REAL_ARMS=perception make demo                # real blur + cascade, ground truth fills the gaps
-PICKY_REAL_ARMS=cameras make dev                    # real observe (needs ANTHROPIC_API_KEY); the rest stays fake
+PICKY_REAL_ARMS=cameras make dev                    # real observe (needs GEMINI_API_KEY); the rest stays fake
 curl -s localhost:8000/api/cameras | jq '.[].camera_id'
 curl -s -o pico.jpg 'localhost:8000/api/cameras/rover-ave-1.front/snapshot.jpg?w=320'
 curl -s -XPOST localhost:8000/api/cameras/rover-ave-1.front/observe -d '{"question":"is the mild salsa here?"}'
 ```
+Verifier (loop; `PICKY_EXEC_MODE=plan` once the gateway wires the loop fields):
+```bash
+uv sync --extra perception                                     # perceptron 0.4.0 (pins Pillow < 12)
+PERCEPTRON_API_KEY=... PICKY_REAL_ARMS=verifier,evidence make demo # Perceptron vision (shadow on 2D-fake stores)
+PICKY_VISION_PROVIDER=fake PICKY_REAL_ARMS=verifier make demo    # real verifier code, deterministic vision, no key
+PICKY_VERIFIER_MODE=decide ...                                 # let the provider decide on the 2D fake too
+uv run --with perceptron==0.4.0 python -m pytest arms/perception/tests/test_perceptron_sdk.py   # real-SDK tests
+```
+Env (`.env.example`): `PERCEPTRON_API_KEY`, `PERCEPTRON_MODEL` (perceptron-mk1.5 | perceptron-mk1),
+`PERCEPTRON_BASE_URL`, `PICKY_VISION_PROVIDER` (perceptron | fake), `PICKY_VERIFIER_MODE` (decide | shadow | gt_only;
+blank = per backend), `PICKY_VISION_CALL_TIMEOUT_S` (4). `create_verifier` raises without a key (unless
+`PICKY_VISION_PROVIDER=fake`), so the gateway boots `create_verifier_fake`.
+
 Fallback flag: drop `perception` (and `cameras`) from `PICKY_REAL_ARMS`. `cameras` is real when `cameras` OR
 `perception` is listed; without an API key the real factory raises and the gateway boots the fake.
 
@@ -126,6 +180,20 @@ Fallback flag: drop `perception` (and `cameras`) from `PICKY_REAL_ARMS`. `camera
   the robot arm's per-store choice can briefly differ during an Isaac reconnect.
 - `stream` drops intermediate live frames (latest wins at the requested fps; max 15). The fps shown in
   `CameraInfo.fps` is an EMA over frames this service served (snapshots + streams), not the sim's render rate.
+
+- Verifier: Perceptron has only been exercised against mocked clients and the real SDK over an in-process transport
+  (no key yet). Its confidence is not calibrated: the judges use cue agreement (0.9 two cues, 0.7 one), so one noisy
+  answer never overrides exact robot state (`VISION_OVERRIDE_CONFIDENCE` 0.85).
+- `GRIPPER_ROI_WRIST` is uncalibrated on Isaac. On the 2D fake the wrist camera shows the shelf when the gripper is
+  empty, so a real model may box shelf items over the jaws: the yes/no cue then disagrees → 'uncertain' (state
+  decides). That is why 2D-fake stores default to `shadow`.
+- An empty detect answer at low confidence counts as "could not see" (never "zero items"); fewer shelf units than
+  expected is 'uncertain', never 'fail' (the scan step is the out-of-stock authority).
+- Detect classes come from the condition, robot state, bindings, the baseline basket and planogram neighbours within
+  1.2 m (never from ground truth). An item outside that list is "an item it could not name".
+- `perceptron` 0.4.0 pins `Pillow<12`, so the lock moved Pillow 13.0 → 11.3 for everyone (all tests pass on 11.3).
+- `EvidenceRing` aims 'front' with `RobotService.scan` (a motion command, ~0.6 s on the fake) only while the robot is
+  idle; otherwise it falls back to a plain capture that may not look at the slot.
 
 ## How to contribute (this arm)
 Full flow: CLAUDE.md §5. Short version: work on branch `arm/perception` (after merge: `feat/perception-<slug>` /

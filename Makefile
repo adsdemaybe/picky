@@ -7,11 +7,12 @@ SHELL := /bin/sh
 FRONTEND_DIR := arms/frontend
 NO_FRONTEND_MSG := "arms/frontend/package.json not found yet: the frontend app has not been scaffolded. See arms/frontend/README.md (pnpm create next-app ...)."
 
-.PHONY: help setup check lint fmt fmt-check rules rules-check test dev demo seed db-up db-down sim gen-types web
+.PHONY: help setup check lint fmt fmt-check rules rules-check test dev demo seed db-up db-down sim gen-types web \
+	secret secrets secrets-identity secrets-pull secrets-push
 
 help: ## List all targets
 	@echo "Picky make targets:"
-	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-12s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-17s %s\n", $$1, $$2}'
 
 setup: ## Install the Python env + dev tools (uv sync --locked; drops extras: re-run `uv sync --extra <arm>`)
 	uv sync --locked
@@ -40,7 +41,7 @@ test: ## Run pytest (base deps; extras are importorskip'd)
 dev: ## Run the gateway API with reload (GATEWAY_HOST/GATEWAY_PORT from .env, default 0.0.0.0:8000)
 	uv run python -m arms.gateway.app --reload
 
-demo: ## Run the demo trips through the pipeline (fakes unless PICKY_REAL_ARMS is set; `make demo ARGS=--allow-errors`)
+demo: ## Run the demo trips (fakes unless PICKY_REAL_ARMS; ARGS="--allow-errors | --exec-mode direct | --faults wrong_salsa")
 	uv run python -m arms.gateway.demo $(ARGS)
 
 seed: ## Seed the DB from data/ (planograms + products); needs `make db-up`
@@ -70,3 +71,20 @@ web: ## Run the frontend dev server (pnpm dev in arms/frontend)
 	else \
 		echo $(NO_FRONTEND_MSG); \
 	fi
+
+# --- Secrets (utils.secrets; docs/secrets.md). Values are never printed. -----------------------------------------
+secret: ## Store one API key in your local vault (hidden prompt): make secret NAME=PERCEPTRON_ROBOTICS_API_KEY
+	@if [ -z "$(NAME)" ]; then echo "usage: make secret NAME=<NAME>   (make secrets lists the names)"; exit 2; fi
+	uv run python -m utils.secrets set $(NAME)
+
+secrets: ## List known secrets: set?, source (env/keychain/file/.env), masked, what it is
+	uv run python -m utils.secrets list $(ARGS)
+
+secrets-identity: ## Create/show your age key for the team bundle; paste the public key into secrets/recipients.txt
+	uv run --extra secrets python -m utils.secrets identity
+
+secrets-pull: ## Decrypt secrets/team.age into your local vault (never overwrites a different value; ARGS=--force)
+	uv run --extra secrets python -m utils.secrets pull $(ARGS)
+
+secrets-push: ## Encrypt local secrets into secrets/team.age for everyone in recipients.txt (NAME=... to rotate one)
+	uv run --extra secrets python -m utils.secrets push $(NAME) $(ARGS)

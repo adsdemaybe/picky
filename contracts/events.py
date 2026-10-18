@@ -25,14 +25,23 @@ Producers (``EVENT_PRODUCERS``; exactly one per type, so nothing is published tw
 - agent: agent.message (shopper chat streaming); the robot brain: brain.step plus the in-store execution events of
   the goal it runs (robot.arrived, scan.result, pick.choices, item.picked, basket.verified).
 - catalog: stock.updated, stock.alert.   - any arm: error.
+- planner -> VLA -> verifier loop (0.2.1, plan / tools mode only; ``LOOP_EVENT_TYPES``): the agent arm's LoopRunner
+  publishes plan.created / plan.revised / step.started / vla.status / step.verified / step.failed / step.completed /
+  plan.completed (P0, ``LOOP_P0_EVENT_TYPES``) and target.grounded / vla.tier_changed / camera.overlay (P1); the robot
+  arm's FaultInjector publishes demo.fault. The VLA service and the verifier publish NOTHING (they return data). Loop
+  events use ``plan_envelope(plan)`` (same keys as ``goal_envelope``), so the /ws filters work unchanged; the runner
+  also mirrors one ``brain.step(kind='status')`` per step transition (``bridge.mirror_brain_step``), so a v0.2
+  ThinkingLog keeps working, and the v0.2 execution events (robot.arrived, scan.result, pick.choices, item.picked,
+  basket.verified) keep firing from the same runs. PICKY_EXEC_MODE=direct (kill switch) emits none of the loop events.
 
-Live-only events (``LIVE_ONLY_EVENT_TYPES`` = ``frame``, ``camera.frame``) never go through the sequenced bus/replay
-ring: they are sent latest-only with ``seq=0`` on ``/ws/frames?trip_id=|robot_id=``, ``/ws/cameras/{camera_id}`` and
-the multiplexed ``/ws/cameras?camera_id=..|store_id=|robot_id=``. ``camera.frame`` (keyed by camera_id) is THE live
-frame event; ``frame`` is legacy (front camera only) and is never sent for an image that also goes out as
-``camera.frame`` on the same socket.
+Live-only events (``LIVE_ONLY_EVENT_TYPES`` = ``frame``, ``camera.frame``, ``camera.overlay``) never go through the
+sequenced bus/replay ring: they are sent latest-only with ``seq=0`` on ``/ws/frames?trip_id=|robot_id=``,
+``/ws/cameras/{camera_id}`` and the multiplexed ``/ws/cameras?camera_id=..|store_id=|robot_id=``. ``camera.frame``
+(keyed by camera_id) is THE live frame event; ``frame`` is legacy (front camera only) and is never sent for an image
+that also goes out as ``camera.frame`` on the same socket.
 ``robot.state`` on ``/ws`` is throttled to <= 2 Hz per robot (plus every status change); full-rate robot.state also
-goes on ``/ws/frames``.
+goes on ``/ws/frames``. ``vla.status`` on ``/ws`` is throttled to <= 2 Hz per exec_id (``THROTTLED_EVENT_TYPES``);
+phase changes (accepted / succeeded / failed / cancelled) always go out.
 """
 
 from collections.abc import Collection, Mapping
@@ -59,15 +68,22 @@ from contracts.common import (
     UserId,
     utcnow,
 )
+from contracts.evidence import FrameRef
+from contracts.faults import FaultFiring
 from contracts.fleet import Assignment, BrainStep, FleetRequest, Goal, RequestPlan, RobotInfo
+from contracts.grounding import Evidence, GroundedTarget
 from contracts.messaging import OutboundMessage
 from contracts.perception import BasketCheck, PickChoice, ScanReport
+from contracts.plan import ExecId, PlanId, PlanStep, PlanStepId, StepPlan, StepStatus, VlaTier
+from contracts.policy import BreakerState, EffectRecord, LoopMetrics, RecoveryDecision, StepFailure
 from contracts.profile import Feedback, ProfileUpdate
 from contracts.routing import Route, StopStatus
 from contracts.shopping import Cart, Intent, ListItem, Recommendation, ShoppingList, TripState
 from contracts.sim import CameraFrame, RobotState
 from contracts.trip import Trip
 from contracts.trust import ApprovalKind, ApprovalRequest, ApprovalResponse, MandateDecision, Receipt
+from contracts.verify import Verdict, VerifyPhase
+from contracts.vla import VlaStatus
 
 
 class EventBase(Model):
@@ -361,6 +377,132 @@ class ErrorEvent(EventBase):
     code: str | None = None
 
 
+# ---- planner -> VLA -> verifier loop (0.2.1; producer: agent (the LoopRunner), demo.fault: robot) -------------------
+class PlanCreated(EventBase):
+    """The step list ('Go to Aisle 1 · Look at salsa · Find jar · Grab · Basket ...'); tools mode: once per goal
+    (mode='tools'), every appended step then arrives in its ``step.started``."""
+
+    type: Literal["plan.created"] = "plan.created"
+    plan: StepPlan
+
+
+class PlanRevised(EventBase):
+    """A re-plan replaced the tail of the plan (done steps carried over with the same ids)."""
+
+    type: Literal["plan.revised"] = "plan.revised"
+    plan: StepPlan
+    previous_plan_id: PlanId
+    reason: str = ""
+    failure: StepFailure | None = None
+
+
+class StepStarted(EventBase):
+    """Row spinner + tier chip (T0 scripted / T1 SmolVLA) + attempt n."""
+
+    type: Literal["step.started"] = "step.started"
+    plan_id: PlanId
+    step: PlanStep
+    attempt: int = Field(1, ge=1)
+    exec_id: ExecId | None = Field(None, description="VLA steps only.")
+    tier: VlaTier | None = Field(None, description="Planned tier for VLA steps (vla.status says the resolved one).")
+    inserted_by: PlanStepId | None = Field(None, description="Recovery step inserted for this failed step.")
+
+
+class VlaStatusEvent(EventBase):
+    """Live VLA progress of one exec (running throttled to <= 2 Hz per exec; every phase change sent)."""
+
+    type: Literal["vla.status"] = "vla.status"
+    plan_id: PlanId
+    step_id: PlanStepId
+    status: VlaStatus
+
+
+class TargetGroundedEvent(EventBase):
+    """Box + grasp point overlay on the evidence frame. (Named ...Event because ``plan.TargetGrounded`` is the
+    condition atom.)"""
+
+    type: Literal["target.grounded"] = "target.grounded"
+    plan_id: PlanId
+    step_id: PlanStepId
+    grounding: GroundedTarget
+
+
+class StepVerified(EventBase):
+    """A pre / post / standalone / re-verify check finished (pass, fail or uncertain), with evidence for overlays."""
+
+    type: Literal["step.verified"] = "step.verified"
+    plan_id: PlanId
+    step_id: PlanStepId
+    attempt: int = Field(1, ge=1)
+    phase: VerifyPhase
+    verdict: Verdict
+    caught_vla_false_success: bool = Field(
+        False, description="The VLA said 'succeeded' and this postcondition FAILED (the demo moment card)."
+    )
+
+
+class StepFailed(EventBase):
+    """An attempt failed; ``decision`` says what happens next (never terminal for the plan by itself)."""
+
+    type: Literal["step.failed"] = "step.failed"
+    plan_id: PlanId
+    step_id: PlanStepId
+    failure: StepFailure
+    decision: RecoveryDecision
+    attempts_left: int | None = Field(None, description="For the UI: 'attempt 2/3'.")
+
+
+class StepCompleted(EventBase):
+    type: Literal["step.completed"] = "step.completed"
+    plan_id: PlanId
+    step_id: PlanStepId
+    status: StepStatus = Field(description="succeeded | provisional | skipped | failed | cancelled.")
+    attempts: int = Field(1, ge=0)
+    effects: list[EffectRecord] = Field(default_factory=list, description="Committed by this step (once).")
+    note: str = ""
+
+
+class VlaTierChanged(EventBase):
+    """A circuit breaker opened / closed for a tier on a robot (or the backend switched Isaac <-> 2D fake)."""
+
+    type: Literal["vla.tier_changed"] = "vla.tier_changed"
+    from_tier: VlaTier | None = None
+    to_tier: VlaTier
+    reason: str
+    breaker: BreakerState | None = None
+
+
+class PlanCompleted(EventBase):
+    """Summary + LoopMetrics ('Done in 2:41 · 82 steps · 1 verifier catch · 1 retry')."""
+
+    type: Literal["plan.completed"] = "plan.completed"
+    plan_id: PlanId
+    status: Literal["completed", "failed", "cancelled"]
+    summary: str = ""
+    stats: LoopMetrics = Field(default_factory=LoopMetrics)
+
+
+class DemoFaultEvent(EventBase):
+    """An injected fault fired (presenter / staff view only; producer: the robot arm's FaultInjector)."""
+
+    type: Literal["demo.fault"] = "demo.fault"
+    firing: FaultFiring
+    scenario: str | None = None
+
+
+class CameraOverlay(EventBase):
+    """LIVE-ONLY overlay for a camera (/ws/cameras/{camera_id}, /ws/cameras, /ws/frames): evidence to draw on the live
+    stream for ``ttl_ms``; coordinates are on the 0-1000 grid of ``frame`` (always a blurred FrameRef)."""
+
+    type: Literal["camera.overlay"] = "camera.overlay"
+    camera_id: CameraId
+    frame: FrameRef
+    evidence: list[Evidence] = Field(default_factory=list)
+    label: str = Field("", description="'Perceptron Mk1.5 · grasp check · FAIL'.")
+    ttl_ms: int = Field(2500, ge=0)
+    step_id: PlanStepId | None = None
+
+
 Event = Annotated[
     TripCreated
     | TripSnapshot
@@ -399,7 +541,19 @@ Event = Annotated[
     | StockUpdated
     | StockAlertEvent
     | AgentMessage
-    | ErrorEvent,
+    | ErrorEvent
+    | PlanCreated
+    | PlanRevised
+    | StepStarted
+    | VlaStatusEvent
+    | TargetGroundedEvent
+    | StepVerified
+    | StepFailed
+    | StepCompleted
+    | VlaTierChanged
+    | PlanCompleted
+    | DemoFaultEvent
+    | CameraOverlay,
     Field(discriminator="type"),
 ]
 
@@ -444,13 +598,54 @@ EVENT_CLASSES: tuple[type[EventBase], ...] = (
     StockAlertEvent,
     AgentMessage,
     ErrorEvent,
+    PlanCreated,
+    PlanRevised,
+    StepStarted,
+    VlaStatusEvent,
+    TargetGroundedEvent,
+    StepVerified,
+    StepFailed,
+    StepCompleted,
+    VlaTierChanged,
+    PlanCompleted,
+    DemoFaultEvent,
+    CameraOverlay,
 )
 
 EVENT_TYPES: dict[str, type[EventBase]] = {cls.model_fields["type"].default: cls for cls in EVENT_CLASSES}
 """Map from ``type`` string to event class."""
 
-LIVE_ONLY_EVENT_TYPES: frozenset[str] = frozenset({"frame", "camera.frame"})
+LIVE_ONLY_EVENT_TYPES: frozenset[str] = frozenset({"frame", "camera.frame", "camera.overlay"})
 """Never sequenced, stored or replayed; sent latest-only on /ws/frames and /ws/cameras/{camera_id}."""
+
+LOOP_EVENT_TYPES: tuple[str, ...] = (
+    "plan.created",
+    "plan.revised",
+    "step.started",
+    "vla.status",
+    "target.grounded",
+    "step.verified",
+    "step.failed",
+    "step.completed",
+    "vla.tier_changed",
+    "plan.completed",
+    "demo.fault",
+    "camera.overlay",
+)
+"""The planner -> VLA -> verifier loop's events (0.2.1). Emitted only in PICKY_EXEC_MODE=plan / tools."""
+LOOP_P0_EVENT_TYPES: tuple[str, ...] = (
+    "plan.created",
+    "plan.revised",
+    "step.started",
+    "vla.status",
+    "step.verified",
+    "step.failed",
+    "step.completed",
+    "plan.completed",
+)
+"""What the web app needs for the demo (PlanPanel, VLA bar, 'Verifier caught it' card); the rest is P1."""
+THROTTLED_EVENT_TYPES: dict[str, float] = {"vla.status": 2.0}
+"""Max Hz per (type, exec_id) on /ws for non-phase-change updates (terminal + phase changes always pass)."""
 
 _FLEET_EVENTS = (
     "request.received",
@@ -469,8 +664,11 @@ EVENT_PRODUCERS: dict[str, str] = (
     | {t: "fleet" for t in _FLEET_EVENTS}
     | {t: "agent" for t in _BRAIN_EVENTS}
     | {"agent.message": "agent", "stock.updated": "catalog", "stock.alert": "catalog", "error": "any"}
+    | {t: "agent" for t in LOOP_EVENT_TYPES}
+    | {"demo.fault": "robot"}
 )
-"""Who publishes each event type (see module docstring). 'agent' covers both the shopper agent and the robot brain."""
+"""Who publishes each event type (see module docstring). 'agent' covers the shopper agent, the robot brain and the
+LoopRunner (loop events); 'robot' = the robot arm's FaultInjector (demo.fault only)."""
 
 
 def make_event(
@@ -510,6 +708,18 @@ def goal_envelope(goal: Goal, robot_id: RobotId | None = None) -> dict[str, Any]
         "robot_id": robot_id or goal.robot_id,
         "user_id": goal.user_id,
         "request_id": goal.request_id,
+    }
+
+
+def plan_envelope(plan: StepPlan, robot_id: RobotId | None = None) -> dict[str, Any]:
+    """Envelope kwargs for any loop event about ``plan`` (same keys as ``goal_envelope``): ``make_event(
+    "step.failed", **plan_envelope(plan), plan_id=..., step_id=..., failure=f, decision=d, source="agent")``."""
+    return {
+        "trip_id": plan.trip_id,
+        "store_id": plan.store_id,
+        "robot_id": robot_id or plan.robot_id,
+        "user_id": plan.user_id,
+        "request_id": plan.request_id,
     }
 
 

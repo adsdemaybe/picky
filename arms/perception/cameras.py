@@ -1,8 +1,9 @@
 """Cameras API (``contracts.services.CameraService``): registry, blurred snapshots / live streams, ``observe``.
 
 ``create_cameras_fake(services)`` -> :class:`FakeCameras` (base deps only: pillow);
-``create_cameras(services)``      -> :class:`RealCameras` (same, plus ``observe`` through claude-haiku-5-5 vision via
-``utils.llm``; raises without ``ANTHROPIC_API_KEY`` so the gateway boots the fake).
+``create_cameras(services)``      -> :class:`RealCameras` (same, plus ``observe`` through the ``utils.llm`` fast model's
+vision (gemini-3.8-flash by default); raises without the provider's key (``GEMINI_API_KEY``) so the gateway boots the
+fake).
 
 Registry: ``utils.data.load_cameras()`` (data/fixtures/robots.yaml: each robot's front / wrist / basket camera + the
 store ceiling cameras; built-in defaults with the fixed ids if the file is missing), overlaid at call time with what
@@ -869,7 +870,8 @@ def create_cameras(services: Services) -> RealCameras:
     from utils import llm
 
     if not llm.is_configured():
-        raise llm.LLMNotConfigured("cameras: ANTHROPIC_API_KEY not set; the fake (ground-truth observe) runs instead")
+        reason = llm.not_configured_reason() or "no LLM configured"
+        raise llm.LLMNotConfigured(f"cameras: {reason}; the fake (ground-truth observe) runs instead")
     return RealCameras(services)
 
 

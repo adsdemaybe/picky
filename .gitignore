@@ -16,6 +16,10 @@ build/
 *.pem
 *.p12
 *.key
+# Team key vault (utils.secrets): only the age-encrypted bundle + public recipients are committed
+secrets/*
+!secrets/*.age
+!secrets/recipients.txt
 
 # Node
 node_modules/

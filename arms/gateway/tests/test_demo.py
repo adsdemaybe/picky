@@ -51,3 +51,21 @@ async def test_demo_requests_staff_scan_and_smarter_second_trip() -> None:
     assert all(g.status == GoalStatus.COMPLETED for g in res.goals)
     assert res.staff_goals and res.staff_goals[0].robot_id == "rover-ave-2"
     assert res.stock_alerts > 0 and res.brain_steps > 0
+    # planner -> VLA -> verifier loop (plan mode is the default once the gateway wires the loop services)
+    assert res.exec_mode == "plan" and res.faults == "drop_on_first_grasp"
+    assert len(res.loop.completed) == len(res.trips1) + len(res.trips2)
+    assert all(e.status == "completed" for e in res.loop.completed)
+    assert [f.effect for f in res.loop.firings] == ["drop_after_lift"]
+    catch = res.loop.catches[0]
+    assert catch.retried_ok and catch.attempt == 1 and catch.fault_ids == ["f-drop-1"], catch
+    assert res.loop.dropoffs >= 1, "tacos for 6 is more than a 12-unit basket: the plan drops off at the checkout"
+
+
+@needs_data
+@pytest.mark.skipif(not _fakes_ready(), reason="fleet / brain / cameras fakes not built yet")
+async def test_demo_direct_mode_is_the_v02_path() -> None:
+    """PICKY_EXEC_MODE=direct (the kill switch) with every loop service still wired: no step plans, same trips."""
+    res = await run_demo(quiet=True, timeout_s=60, staff_text=None, exec_mode="direct")
+    assert res.exec_mode == "direct" and res.faults is None
+    assert not res.loop.plans and not res.loop.firings
+    assert all(t.state == TripState.DONE for t in (*res.trips1, *res.trips2))

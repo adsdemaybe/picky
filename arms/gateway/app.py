@@ -29,8 +29,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import ValidationError
 
+from arms.gateway.loop_api import mount_loop_routes
 from arms.gateway.orchestrator import OrchestratorConfig, TripOrchestrator
-from arms.gateway.registry import Registry, build_registry
+from arms.gateway.registry import NOT_WIRED, Registry, build_registry
 from contracts import CONTRACTS_VERSION
 from contracts.api import (
     ApprovalDecisionRequest,
@@ -204,7 +205,11 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
         r = reg()
         details = {arm: mode for arm, mode in r.modes.items()}
         details.update({f"{arm}_note": note for arm, note in r.notes.items()})
-        degraded = any(m not in ("real", "fake", "override") for m in r.modes.values())
+        details["exec_mode"] = r.exec_mode  # direct | plan | tools (the planner -> VLA -> verifier loop)
+        faults = r.services.faults
+        if faults is not None and getattr(faults, "scenario", None):
+            details["fault_scenario"] = str(faults.scenario)
+        degraded = any(m not in ("real", "fake", "override", NOT_WIRED) for m in r.modes.values())
         robots = 0
         fleet = r.services.fleet
         if fleet is not None:
@@ -623,6 +628,9 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
                     msg = msg.model_copy(update={"user_id": profile.user_id})
         return await orch().handle_inbound(msg)
 
+    # ------------------------------------------------------------------------- planner -> VLA -> verifier loop
+    mount_loop_routes(app, reg)
+
     @app.get("/api/_schema/events")
     async def events_schema() -> dict[str, Any]:
         return event_json_schema()
@@ -721,7 +729,7 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
                         tasks.append(asyncio.ensure_future(_pump_camera(r, cid, fps, width, send, trip_id, as_legacy)))
                 while True:
                     ev = await sub.get()
-                    if ev.type == "robot.state" or (legacy and ev.type == "frame"):
+                    if ev.type in ("robot.state", "camera.overlay") or (legacy and ev.type == "frame"):
                         await send(event_to_dict(ev))
             finally:
                 sub.close()
@@ -743,7 +751,9 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
             async with lock:
                 await ws.send_json(data)
 
-        await _run_pair(ws, _pump_camera(r, camera_id, fps, width, send), _drain(ws))
+        await _run_pair(
+            ws, _pump_camera(r, camera_id, fps, width, send), _pump_overlays(r, {camera_id}, send), _drain(ws)
+        )
 
     @app.websocket("/ws/cameras")
     async def ws_cameras(ws: WebSocket) -> None:
@@ -775,6 +785,7 @@ def create_app(registry: Registry | None = None, orchestrator_config: Orchestrat
                 await send(_error_dict(None, "no cameras match"))
                 return
             tasks = [asyncio.ensure_future(_pump_camera(r, cid, fps, width, send)) for cid in ids]
+            tasks.append(asyncio.ensure_future(_pump_overlays(r, set(ids), send)))
             try:
                 await asyncio.gather(*tasks)
             finally:
@@ -945,6 +956,18 @@ async def _pump_camera(
         if aclose is not None:
             with contextlib.suppress(Exception):
                 await aclose()
+
+
+async def _pump_overlays(r: Registry, camera_ids: set[str], send: Any) -> None:
+    """Live-only ``camera.overlay`` events (the loop's evidence boxes) for these cameras, latest-only."""
+    sub = r.frames.subscribe()
+    try:
+        while True:
+            ev = await sub.get()
+            if getattr(ev, "type", None) == "camera.overlay" and ev.camera_id in camera_ids:
+                await send(event_to_dict(ev))
+    finally:
+        sub.close()
 
 
 async def _sim_status(r: Registry) -> SimStatus:
