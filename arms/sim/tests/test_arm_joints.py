@@ -312,3 +312,71 @@ def test_isaac_style_kinematics_scripted_pose_matches_the_puppet():
     assert q["gripper"] == pytest.approx(math.radians(rp.GRIPPER_OPEN_DEG))
     assert kin.travel(0.6) == pytest.approx(0.6 - z_ref) and kin.ref_height(0.6) == pytest.approx(0.6)
     assert kin.clamp_deg([500, 0, 0, 0, 0, -50]) == pytest.approx([110.0, 0, 0, 0, 0, -10.0])
+
+
+# ---- 0.2.2 additions: arm_ik (Cartesian policies), capture_every (live feed while moving), frame roll --------------
+def ik(core, out, clock, cmd_id, points, **kw):
+    from contracts.sim import ArmIkCmd
+
+    core.submit(ArmIkCmd(cmd_id=cmd_id, robot_id=R1, targets=[{"point": p, **kw} for p in points]))
+    return run_until(core, out, clock, cmd_id, max_s=5.0, dt=1 / 60)
+
+
+def test_arm_ik_solves_without_moving_and_the_rows_reach_the_target(rig):
+    from contracts.sim import ARM_IK_CAPABILITY
+
+    core, out, clock, _ = rig
+    assert ARM_IK_CAPABILITY in core.hello("tok").capabilities
+    rover, unit = at_salsa(core, out, clock)
+    arm(core, out, clock, "a0", lift_height_m=unit.position.z, capture=[])
+    q_before = list(rover.arm_q)
+    p = unit.position
+    standoff = Point3(x=p.x - 0.06 * math.cos(rover.pose.theta), y=p.y - 0.06 * math.sin(rover.pose.theta), z=p.z)
+    res = ik(core, out, clock, "k1", [standoff, p], gripper_deg=OPEN)
+    assert res.ok, res.error
+    assert len(res.ik) == 2 and all(s.ok and s.error_m < 0.015 for s in res.ik), res.ik
+    assert rover.arm_q == q_before and rover.active is None  # solved only, never moved
+    assert res.ik[1].q_deg[5] == pytest.approx(OPEN)
+    assert math.dist((res.ik[1].tcp.x, res.ik[1].tcp.y, res.ik[1].tcp.z), (p.x, p.y, p.z)) < 0.015
+    # playing the solution puts the jaw center on the unit: closing there is a sticky grasp
+    mv = arm(core, out, clock, "a1", lerp(q_before, res.ik[1].q_deg, 15), capture=[])
+    assert mv.ok and math.dist((mv.arm.tcp.x, mv.arm.tcp.y, mv.arm.tcp.z), (p.x, p.y, p.z)) < 0.02
+    closed = [*res.ik[1].q_deg[:5], CLOSED]
+    grab = arm(core, out, clock, "a2", lerp(res.ik[1].q_deg, closed, 6), capture=[])
+    assert grab.arm.attached == unit.instance_id and f"sticky_grasp:{unit.instance_id}" in grab.arm.events
+
+
+def test_arm_ik_is_allowed_while_a_chunk_plays_and_reports_unreachable(rig):
+    core, out, clock, _ = rig
+    rover, unit = at_salsa(core, out, clock)
+    arm(core, out, clock, "a0", lift_height_m=unit.position.z, capture=[])
+    q0 = list(rover.arm_q)
+    core.submit(ArmJointsCmd(cmd_id="long", robot_id=R1, targets=[q0] * 30, capture=[]))
+    far = Point3(x=rover.pose.x + 3.0, y=rover.pose.y, z=unit.position.z)
+    res = ik(core, out, clock, "k2", [far])
+    assert res.ok and not res.ik[0].ok and res.ik[0].error_m > 0.5  # closest reachable pose, flagged
+    assert run_until(core, out, clock, "long", max_s=5.0, dt=1 / 60).ok
+    from contracts.sim import ArmIkCmd
+
+    core.submit(ArmIkCmd(cmd_id="k3", robot_id="nobody", targets=[{"point": far}]))
+    bad = run_until(core, out, clock, "k3", max_s=1.0, dt=1 / 60)
+    assert not bad.ok and bad.error_code == "unknown_robot"
+
+
+def test_capture_every_streams_frames_while_the_arm_moves(rig):
+    core, out, clock, _ = rig
+    rover, unit = at_salsa(core, out, clock)
+    arm(core, out, clock, "a0", lift_height_m=unit.position.z, capture=[])
+    q0 = list(rover.arm_q)
+    q1 = reach_q(core, rover, unit.position, rover.lift, OPEN)
+    res = arm(core, out, clock, "a1", lerp(q0, q1, 30), capture_every=10)
+    assert res.ok and res.arm.steps_applied == 30
+    steps = [(f.camera, f.step) for f in res.policy_frames]
+    # mid-chunk pictures at rows 10 and 20 (3 Hz at 30 rows/s), then the observation after the last row
+    assert steps == [("side", 10), ("wrist", 10), ("side", 20), ("wrist", 20), ("side", 30), ("wrist", 30)]
+    wrist = [f for f in res.policy_frames if f.camera == "wrist"]
+    assert wrist[0].camera_pose != wrist[-1].camera_pose  # pictures taken WHILE moving, not repeats
+    # the wrist camera rolls with the wrist: its roll is on the frame so pixel rays can be cast exactly
+    kin = core.kinematics(rover)
+    cam = aj.wrist_camera_pose(kin, rover.pose, rover.lift, rp.q_rad(rover.arm_q))
+    assert wrist[-1].roll == pytest.approx(cam.roll, abs=1e-4)

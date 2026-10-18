@@ -54,7 +54,15 @@ from arms.sim.geometry import (
     robot_camera_pose,
 )
 from arms.sim.navigation import PurePursuit
-from arms.sim.rover_puppet import ArmKinematics, apply, inverse, q_deg, q_rad, synthetic_kinematics
+from arms.sim.rover_puppet import (
+    ArmKinematics,
+    apply,
+    inverse,
+    q_deg,
+    q_rad,
+    solve_reach,
+    synthetic_kinematics,
+)
 from arms.sim.scene_spec import (
     BASKET_OFFSET_M,
     PrimSpec,
@@ -94,10 +102,13 @@ from contracts.common import (
 )
 from contracts.planogram import Planogram, RobotSpec, Slot, StoreCameraSpec
 from contracts.sim import (
+    ARM_IK_CAPABILITY,
     ARM_JOINTS_CAPABILITY,
+    IK_TOLERANCE_M,
     ArmJointState,
     CameraFrame,
     CommandResult,
+    IkSolution,
     InstanceInfo,
     ItemInstance,
     PolicyFrame,
@@ -145,9 +156,18 @@ CAPABILITIES = [
     "camera:basket",
     "camera:ceiling",
     ARM_JOINTS_CAPABILITY,
+    ARM_IK_CAPABILITY,
     "camera:policy_side",
     "camera:policy_wrist",
 ]
+IK_SEEDS_DEG: tuple[tuple[float, float, float, float], ...] = (
+    (0.0, -20.0, 60.0, -40.0),
+    (0.0, 20.0, 20.0, -40.0),
+    (0.0, 50.0, -20.0, -30.0),
+    (0.0, -60.0, 80.0, 0.0),
+)
+"""Fallback IK seeds (shoulder_pan, shoulder_lift, elbow_flex, wrist_flex) after the current joints / the scripted
+reach for the target's extension: damped least squares can stall on a joint limit from a single seed."""
 
 # 1x1 grey baseline JPEG: last-resort placeholder when Pillow is missing.
 PLACEHOLDER_JPEG = base64.b64decode(
@@ -625,12 +645,18 @@ class _ArmJoints(_Action):
             due = min(len(self.rows), int(self.t * cmd.hz + 1e-9) + 1)
             if cmd.capture_each_step:
                 due = min(due, self.i + 1)  # one row per tick: a frame after each (dataset recording)
+            every = 0 if cmd.capture_each_step else int(getattr(cmd, "capture_every", 0) or 0)
+            mid_frame = False
             while self.i < due:
                 core.apply_joint_row(r, self.rows[self.i], self.events)
                 self.i += 1
                 if cmd.capture_each_step and self.capture:
                     self.frames += core.render_policy(r, self.capture, step=self.i)
+                elif every and self.i % every == 0 and self.i < len(self.rows):
+                    mid_frame = True
             core.sync_carried(r)
+            if mid_frame and self.capture:  # live feed while the arm moves (one render per tick at most)
+                self.frames += core.render_policy(r, self.capture, step=self.i)
             if self.i < len(self.rows) or self.t + 1e-9 < len(self.rows) / cmd.hz:
                 return None
         if not cmd.capture_each_step and self.capture:
@@ -1137,8 +1163,65 @@ class WorkerCore:
                     w=w,
                     h=h,
                     camera_pose=cam.sized(w, h).to_mount(),
+                    roll=round(cam.roll, 5),
                 )
             )
+        return out
+
+    def solve_ik(self, rover: Rover, cmd: Any) -> list[IkSolution]:
+        """``ArmIkCmd``: each TCP target (store frame) -> joint degrees on the rover's SO-101 model; never moves.
+        Seeds: the previous solution (first: ``seed_deg`` / the current joints), then the scripted reach for the
+        target's extension, then ``IK_SEEDS_DEG``; the first solution within IK_TOLERANCE_M wins, else the closest."""
+        kin = self.kinematics(rover)
+        lift = clamp_lift(cmd.lift_height_m) if cmd.lift_height_m is not None else rover.lift
+        if cmd.seed_deg is not None:
+            prev = q_rad(kin.clamp_deg(cmd.seed_deg))
+        elif rover.arm_q is not None:
+            prev = q_rad(rover.arm_q)
+        else:
+            prev = dict(self._scripted_q(rover))
+        to_robot = inverse(aj.store_matrix(rover.pose))
+        base = kin.base(lift)
+        out: list[IkSolution] = []
+        for tgt in cmd.targets:
+            p = tgt.point
+            robot_pt = apply(to_robot, (p.x, p.y, p.z))
+            target = apply(inverse(kin.model), robot_pt)
+            fixed = dict(prev)
+            if tgt.gripper_deg is not None:
+                fixed["gripper"] = math.radians(tgt.gripper_deg)
+            if tgt.wrist_roll_deg is not None:
+                fixed["wrist_roll"] = math.radians(tgt.wrist_roll_deg)
+            ext = max(0.0, min(ARM_FULL_EXT_M, robot_pt[0] - ARM_MOUNT_X_M))
+            seeds = [fixed]
+            try:
+                scripted = kin.scripted_q(lift, ext, closed=False)
+                seeds.append({**fixed, **{k: v for k, v in scripted.items() if k not in ("gripper", "wrist_roll")}})
+            except Exception:  # noqa: BLE001 - a missing reach table only removes one seed
+                pass
+            names = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex")
+            seeds += [{**fixed, **{n: math.radians(v) for n, v in zip(names, sd, strict=True)}} for sd in IK_SEEDS_DEG]
+            best = None
+            for seed in seeds:
+                res = solve_reach(
+                    kin.chain, target, q0=seed, base=base, level_weight=0.5 if tgt.level else 0.0, iters=60
+                )
+                if best is None or res.error_m < best.error_m:
+                    best = res
+                if res.error_m <= IK_TOLERANCE_M:
+                    break
+            assert best is not None
+            q = kin.clamp_deg(q_deg(best.q))
+            tcp = aj.tcp_store(kin, rover.pose, lift, q_rad(q))
+            out.append(
+                IkSolution(
+                    q_deg=[round(v, 3) for v in q],
+                    error_m=round(best.error_m, 5),
+                    ok=best.error_m <= IK_TOLERANCE_M,
+                    tcp=Point3(x=round(tcp.x, 4), y=round(tcp.y, 4), z=round(tcp.z, 4)),
+                )
+            )
+            prev = q_rad(q)
         return out
 
     def arm_state(self, rover: Rover, steps: int = 0, events: list[str] | None = None) -> ArmJointState:
@@ -1348,6 +1431,8 @@ class WorkerCore:
                 self._set_slot_stock(cmd)
             elif kind == "capture":
                 self._capture(cmd, rover)
+            elif kind == "arm_ik":
+                self._reply(cmd, rover, ik=self.solve_ik(self.rover(cmd.robot_id), cmd))
             elif kind == "reset":
                 self._reset(cmd)
             elif kind in _ACTIONS:
