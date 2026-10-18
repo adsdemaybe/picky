@@ -27,16 +27,20 @@ so it calls `execute_trip` by itself, and the fleet runs the in-store part on a 
   withdraws pending questions)
 - [x] **P0** Execution: one driver task per goal runs choose_robot, waits on a per-robot lock (that lock is the queue), sets ACTIVE
   and runs `brain.run_goal`. On `RobotError` it reassigns to another robot in the same store (`MAX_GOAL_ATTEMPTS=2`,
-  `goal.assigned` attempt 2, items rebuilt from the trip). When no robot can take the goal it fails with `no_robot`.
-  `execute_trip` returns the terminal goal
+  `goal.assigned` attempt 2, items rebuilt from the trip), never back to a robot that already failed it. When no robot
+  can take the goal it fails with `no_robot`; a goal handed off after a robot failure fails at once with the robot's step
+  code and a readable reason ("Rhea could not finish: …; no other robot at … can take over (Pico is stopped)") instead of
+  waiting for a stopped robot's resume. The agent's escalation (`RobotError('unknown_robot', '<step code>: <why>')`) is
+  read back as that step code (`robot_failure`). `execute_trip` returns the terminal goal
 - [x] **P0** Events: `request.received`, `request.planned` (re-sent on completed / failed), `goal.created|assigned|updated|
   completed|failed` (envelope `goal_envelope`: shop goals carry `trip_id`), `fleet.robot_updated` (≤ 1 Hz for pose-only
   changes, immediately on status / battery / goal changes)
 - [x] **P1** Battery monitor: an idle robot below `MIN_BATTERY_PCT` that is away from its dock gets a high-priority
   `return_to_dock` goal
 - [x] **P1** `message_robot` → `brain.handle_message`; `stop_robot` → `robot.stop` + cancel the active goal + HOLD
-  the robot (its queued goals move to another robot in the store when one is eligible, else wait; nothing starts on
-  it until a manual goal for it or `resume_robot` / `POST /api/fleet/robots/{id}/resume`)
+  the robot (its queued goals move to another robot in the store when one is eligible and has not failed that goal, else
+  wait, or fail when a robot already failed them; nothing starts on it until a manual goal for it or `resume_robot` /
+  `POST /api/fleet/robots/{id}/resume`)
 - [ ] **P1** Priority-ordered queue (today: FIFO per robot; `priority` is stored and shown only)
 - [ ] **P2** Real fleet: routing-distance store choice + per-robot ETA (`service.py` TODO)
 
@@ -94,6 +98,9 @@ Options (kwargs to `create` / `create_fake`, settable from the gateway's fake_op
   `execute_trip` then returns the cancelled goal, and the trip flow fails the trip.
 - If the robot arm does not speak the multi-robot API (an old `state()` signature) or is not wired, robots are treated as
   idle on their docks, so the pipeline keeps running.
+- After a robot failure the fleet only stops that robot: a unit still in its gripper (or items already in its basket) stay
+  with it, and its next goal starts by putting the unit back (agent / robot arms). The handoff robot shops the
+  trip's not-yet-done stops.
 - Store choice uses straight item coverage and in-store prices. It ignores travel distance inside the store and robot
   ETA.
 - Contract notes: `GoalStatus` has no transition PENDING → ACTIVE, so a pre-assigned shop goal goes

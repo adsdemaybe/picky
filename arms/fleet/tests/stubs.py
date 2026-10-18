@@ -198,8 +198,16 @@ class StubRobot:
             yield await self.queue.get()
 
 
+ESCALATED = RobotError(
+    "unknown_robot", "unsupported_step: no place-back primitive on this backend (T0 over the 0.2 sim wire)"
+)
+"""What the agent's plan runner raises when a recovery 'escalates' (arms/agent/loop.py: SimErrorCode has no hand-off
+code, so the step's own code + message ride in the message), as in the live 2026-10-18 put-back failures."""
+
+
 class StubBrain:
-    """``behavior[robot_id]``: 'complete' (default), 'raise' (RobotError battery_low), 'block' (until cancelled)."""
+    """``behavior[robot_id]``: 'complete' (default), 'raise' (RobotError battery_low), 'escalate' (the agent's hand-off
+    RobotError, ``ESCALATED``), 'block' (until cancelled)."""
 
     def __init__(self, services: Services) -> None:
         self.services = services
@@ -216,6 +224,9 @@ class StubBrain:
         if mode == "raise":
             await asyncio.sleep(0)
             raise RobotError("battery_low", f"{robot_id} battery low")
+        if mode == "escalate":
+            await asyncio.sleep(0)
+            raise RobotError(ESCALATED.code, ESCALATED.message)
         if mode == "block":
             try:
                 await asyncio.sleep(3600)

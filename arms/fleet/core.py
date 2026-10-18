@@ -83,6 +83,20 @@ DEFAULT_ROBOTS: tuple[tuple[str, str, str, str, int], ...] = (
 )
 """Fallback fleet when data/fixtures/robots.yaml is missing (robot_id, name, store, color, dock slot)."""
 
+_STEP_FAILURE = re.compile(r"^([a-z][a-z0-9_]*): (.+)$", re.DOTALL)
+
+
+def robot_failure(err: RobotError) -> tuple[str, str]:
+    """(code, plain reason) of a robot failure for ``goal.failure_code`` and the shopper. The agent's plan runner hands
+    a goal back ('escalate') as ``RobotError('unknown_robot', '<step code>: <message>')`` because SimErrorCode has no
+    hand-off code, so that step's own code and message are read back here; any other error is kept as it is."""
+    msg = (err.message or "").strip()
+    m = _STEP_FAILURE.match(msg)
+    if m is not None and (err.code == "unknown_robot" or m.group(1) == err.code):
+        return m.group(1), m.group(2).strip()
+    return err.code, msg or err.code
+
+
 _GENERIC_LIST_TITLES = frozenset({"", "shopping", "shopping list", "shopping trip", "groceries", "list"})
 _COUNT_SUFFIX = re.compile(r"\s*\(\d+ items?\)$")
 """A list title that already carries its count ('Your order (3 items)'): replaced, so the count is said once."""
@@ -150,6 +164,8 @@ class FleetManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._planning: dict[str, asyncio.Event] = {}
         self._failed_robots: dict[str, set[str]] = {}
+        self._last_failure: dict[str, tuple[str, str, str]] = {}
+        """goal_id -> (robot_id, code, reason) of its latest robot failure (robot_failure)."""
         self._held: dict[str, str] = {}
         """robot_id -> why it was stopped. A held robot takes no goal from its queue (and no new automatic goal)
         until a manual goal for it or ``resume_robot``."""
@@ -963,8 +979,11 @@ class FleetManager:
                         cur.note = cur.note or "robot became unavailable"
                 await self._assign(goal, cand, cands, pinned=pinned_now)
                 return cand.robot_id, ""
-            if self._closed or (time.monotonic() >= deadline and not self._held_in_store(goal.store_id)):
-                return None, "no_robot"  # (a stopped robot in this store = wait for its resume instead of failing)
+            # A stopped robot in this store = wait for its resume instead of failing; but a goal a robot already
+            # failed (handed off mid-trip) ends now with the reason instead of sitting 'assigned' until a resume.
+            wait_for_resume = self._held_in_store(goal.store_id) and not self._failed_robots.get(goal.goal_id)
+            if self._closed or (time.monotonic() >= deadline and not wait_for_resume):
+                return None, "no_robot"
             await asyncio.sleep(self.robot_poll_s)
             goal = self._goals[goal.goal_id]
             if goal.terminal:
@@ -984,11 +1003,11 @@ class FleetManager:
                 if goal.terminal:
                     return
                 if rid is None:
-                    failed = self._failed_robots.get(goal_id)
-                    msg = "no eligible robot in this store"
-                    if failed:
-                        msg = f"robot failure and no other robot available in {goal.store_id}"
-                    await self._set_status(goal, GoalStatus.FAILED, error=msg, failure_code=code or "no_robot")
+                    msg, code = "no eligible robot in this store", code or "no_robot"
+                    last = self._last_failure.get(goal_id)
+                    if last is not None:
+                        msg, code = self._no_takeover(goal, last[0], last[2]), last[1]
+                    await self._set_status(goal, GoalStatus.FAILED, error=msg, failure_code=code)
                     return
                 async with self._lock(rid):
                     goal = self._goals[goal_id]
@@ -1009,11 +1028,13 @@ class FleetManager:
                 if goal.terminal:
                     return
                 self._failed_robots.setdefault(goal_id, set()).add(rid)
+                code, why = robot_failure(err)
+                self._last_failure[goal_id] = (rid, code, why)
                 cur = goal.assignment
                 if cur is not None:
                     cur.outcome = "reassigned"
                     cur.ended_at = utcnow()
-                    cur.note = f"{err.code}: {err.message}"
+                    cur.note = f"{code}: {why}"
                 await self._stop_robot_quietly(rid)
                 if len(goal.assignments) >= MAX_GOAL_ATTEMPTS:
                     if cur is not None:
@@ -1021,15 +1042,13 @@ class FleetManager:
                     await self._set_status(
                         goal,
                         GoalStatus.FAILED,
-                        error=f"robot {rid} failed ({err.code}: {err.message}); out of attempts",
-                        failure_code=err.code,
+                        error=f"{self._spec(rid).name} could not finish: {why}; out of attempts",
+                        failure_code=code,
                     )
                     return
                 await self._apply(
                     goal,
-                    GoalUpdate(
-                        status=GoalStatus.PENDING, note=f"{self._spec(rid).name} failed ({err.code}); reassigning"
-                    ),
+                    GoalUpdate(status=GoalStatus.PENDING, note=f"{self._spec(rid).name} failed ({code}); reassigning"),
                 )
                 preferred, pinned, wait_for_robot = None, False, False
                 exclude = self._failed_robots[goal_id]
@@ -1038,10 +1057,7 @@ class FleetManager:
                     if cur is not None:
                         cur.outcome = "failed"
                     await self._set_status(
-                        goal,
-                        GoalStatus.FAILED,
-                        error=f"robot {rid} failed ({err.code}: {err.message}); no other robot in {goal.store_id}",
-                        failure_code=err.code,
+                        goal, GoalStatus.FAILED, error=self._no_takeover(goal, rid, why), failure_code=code
                     )
                     return
                 await self._assign(goal, cand, cands, pinned=False)
@@ -1058,6 +1074,25 @@ class FleetManager:
                 with contextlib.suppress(Exception):
                     await self._set_status(goal, GoalStatus.FAILED, error=str(exc), failure_code="fleet_error")
                     await self._error(f"goal {goal_id} failed: {exc}", code="fleet_error", goal=goal)
+
+    def _no_takeover(self, goal: Goal, failed_rid: str, why: str) -> str:
+        """Shopper-readable reason for a goal whose robot failed and that no other robot in the store can take."""
+        failed = self._failed_robots.get(goal.goal_id, set())
+        others = []
+        for rid, spec in self._robot_specs().items():
+            if spec.store_id != goal.store_id or rid == failed_rid:
+                continue
+            if rid in self._held:
+                others.append(f"{spec.name} is stopped")
+            elif rid in failed:
+                others.append(f"{spec.name} already tried")
+            else:
+                cand = score_robot(self._info(rid, self._cached_state(rid)), store_id=goal.store_id, kind=goal.kind)
+                if not cand.eligible:
+                    others.append(cand.reason)
+        tail = f" ({', '.join(others)})" if others else ""
+        store = self._store_name(goal.store_id)
+        return f"{self._spec(failed_rid).name} could not finish: {why}; no other robot at {store} can take over{tail}"
 
     async def _run_once(self, goal: Goal, robot_id: str) -> RobotError | None:
         """One attempt on one robot. Returns the RobotError to reassign on, else None (goal is terminal)."""
@@ -1229,9 +1264,9 @@ class FleetManager:
             cur = g.assignment
             if cur is not None and cur.pinned:
                 continue  # explicitly for this robot: waits for its resume
-            cand, cands, _ = await self._choose(g)
+            cand, cands, _ = await self._choose(g, exclude=self._failed_robots.get(g.goal_id))
             if cand is None:
-                continue
+                continue  # its driver chooses again once this robot's lock frees (a handed-off goal then fails)
             if cur is not None and cur.outcome == "active":
                 if g.started_at is None:
                     g.assignments.pop()  # never started: swap the pre-assignment
