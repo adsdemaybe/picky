@@ -189,6 +189,9 @@ def test_real_stores_keep_every_unit_with_models():
         per_slot = {s: len(spec.instances_in_slot(s)) for s in spec.slot_layouts}
         assert per_slot == {s: len(modeled.stores[sid].instances_in_slot(s)) for s in spec.slot_layouts}
         on_models = [p for p in modeled.stores[sid].product_prims() if p.render != "primitive"]
+        if all(sa.entries[i.sku]["render"] == "primitive" for i in spec.instances):
+            assert not on_models, sid  # store_tmobile: retail boxes are primitives by design (gen_sku_assets.py)
+            continue
         assert len(on_models) > 0.8 * len(spec.instances), sid
 
 

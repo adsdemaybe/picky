@@ -168,3 +168,97 @@ categories:
   sort: 130
 - {category_id: beer, name: Beer, parent_id: alcohol, sort: 1}
 - {category_id: wine, name: Wine, parent_id: alcohol, sort: 2}
+# ==== Wireless store (store_tmobile) ====
+# Wireless store categories (store_tmobile: phone + tablet = Phone tables; case / screen / charger /
+# connected = Accessory wall; audio = Audio wall; wearable + home_internet = Wearables & Home Internet;
+# boxed phones / SIM kits = Counter & back stock). NOT in contracts.catalog.STANDARD_CATEGORY_IDS (grocery
+# only) yet, so the keyword NL rules do not map them; the categories API, mandates and the catalog do.
+- category_id: phone
+  name: Phones
+  description: 'Smartphones: live demo units on the tables, boxed units from back stock.'
+  icon: smartphone
+  color: '#e20074'
+  aliases: [phones, cell phone, smartphone, iphone, pixel, galaxy, android phone]
+  sort: 200
+- {category_id: ios, name: iPhone, parent_id: phone, sort: 1}
+- {category_id: android, name: Android phones, parent_id: phone, sort: 2}
+- category_id: tablet
+  name: Tablets
+  description: 'Cellular tablets (iPad, Galaxy Tab).'
+  icon: tablet
+  color: '#a21caf'
+  aliases: [tablets, ipad, galaxy tab]
+  sort: 210
+- {category_id: ipad, name: iPad, parent_id: tablet, sort: 1}
+- {category_id: android_tablet, name: Android tablets, parent_id: tablet, sort: 2}
+- category_id: wearable
+  name: 'Watches & Wearables'
+  description: 'LTE smartwatches and kids'' watches (tethered demo units).'
+  icon: watch
+  color: '#7c3aed'
+  aliases: [watch, smartwatch, apple watch, wearables]
+  sort: 220
+- {category_id: smartwatch, name: Smartwatches, parent_id: wearable, sort: 1}
+- {category_id: kids_watch, name: 'Kids'' watches', parent_id: wearable, sort: 2}
+- category_id: case
+  name: 'Cases & Grips'
+  description: 'Phone cases by device, plus grips and stands.'
+  icon: shield
+  color: '#0ea5e9'
+  aliases: [cases, phone case, cover, grip, popsocket]
+  sort: 230
+- {category_id: case_clear, name: Clear cases, parent_id: case, sort: 1}
+- {category_id: case_slim, name: 'Slim & magnetic cases', parent_id: case, sort: 2}
+- {category_id: case_rugged, name: Rugged cases, parent_id: case, sort: 3}
+- {category_id: grip, name: 'Grips & stands', parent_id: case, sort: 4}
+- category_id: screen
+  name: Screen Protection
+  description: Tempered glass screen protectors by device.
+  icon: scan
+  color: '#14b8a6'
+  aliases: [screen protector, glass, screen guard]
+  sort: 240
+- {category_id: glass_premium, name: Premium glass, parent_id: screen, sort: 1}
+- {category_id: glass_basic, name: Tempered glass, parent_id: screen, sort: 2}
+- category_id: charger
+  name: 'Chargers & Power'
+  description: 'Wall chargers, cables, wireless chargers, power banks and car gear.'
+  icon: plug
+  color: '#f59e0b'
+  aliases: [charger, charging, cable, power bank, battery, car charger]
+  sort: 250
+- {category_id: wall_charger, name: Wall chargers, parent_id: charger, sort: 1}
+- {category_id: cable, name: Cables, parent_id: charger, sort: 2}
+- {category_id: wireless_charger, name: Wireless chargers, parent_id: charger, sort: 3}
+- {category_id: power_bank, name: Power banks, parent_id: charger, sort: 4}
+- {category_id: car_charger, name: Car chargers, parent_id: charger, sort: 5}
+- {category_id: car_mount, name: Car mounts, parent_id: charger, sort: 6}
+- category_id: audio
+  name: Audio
+  description: 'Earbuds, headphones and portable speakers.'
+  icon: headphones
+  color: '#ef4444'
+  aliases: [earbuds, headphones, speaker, airpods, buds]
+  sort: 260
+- {category_id: earbuds, name: Earbuds, parent_id: audio, sort: 1}
+- {category_id: headphones, name: Headphones, parent_id: audio, sort: 2}
+- {category_id: speaker, name: Speakers, parent_id: audio, sort: 3}
+- category_id: home_internet
+  name: 'Home Internet & Hotspots'
+  description: '5G Home Internet gateway, mobile hotspots and antennas.'
+  icon: wifi
+  color: '#22c55e'
+  aliases: [home internet, hotspot, wifi, router, gateway]
+  sort: 270
+- {category_id: gateway, name: Home Internet gateways, parent_id: home_internet, sort: 1}
+- {category_id: hotspot, name: Mobile hotspots, parent_id: home_internet, sort: 2}
+- {category_id: antenna, name: Antennas, parent_id: home_internet, sort: 3}
+- category_id: connected
+  name: 'SIM & Connected'
+  description: 'SIM kits, trackers and other connected devices.'
+  icon: sim-card
+  color: '#64748b'
+  aliases: [sim, sim card, tracker, airtag, esim]
+  sort: 280
+- {category_id: sim, name: SIM kits, parent_id: connected, sort: 1}
+- {category_id: tracker, name: Trackers, parent_id: connected, sort: 2}

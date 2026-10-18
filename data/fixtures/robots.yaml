@@ -40,6 +40,18 @@ robots:
   cameras: [front, wrist, basket]
   color: '#16a34a'
   notes: Capitol Hill rover. 'Hazel, go charge' -> return_to_dock; 'scan dairy at Hill' -> shelf_scan.
+- robot_id: rover-tmo-1
+  name: Tess
+  kind: rover_so101
+  store_id: store_tmobile
+  dock: {x: 2.4, y: 1.0, theta: 1.571}
+  battery_pct: 92.0
+  basket_capacity: 10
+  max_speed_mps: 0.8
+  cameras: [front, wrist, basket]
+  color: '#e20074'
+  notes: 'T-Mobile store rover (Cart Whisperer demo). Dock = the planogram robot_home, by the entrance in front of the
+    Apple table. Fetches boxed phones from BACK-STOCK behind the counter, accessories from the walls.'
 store_cameras:
 - camera_id: store_ave.ceiling-1
   store_id: store_ave
@@ -53,3 +65,11 @@ store_cameras:
   store_id: store_hill
   name: Hill ceiling 1 · whole store
   mount: {frame: world, x: 0.8, y: 1.8, z: 3.2, yaw: 0.9, pitch: -0.5, hfov_deg: 100.0, width: 640, height: 480}
+- camera_id: store_tmobile.ceiling-1
+  store_id: store_tmobile
+  name: T-Mobile ceiling 1 · entrance & phone tables
+  mount: {frame: world, x: 0.6, y: 0.8, z: 3.2, yaw: 0.65, pitch: -0.55, hfov_deg: 100.0, width: 640, height: 480}
+- camera_id: store_tmobile.ceiling-2
+  store_id: store_tmobile
+  name: T-Mobile ceiling 2 · counter, back stock & accessory wall
+  mount: {frame: world, x: 9.4, y: 7.4, z: 3.2, yaw: -2.5, pitch: -0.5, hfov_deg: 100.0, width: 640, height: 480}

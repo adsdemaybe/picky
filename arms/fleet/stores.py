@@ -175,7 +175,8 @@ def choose_stores(
         est = ev.total(mine)
         miss = [queries[i] for i in ids if i not in ev.offers]
         parts = [f"{len(in_stock)}/{len(ids)} items in stock"]
-        others = [o for o in evals.values() if o.store_id != ev.store_id]
+        # stores that stock none of the list (e.g. the wireless store for a grocery list) are not a price comparison
+        others = [o for o in evals.values() if o.store_id != ev.store_id and o.offers]
         if others and in_stock:
             common = [i for i in in_stock if all(i in o.offers for o in others)]
             if common:

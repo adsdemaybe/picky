@@ -7,7 +7,7 @@ everything.
 
 | What | In the repo | On vhagar |
 |---|---|---|
-| SKU -> model map (125 SKUs) | `data/sim/sku_assets.yaml` (generated, never hand-edited) | |
+| SKU -> model map (216 SKUs: 125 grocery + 91 wireless) | `data/sim/sku_assets.yaml` (generated, never hand-edited) | |
 | Normalized product models | | `/data/advaiv2/picky-assets/products/items/<asset_id>/{item,geom}.usda` |
 | Raw sources + conversions | | `.../products/{simready,robocasa,lightwheel,converted}/` |
 | Asset catalog (463 assets) | | `.../products/index.yaml` (+ `ATTRIBUTION.md`) |
@@ -23,7 +23,7 @@ everything.
 | `PICKY_SIM_ASSETS=off` / `--no-assets` | on | Forces primitives everywhere, even with an asset root. |
 | `PICKY_ROVER_USD` / `--rover-usd` | unset = primitive rover | `picky_rover.usda`. Used only by the Isaac backend; the Pillow sketch always draws primitives. |
 
-On startup the worker logs `per-item models from ... (125 SKUs mapped ...)`. Each store then logs one line:
+On startup the worker logs `per-item models from ... (216 SKUs mapped ...)`. Each store then logs one line:
 `SimLog: store_ave scene: N SKUs on per-item models, M primitive (gap: ...; render=primitive by design: ...)`.
 After that comes `store store_ave: N units on per-item models, K shelf tags`. For a rover USD the log reads
 `rover USD ...: SO-101 puppet ready in ~2 s`.
@@ -35,7 +35,9 @@ Each item below falls back to **today's primitive box/cylinder with our label qu
 - `PICKY_ASSET_ROOT` is unset or not a directory, `PICKY_SIM_ASSETS=off`, or the map file is missing or unreadable.
 - The SKU is not in the map.
 - The SKU is a `gap` match: TORT-CORN and TORT-FLOUR use a snack-bag stand-in, and CILANTRO uses lettuce.
-- The SKU is `render: primitive` by design: EGGS, SPARKLING-LIME, NAPKINS, PAPER-PLATES, CHEESE-CHEDDAR.
+- The SKU is `render: primitive` by design: EGGS, SPARKLING-LIME, NAPKINS, PAPER-PLATES, CHEESE-CHEDDAR, and every
+  wireless SKU (`store_tmobile`; rule `WIRELESS_CATEGORIES` in `gen_sku_assets.py`). The tethered live demo units
+  there get their device size from `data/sim/demo_units.yaml`, not from this map.
 - Any `item.usda` / `geom.usda` the SKU needs is missing. The worker logs one warning per SKU.
 - Authoring a model unit raises. That unit is redrawn as a primitive.
 
@@ -64,7 +66,7 @@ The map is `data/sim/sku_assets.yaml`, read by `arms/sim/assets.py`. Each SKU ha
 |---|---|---|
 | `asset` | 96 (93 drawn: 3 are gaps) | Xform that references `items/<id>/item.usda`, with ops `translate . rotateZ . scale(scale_xyz)`. The origin sits at the bottom center. `scale_xyz` is in the model's native axes. |
 | `parts` | 24 | Xform with one child per member (`P<k>_<i>/G` references `geom.usda`, instanceable) and the opaque wrapper boxes (carrier, board). Clear film, clamshell and netting boxes are **skipped**: real-time RTX may draw UsdPreviewSurface opacity as opaque, which would hide the tray contents. This is unverified. |
-| `primitive` | 5 | Today's `_define_unit`. |
+| `primitive` | 96 (5 grocery + the 91 wireless SKUs of `store_tmobile`: retail boxes and blister cards) | Today's `_define_unit`. |
 
 Details:
 

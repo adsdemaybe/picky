@@ -1,0 +1,50 @@
+# Picky demo data (DubHacks 2026). Sim hints for the T-Mobile store's LIVE DEMO units (no contracts model;
+# read by arms/sim when it builds the interactive store, ignored by everything else).
+# - demo_m = the DEVICE size from the maker / T-Mobile spec sheet (item frame: x width, y thickness, z height;
+#   screen on the -y face, facing the aisle). products.yaml asset.dims_m stays the RETAIL BOX, which is what
+#   BACK-STOCK holds and what the robot puts in the basket.
+# - Each demo unit is its own rigid prim, kinematic until grabbed (as in the supermarket teleop app), tied to
+#   its stand by a D6 / distance joint (tether_length_m) like a real recoiler tether; stand = the alarmed puck.
+# - Hook items (ACC-WALL): one prim per facing on a peg; peg hole at the top center of the -y face.
+# - shown: open = a foldable / flip displayed unfolded (demo_m is the OPEN size; its box holds it folded).
+schema_version: 1
+store_id: store_tmobile
+tether_length_m: 0.6
+stand: {puck_diameter_m: 0.07, puck_height_m: 0.03, phone_tilt_deg: 15}
+hook: {fixture_id: ACC-WALL, peg_length_m: 0.3, hole_from_top_m: 0.012}
+units:
+  IP18PM-256: {slot_id: TMO-TABLE-A-W0-00, stand: phone_stand, demo_m: [0.078, 0.0086, 0.1633]}
+  IP18P-256: {slot_id: TMO-TABLE-A-W0-01, stand: phone_stand, demo_m: [0.0719, 0.0086, 0.1501]}
+  IPDUO-256: {slot_id: TMO-TABLE-A-W0-02, stand: phone_stand, shown: open, demo_m: [0.1646, 0.0053, 0.1179]}
+  IPAIR-256: {slot_id: TMO-TABLE-A-W0-03, stand: phone_stand, demo_m: [0.0747, 0.0056, 0.1562]}
+  IP17-256: {slot_id: TMO-TABLE-A-E0-03, stand: phone_stand, demo_m: [0.0714, 0.0079, 0.1496]}
+  IP17E-256: {slot_id: TMO-TABLE-A-E0-02, stand: phone_stand, demo_m: [0.0716, 0.0079, 0.1468]}
+  IP16-128: {slot_id: TMO-TABLE-A-E0-01, stand: phone_stand, demo_m: [0.0716, 0.0078, 0.1476]}
+  PX11PXL-256: {slot_id: TMO-TABLE-B-W0-00, stand: phone_stand, demo_m: [0.0762, 0.0076, 0.1626]}
+  PX11P-256: {slot_id: TMO-TABLE-B-W0-01, stand: phone_stand, demo_m: [0.0711, 0.0076, 0.1524]}
+  PX11-256: {slot_id: TMO-TABLE-B-W0-02, stand: phone_stand, demo_m: [0.0711, 0.0076, 0.1524]}
+  PX11PF-256: {slot_id: TMO-TABLE-B-W0-03, stand: phone_stand, shown: open, demo_m: [0.155, 0.0052, 0.155]}
+  PX10A-128: {slot_id: TMO-TABLE-B-W0-04, stand: phone_stand, demo_m: [0.0737, 0.0102, 0.1549]}
+  PX9-128: {slot_id: TMO-TABLE-B-E0-04, stand: phone_stand, demo_m: [0.072, 0.0085, 0.1528]}
+  GS26U-256: {slot_id: TMO-TABLE-C-W0-00, stand: phone_stand, demo_m: [0.078, 0.0079, 0.1636]}
+  GS26-256: {slot_id: TMO-TABLE-C-W0-01, stand: phone_stand, demo_m: [0.0716, 0.0071, 0.1496]}
+  GS26FE-128: {slot_id: TMO-TABLE-C-W0-02, stand: phone_stand, demo_m: [0.077, 0.0074, 0.1615]}
+  ZFOLD8-256: {slot_id: TMO-TABLE-C-E0-02, stand: phone_stand, shown: open, demo_m: [0.1433, 0.0041, 0.1585]}
+  ZFLIP8-256: {slot_id: TMO-TABLE-C-E0-01, stand: phone_stand, shown: open, demo_m: [0.0752, 0.0064, 0.1666]}
+  GS25-128: {slot_id: TMO-TABLE-C-W0-03, stand: phone_stand, demo_m: [0.0705, 0.0072, 0.1462]}
+  RAZRP26-256: {slot_id: TMO-TABLE-B-E0-03, stand: phone_stand, shown: open, demo_m: [0.074, 0.0072, 0.171]}
+  RAZR26-256: {slot_id: TMO-TABLE-B-E0-02, stand: phone_stand, shown: open, demo_m: [0.074, 0.0073, 0.171]}
+  MOTOG26-128: {slot_id: TMO-TABLE-B-E0-01, stand: phone_stand, demo_m: [0.076, 0.0085, 0.168]}
+  REVVL8P-256: {slot_id: TMO-TABLE-B-E0-00, stand: phone_stand, demo_m: [0.076, 0.0085, 0.168]}
+  IPAD-A16-128: {slot_id: TMO-TABLE-A-E0-00, stand: tablet_stand, demo_m: [0.1795, 0.007, 0.2481]}
+  IPADAIR11-128: {slot_id: TMO-TABLE-A-W0-04, stand: tablet_stand, demo_m: [0.1786, 0.0061, 0.2476]}
+  TABS10FE-128: {slot_id: TMO-TABLE-C-E0-00, stand: tablet_stand, demo_m: [0.1659, 0.006, 0.2547]}
+  AWS12-42: {slot_id: TMO-WEAR-CASE-S0-01, stand: watch_puck, demo_m: [0.036, 0.0107, 0.042]}
+  AWU4-49: {slot_id: TMO-WEAR-CASE-S0-00, stand: watch_puck, demo_m: [0.044, 0.012, 0.049]}
+  AWSE3-40: {slot_id: TMO-WEAR-CASE-S0-02, stand: watch_puck, demo_m: [0.034, 0.0107, 0.04]}
+  PXW5-41: {slot_id: TMO-WEAR-CASE-S0-03, stand: watch_puck, demo_m: [0.041, 0.012, 0.041]}
+  GW9-40: {slot_id: TMO-WEAR-CASE-S0-05, stand: watch_puck, demo_m: [0.04, 0.0086, 0.042]}
+  SYNCUP-KW2: {slot_id: TMO-WEAR-CASE-S0-06, stand: watch_puck, demo_m: [0.045, 0.016, 0.052]}
+  WATCH-PX3: {slot_id: TMO-WEAR-CASE-S0-04, stand: watch_puck, demo_m: [0.041, 0.012, 0.041]}
+live_displays:  # unboxed, not tethered, not stock (no slot): drawn next to their boxes
+  GW-5G: {fixture_id: HOME-INET, on_level: 1, demo_m: [0.11, 0.11, 0.21]}
