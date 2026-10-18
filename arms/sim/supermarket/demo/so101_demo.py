@@ -22,6 +22,7 @@ Per-frame state + events go to frames.jsonl / events.jsonl for demo/edit_so101.p
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import math
 import sys
@@ -636,6 +637,7 @@ class Recorder:
         self.active = set(cams)
         self.frame = 0
         self.on = None
+        self.dups, self.last = {}, {}  # per camera: captures identical to the previous one, last frame hash
 
     def render(self, on: bool):
         # Isaac 6.0: re-enabling a render product's updates leaks its GPU textures (OOM after ~100 toggled captures),
@@ -662,6 +664,9 @@ class Recorder:
             if d is None or getattr(d, "size", 0) == 0:
                 continue
             arr = np.asarray(d)[..., :3].copy()
+            h = hashlib.md5(arr[::6, ::6].tobytes()).hexdigest()  # stale-frame check (render product not updating)
+            self.dups[n] = self.dups.get(n, 0) + (h == self.last.get(n))
+            self.last[n] = h
             p = self.out / n / f"{self.frame:06d}.jpg"
             self.pool.submit(lambda a=arr, p=p: Image.fromarray(a).save(p, quality=92))
         self.frame += 1
@@ -970,6 +975,8 @@ class Mission:
             q = self.qm
             if self.rec is not None:
                 self.rec.capture()
+                if self.rec.frame % 150 == 0:
+                    self.log(f"[so101-demo] frame {self.rec.frame} t={self.t:.1f}s stale={self.rec.dups}")
             moved = {}
             for p in self.tracked:
                 T = self.io.body_T(p)
@@ -1993,20 +2000,28 @@ def product_closeups(app, stage, items, out: Path, hide=(), look_at=None):
     cs = carb.settings.get_settings()
     cop = cs.get("/omni/replicator/captureOnPlay")
     cs.set("/omni/replicator/captureOnPlay", False)  # rendered before the timeline plays
+    last = None
     for iid, it in items.items():
         n = np.array([*SIDE_N[it["side"]], 0.0])
         eye = it["center"] + n * 0.42 + np.array([0, 0, 0.06])
         look_at(stage, cam, eye, it["center"], focal=40.0)
-        for _ in range(12):
+        d = None
+        for k in range(90):  # a new render product needs a few dozen updates before its annotator has data
             app.update()
-        d = ann.get_data()
+            d = ann.get_data()
+            if k >= 11 and d is not None and getattr(d, "size", 0) > 0:
+                break
         if d is None or getattr(d, "size", 0) == 0:
             continue
+        a = np.asarray(d)[..., :3].copy()
+        h = hashlib.md5(a[::8, ::8].tobytes()).hexdigest()
+        if h == last:  # stale annotator (same pixels as the previous item): no close-up rather than a wrong one
+            continue
+        last = h
         f = out / "items" / f"{iid}.jpg"
-        Image.fromarray(np.asarray(d)[..., :3].copy()).save(f, quality=92)
+        Image.fromarray(a).save(f, quality=92)
         shots.append((iid, f.read_bytes()))
-    if cop is not None:
-        cs.set("/omni/replicator/captureOnPlay", cop)
+    cs.set("/omni/replicator/captureOnPlay", True if cop is None else cop)
     ann.detach()
     rp.destroy()
     for im in vis:
@@ -2156,7 +2171,7 @@ def run(app, args, tele):
     set_cam = set_cam_factory("/World/picky_director")
     autopilot.look_at(stage, "/World/picky_director", [spawn[0] - 2, spawn[1], 1.8], [spawn[0], spawn[1], 0.5], 16.0)
     cams = {"director": ("/World/picky_director", tuple(args.res))}
-    for nm, res in (("wrist", (640, 360)), ("front", (640, 360)), ("basket", (480, 270))):
+    for nm, res in (("wrist", (960, 540)), ("front", (640, 360)), ("basket", (480, 270))):
         cams[nm] = (ROBOT + kin.k["cameras"][nm][len("/Picky") :], res)
     # bird's-eye + side follow cameras (960x540 keeps the render cost low)
     bird_path, side_path = "/World/picky_birdseye", "/World/picky_side"
@@ -2179,6 +2194,14 @@ def run(app, args, tele):
     import omni.timeline  # noqa: PLC0415
 
     timeline = omni.timeline.get_timeline_interface()
+    try:  # annotators update on every rendered frame only while capture-on-play is on
+        import carb.settings  # noqa: PLC0415
+
+        cs = carb.settings.get_settings()
+        cs.set("/omni/replicator/captureOnPlay", True)
+        log(f"[so101-demo] replicator captureOnPlay={cs.get('/omni/replicator/captureOnPlay')}")
+    except Exception as e:  # noqa: BLE001
+        log(f"[so101-demo] captureOnPlay: {e}")
     timeline.play()
     for _ in range(4):
         app.update()
@@ -2241,6 +2264,7 @@ def run(app, args, tele):
             "sim_s": round(ms.t, 1),
             "wall_s": round(time.time() - t_run, 1),
             "frames": rec.frame if rec else 0,
+            "stale_frames": dict(rec.dups) if rec else {},
             "effort_api": io.eff_fn,
             "follow_cam_cuts": follow.cuts,
             "effort_max_Nm": {k: round(v, 3) for k, v in ms.eff_max.items()},

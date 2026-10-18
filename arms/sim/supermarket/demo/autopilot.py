@@ -679,8 +679,9 @@ def topdown(app, stage, smap, out: Path, hide: list[str], px_n: int = 1024):
             except Exception as e:  # noqa: BLE001
                 print(f"[topdown] orchestrator.step: {e}", flush=True)
         app.update()
-    if cop is not None:
-        cs.set("/omni/replicator/captureOnPlay", cop)
+    # restore capture-on-play (unset counts as on): left False, every annotator during the run keeps returning its
+    # first frame (the frozen-frame recordings of runs isaac1/isaac2)
+    cs.set("/omni/replicator/captureOnPlay", True if cop is None else cop)
     img = np.asarray(rgb.get_data())[..., :3]
     d = np.asarray(dep.get_data(), dtype=np.float32)
     rgb.detach()

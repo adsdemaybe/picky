@@ -533,7 +533,7 @@ def write(path: Path, frames_iter, gif: Path | None = None, gif_range=None):
         fps=FPS,
         codec="libx264",
         quality=None,
-        output_params=["-crf", "19", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart"],
+        output_params=["-crf", "18", "-preset", "medium", "-pix_fmt", "yuv420p", "-movflags", "+faststart"],
         macro_block_size=8,
     )
     w.send(None)
