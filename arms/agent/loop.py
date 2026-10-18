@@ -24,7 +24,7 @@ import asyncio
 import time
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any
+from typing import Any, NamedTuple
 
 from contracts.bridge import (
     ITEM_TO_STOP_STATUS,
@@ -34,11 +34,11 @@ from contracts.bridge import (
     brain_tool_error,
     mirror_brain_step,
 )
-from contracts.common import STAFF_USER_ID, utcnow
+from contracts.common import STAFF_USER_ID, Pose2D, utcnow
 from contracts.events import make_event, plan_envelope
 from contracts.evidence import SlotTruth
 from contracts.fleet import BrainStep, Goal, GoalItemUpdate, GoalUpdate
-from contracts.grounding import GroundedTarget, ProviderCall
+from contracts.grounding import GroundedTarget, ProviderCall, TargetSpec
 from contracts.perception import PICK_CHOICE_MAX, BasketCheck, Detection, FreshnessCandidate, PickChoice, ScanReport
 from contracts.plan import (
     CLOSED_STEP_STATUSES,
@@ -47,6 +47,7 @@ from contracts.plan import (
     VLA_STEP_KINDS,
     AlignStep,
     AllOf,
+    AnyOf,
     AskUserStep,
     BasketContains,
     Condition,
@@ -63,9 +64,11 @@ from contracts.plan import (
     PlanRequest,
     PlanStatus,
     PlanStep,
+    RobotAt,
     ScanShelfStep,
     StepPlan,
     StepStatus,
+    TargetGrounded,
     VerifyStep,
     atom_cameras,
     binding_key,
@@ -136,6 +139,17 @@ DEFAULT_BASKET_CAPACITY = 12
 MAX_DROPOFFS = 3
 """Basket drop-offs per run (a full basket before a grasp: checkout, unload, back), as in the v0.2 brain."""
 _SET_ASIDE = "set_aside"  # photo check: wrong unit, no put-back -> basket for staff (uncounted) + grab another
+_ASIDE_NOTE = "set aside for staff, not charged"
+
+
+class _AsideUnit(NamedTuple):
+    """A unit set aside for staff (never charged) that is in the basket: unloaded onto the counter like the others."""
+
+    place_step_id: str
+    item_id: str | None
+    unit: int | None
+    sku: str
+    instance_id: str | None
 
 
 def _basket_capacity(robot_id: str) -> int:
@@ -231,6 +245,8 @@ class _Run:
         self.unload_numbers: dict[str, int] = {}  # 'unload:<n>' group -> unit number after the gate's re-layout
         self.rejections: Counter[tuple[str | None, int | None]] = Counter()  # (item_id, unit) -> 'wrong' answers
         self.set_aside: set[str] = set()  # basket place steps carrying a unit the shopper marked wrong: never counted
+        self.aside_units: list[_AsideUnit] = []  # set-aside units in the basket now (a drop-off hands them to staff)
+        self.aside_groups: set[str] = set()  # 'unload:<n>' groups unloading a set-aside unit (never charged)
 
 
 class PlanLoop:
@@ -808,6 +824,10 @@ class PlanLoop:
                 "instance_id": unit.instance_id if unit else None,
                 "lot_id": unit.lot_id if unit else None,
             }
+            if step.step_id in run.set_aside:  # in the basket for staff: the checkout unload puts it on the counter
+                run.aside_units.append(
+                    _AsideUnit(step.step_id, step.item_id, step.unit, step.sku, unit.instance_id if unit else None)
+                )
             run.held = None
             await self._basket_event(run, pending_sku=step.sku)  # this unit's ledger record lands after we return
             return payload
@@ -1603,6 +1623,7 @@ class PlanLoop:
             return []
         run.dropoffs += 1
         run.unloaded.update(st.basket_skus)
+        run.aside_units.clear()  # the whole basket goes to staff here, set-aside units included
         n = run.dropoffs
         loc = grasp.target.location
         back = loc.approach_pose if loc is not None else st.pose
@@ -2085,7 +2106,7 @@ class PlanLoop:
             limit = int(setting("picky_verify_max_rejections", 1) or 1)
             if t0 is not None and not t0.place_back and run.rejections[key] <= limit:
                 # no put-back (Isaac): the wrong unit rides in the basket uncounted (never charged), another is grabbed
-                await self._mirror(run, step, "marked wrong: keeping it for staff to swap at the counter")
+                await self._mirror(run, step, f"marked wrong: {_ASIDE_NOTE}")
                 return _SET_ASIDE
             if run.rejections[key] > limit or (t0 is not None and not t0.place_back):
                 await self._mirror(run, step, "marked wrong: keeping it for staff to swap at the counter")
@@ -2149,7 +2170,10 @@ class PlanLoop:
         chosen = step.target.instance_id
         caps = await self._caps(run)
         t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
-        await self._mirror(run, step, f"grabbed {held.instance_id}, not the chosen {chosen}", ok=False)
+        item = run.plan.item(step.item_id)
+        name = (item.name if item is not None else None) or step.target.description or step.target.sku
+        log.info("%s: grabbed %s, not the chosen %s", step.step_id, held.instance_id, chosen)
+        await self._mirror(run, step, f"grabbed a different {name} than the one you chose", ok=False)
         if t0 is not None and not t0.place_back and self._set_aside(run, i):
             for s in run.plan.steps:
                 if s.inserted_by == step.step_id and s.status == StepStatus.PENDING:
@@ -2157,7 +2181,7 @@ class PlanLoop:
                         s.target = s.target.model_copy(update={"instance_id": chosen})
                     if isinstance(s, GraspStep):
                         run.next_tier[s.step_id] = "t0_scripted"
-            return await self._succeed(run, step, att, note="not the chosen unit: set aside for staff; grabbing it")
+            return await self._succeed(run, step, att, note=f"not the one you chose: {_ASIDE_NOTE}; grabbing yours")
         f = StepFailure(
             plan_id=run.plan.plan_id,
             step_id=step.step_id,
@@ -2165,7 +2189,7 @@ class PlanLoop:
             attempt=step.attempts,
             kind="postcondition",
             code="wrong_item_grasped",
-            message=f"grabbed {held.instance_id}, not the shopper's chosen {chosen}: putting it back",
+            message=f"grabbed a different {name} than the one you chose: putting it back",
             item_id=step.item_id,
         )
         out = await self._recover(run, i, f, att, baseline=baseline)
@@ -2187,6 +2211,7 @@ class PlanLoop:
         name = (item.name if item is not None else None) or sku
         ref = await self._photo(run, att, ["front"])
         auto_s = max(1.0, float(setting("picky_verify_auto_accept_s", 20.0) or 20.0))
+        aside = step.group_id in run.aside_groups  # flagged, never bought: its photo stays off the purchase rows
         ver = ItemVerification(
             verification_id=f"ver-{run.plan.plan_id}-{step.step_id}",
             trip_id=run.plan.trip_id,
@@ -2197,12 +2222,14 @@ class PlanLoop:
             name=name,
             item_id=step.item_id,
             unit=step.unit,
-            question=f"{name} is on the counter — looks right?",
+            question=f"{name} is on the counter: {_ASIDE_NOTE}"
+            if aside
+            else f"{name} is on the counter — looks right?",
             photo_url=f"/api/evidence/{ref.frame_id}.jpg" if ref is not None else None,
             frame_id=ref.frame_id if ref is not None else None,
             camera_id=ref.camera_id if ref is not None else None,
-            status="auto_accepted",
-            decided_by="auto",
+            status="rejected" if aside else "auto_accepted",
+            decided_by="system" if aside else "auto",
             auto_accept_s=auto_s,
             decided_at=utcnow(),
         )
@@ -2245,10 +2272,12 @@ class PlanLoop:
         3. re-lay the kept units on the counter spots left -> right from spot 1 (``planogram.counter_spots``), renumber
            them 'Unloading k/n', recompute the per-SKU on-counter counts and re-insert the short drives along the
            counter where the next spot is in another bay.
+        Units set aside for staff (no put-back) get an unload group of their own first (``_aside_unload_groups``).
         Returns True when nothing is left to unload by arm."""
         plan = run.plan
         caps = await self._caps(run)
         t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
+        aside = 0 if t0 is not None and not t0.basket_unload else self._aside_unload_groups(run)
         order: list[str] = []
         for st in plan.steps:
             if _unload_group(st) and st.status not in CLOSED_STEP_STATUSES and st.group_id not in order:
@@ -2298,7 +2327,7 @@ class PlanLoop:
             sku = grasp.target.sku
             on_counter[sku] += 1
             name = (plan.item(grasp.item_id).name if plan.item(grasp.item_id) else None) or sku
-            head = f"Unloading {n}/{total}: {name}"
+            head = f"Unloading {n}/{total}: {name}" + (f" ({_ASIDE_NOTE})" if gid in run.aside_groups else "")
             first: PlanStep | None = None
             for st in members[gid]:
                 if isinstance(st, NavigateToStep):  # re-inserted below where the bay changes
@@ -2342,7 +2371,132 @@ class PlanLoop:
                 )
                 plan.steps.insert(plan.steps.index(first), nav)
             prev = spot.approach_pose
+        if aside:  # more units than compiled: the handoff waits at whichever counter bay the last one used
+            bays: list[Pose2D] = []
+            for spot in spots[:total]:
+                if all(spot.approach_pose.distance_to(b) > 1e-6 for b in bays):
+                    bays.append(spot.approach_pose)
+            for st in plan.steps:
+                if (
+                    isinstance(st, HandoffStep)
+                    and st.group_id == "checkout"
+                    and st.status not in CLOSED_STEP_STATUSES
+                    and isinstance(st.preconditions, AnyOf)
+                ):
+                    st.preconditions = AnyOf(of=[RobotAt(pose=b, note="at the counter") for b in bays])
         return False
+
+    def _aside_unload_groups(self, run: _Run) -> int:
+        """Units set aside for staff (photo check 'wrong' / not the chosen unit, on a backend without put-back) ride
+        in the basket uncounted. Each gets its own unload group (ground in the basket -> grasp -> place on the counter
+        -> verify), placed just before the group of the unit that replaced it (basket order: it went in first) and
+        pinned to its instance. Only 'unload_to_counter' commits on those steps: no cart line, no total change.
+        Returns how many groups were added."""
+        plan = run.plan
+        if not run.aside_units:
+            return 0
+
+        def open_unload() -> list[int]:
+            return [k for k, st in enumerate(plan.steps) if _unload_group(st) and st.status not in CLOSED_STEP_STATUSES]
+
+        if not open_unload():
+            return 0
+        nums = [
+            int(gid.split(":", 1)[1])
+            for gid in {st.group_id for st in plan.steps if _unload_group(st)}
+            if gid and gid.split(":", 1)[1].isdigit()
+        ]
+        n = max(nums, default=0)
+        for a in run.aside_units:
+            n += 1
+            gid = f"unload:{n}"
+            item = plan.item(a.item_id)
+            name = (item.name if item is not None else None) or a.sku
+            base = next(
+                (
+                    st.target
+                    for st in plan.steps
+                    if isinstance(st, GraspStep) and st.item_id == a.item_id and st.target.sku == a.sku
+                ),
+                None,
+            )
+            target = (
+                base.model_copy(update={"slot_id": None, "location": None, "instance_id": a.instance_id})
+                if base is not None
+                else TargetSpec(sku=a.sku, description=name, instance_id=a.instance_id)
+            )
+            head = f"Unloading: {name} ({_ASIDE_NOTE})"
+            group: dict[str, Any] = {
+                "item_id": a.item_id,
+                "unit": a.unit,
+                "group_id": gid,
+                "group_label": head,
+                "optional": True,
+                "origin": "replan",
+            }
+            bkey = f"basket:aside:{a.place_step_id}"
+            g_pre, g_post = default_conditions("grasp", sku=a.sku, source="basket")
+            p_pre, p_post = default_conditions("place", sku=a.sku, destination="counter")
+            steps: list[PlanStep] = [
+                GroundTargetStep(
+                    step_id=f"{a.place_step_id}.out1",
+                    title=f"{head}: find it in the basket",
+                    target=target,
+                    camera="basket",
+                    binding=bkey,
+                    postconditions=TargetGrounded(binding=bkey, note="found in the basket"),
+                    **group,
+                ),
+                GraspStep(
+                    step_id=f"{a.place_step_id}.out2",
+                    title=f"{head}: grasp it from the basket",
+                    source="basket",
+                    target=target,
+                    binding=bkey,
+                    instruction=f"take the {name} out of the basket",
+                    preconditions=g_pre,
+                    postconditions=g_post,
+                    **group,
+                ),
+                PlaceStep(
+                    step_id=f"{a.place_step_id}.out3",
+                    title=f"{head} → counter",
+                    sku=a.sku,
+                    destination="counter",
+                    instruction=f"put the {name} on the counter",
+                    preconditions=p_pre,
+                    postconditions=p_post,
+                    **group,
+                ),
+                VerifyStep(
+                    step_id=f"{a.place_step_id}.out4",
+                    title=f"{head} → counter ✓",
+                    condition=AllOf(
+                        of=[
+                            ItemOnCounter(sku=a.sku, min_count=1, note=f"{name} on the counter"),
+                            GripperEmpty(note="not in the gripper"),
+                        ]
+                    ),
+                    purpose="check",
+                    **group,
+                ),
+            ]
+            ks = open_unload()
+            at = next(
+                (
+                    k
+                    for k in ks
+                    if plan.steps[k].item_id == a.item_id
+                    and plan.steps[k].unit == a.unit
+                    and plan.steps[k].group_id not in run.aside_groups
+                ),
+                ks[-1] + 1,  # its unit's own unload is gone (skipped item...): after the last unit
+            )
+            plan.steps[at:at] = steps
+            run.aside_groups.add(gid)
+        added = len(run.aside_units)
+        run.aside_units.clear()
+        return added
 
     async def _skip_unload_group(self, run: _Run, step: PlanStep, reason: str) -> None:
         gid = step.group_id
@@ -2406,14 +2560,17 @@ class PlanLoop:
         if verdict is not None:
             photo = next((f"/api/evidence/{f.frame_id}.jpg" for f in verdict.frames if f.blurred), None)
         total = run.unload_total
+        shown = f"{name} ({_ASIDE_NOTE})" if gid in run.aside_groups else name
+        aside = sum(1 for g in run.aside_groups if g in run.unload_numbers)
         texts = {
-            "started": f"Unloading {n}/{total}: {name}",
-            "grasped": f"Unloading {n}/{total}: {name} out of the basket",
-            "placed": f"Unloading {n}/{total}: {name} → counter",
-            "verified": f"Unloading {n}/{total}: {name} → counter ✓",
-            "skipped": f"Unloading {n}/{total}: {name} left in the basket ({note})",
-            "failed": f"Unloading {n}/{total}: {name} failed",
-            "done": f"Basket empty: {total} item{'s' if total != 1 else ''} on the counter",
+            "started": f"Unloading {n}/{total}: {shown}",
+            "grasped": f"Unloading {n}/{total}: {shown} out of the basket",
+            "placed": f"Unloading {n}/{total}: {shown} → counter",
+            "verified": f"Unloading {n}/{total}: {shown} → counter ✓",
+            "skipped": f"Unloading {n}/{total}: {shown} left in the basket ({note})",
+            "failed": f"Unloading {n}/{total}: {shown} failed",
+            "done": f"Basket empty: {total} item{'s' if total != 1 else ''} on the counter"
+            + (f" ({aside} {_ASIDE_NOTE})" if aside else ""),
         }
         await self._pub(
             run,
