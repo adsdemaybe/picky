@@ -24,7 +24,7 @@ Nothing binary is committed: no USD, mesh or texture, and not LeIsaac's `lekiwi.
 | `PICKY_ASSET_ROOT` / `--asset-root` | unset = off | The `products/` asset tree. When it is unset or missing, every SKU is drawn as a primitive. |
 | `PICKY_SKU_ASSETS` / `--sku-assets` | `$PICKY_DATA_DIR/sim/sku_assets.yaml` | The SKU map. |
 | `PICKY_SIM_ASSETS=off` / `--no-assets` | on | Forces primitives everywhere, even with an asset root. |
-| `PICKY_ROVER_USD` / `--rover-usd` | unset = primitive rover | `picky_rover.usda`. Used only by the Isaac backend; the Pillow sketch always draws primitives. |
+| `PICKY_ROVER_USD` / `--rover-usd` | unset = primitive rover | `picky_rover.usda` (LeKiwi + lift), or the white robot v3 `picky_so101_rover.usd` (no lift, own basket; detected by file name or its `.kin.json`). Used only by the Isaac backend; the Pillow sketch always draws primitives. |
 
 On startup the worker logs `per-item models from ... (125 SKUs mapped ...)`. Each store then logs one line:
 `SimLog: store_ave scene: N SKUs on per-item models, M primitive (gap: ...; render=primitive by design: ...)`.

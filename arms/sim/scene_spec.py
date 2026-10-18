@@ -949,7 +949,9 @@ def build_rover_spec(robot: RobotSpec, model_usd: str | None = None) -> RoverSpe
     prims.append(prim("so101_jaw_fixed", "arm", (x - 0.02, 0.018, z), (0.05, 0.008, 0.04), "#f59e0b"))
     prims.append(prim("so101_jaw_moving", "arm", (x - 0.02, -0.018, z), (0.05, 0.008, 0.04), "#f59e0b"))
     prims.append(prim("so101_wrist_cam", "arm", (x - 0.05, 0.0, z + 0.035), (0.03, 0.03, 0.02), "#111111"))
-    puppet_prims = _puppet_prims(prims, prim, color) if model_usd else []
+    rm = puppet.rover_model_for(model_usd)
+    # robot v3 brings its own riser, camera housings and basket: nothing primitive is drawn next to it
+    puppet_prims = _puppet_prims(prims, prim, color) if model_usd and rm.primitives else []
     return RoverSpec(
         robot_id=robot.robot_id,
         store_id=sid,
@@ -963,7 +965,7 @@ def build_rover_spec(robot: RobotSpec, model_usd: str | None = None) -> RoverSpe
         camera_ids=[robot_camera_id(robot.robot_id, k) for k in robot.cameras],
         prims=prims,
         model_usd=model_usd,
-        model_path=f"{root}/{puppet.MODEL_PRIM_NAME}/{puppet.MODEL_REF_NAME}" if model_usd else None,
+        model_path=f"{root}/{puppet.MODEL_PRIM_NAME}/{rm.ref_name}" if model_usd else None,
         puppet_prims=puppet_prims,
     )
 

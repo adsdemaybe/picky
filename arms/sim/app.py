@@ -940,16 +940,17 @@ class IsaacBackend:
         from pxr import Gf, Usd, UsdGeom, UsdPhysics  # type: ignore[import-not-found]
 
         model_path = f"{rover.root_path}/{puppet.MODEL_PRIM_NAME}"
+        rm = puppet.rover_model_for(rover.model_usd)
         try:
             model = UsdGeom.Xform.Define(self.stage, model_path)
-            model.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, puppet.FLOOR_OFFSET_M))
-            model.AddRotateZOp().Set(math.degrees(puppet.HEADING_OFFSET_RAD))
-            ref = self.stage.DefinePrim(rover.model_path or f"{model_path}/{puppet.MODEL_REF_NAME}", "Xform")
+            model.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, rm.floor_offset_m))
+            model.AddRotateZOp().Set(math.degrees(rm.heading_offset_rad))
+            ref = self.stage.DefinePrim(rover.model_path or f"{model_path}/{rm.ref_name}", "Xform")
             ref.GetReferences().AddReference(rover.model_usd or "")
             names = [c.GetName() for c in ref.GetChildren()]
-            if not puppet.names_ok(names):
+            if not puppet.names_ok(names, rm):
                 raise RuntimeError(f"{rover.model_usd} has no SO-101 links (children: {names[:8]})")
-            geo = self._puppet_geometry(rover.model_usd or "", ref)
+            geo = self._puppet_geometry(rover.model_usd or "", ref, rm)
             if geo is None:
                 raise RuntimeError("arm chain unavailable")
             # never simulated: no articulation, no joints, no rigid bodies, no colliders
@@ -966,13 +967,13 @@ class IsaacBackend:
                 jp = self.stage.GetPrimAtPath(path)
                 if jp:
                     jp.SetActive(False)
-            for rel in (*puppet.HIDE_OVERLAY_PRIMS, *puppet.VIRTUAL_LINKS):
+            for rel in (*rm.hide_prims, *rm.virtual_links):
                 hp = self.stage.GetPrimAtPath(f"{ref.GetPath()}/{rel}")
                 if hp:
                     hp.SetActive(False)
             ops: dict[str, Any] = {}
-            for name in puppet.ARM_LINKS:
-                xf = UsdGeom.Xformable(self.stage.GetPrimAtPath(f"{ref.GetPath()}/{name}"))
+            for name, usd_name in rm.link_map.items():
+                xf = UsdGeom.Xformable(self.stage.GetPrimAtPath(f"{ref.GetPath()}/{usd_name}"))
                 xf.ClearXformOpOrder()
                 ops[name] = xf.AddTransformOp(opSuffix="puppet")
                 ops[name].Set(Gf.Matrix4d(*gf_rows(geo["chain"].rest[name])))
@@ -983,33 +984,39 @@ class IsaacBackend:
                 self.stage.RemovePrim(model_path)
             return None
 
-    def _puppet_geometry(self, model_usd: str, ref: Any) -> dict[str, Any] | None:
+    def _puppet_geometry(
+        self, model_usd: str, ref: Any, rm: puppet.RoverModel = puppet.LEKIWI
+    ) -> dict[str, Any] | None:
         """Arm chain + reach table of one rover USD (read from the first rover that references it; shared)."""
         if model_usd in self._puppet_geo:
             return self._puppet_geo[model_usd]
         t0 = time.monotonic()
         try:
-            geo = self._build_puppet_geometry(ref)
+            geo = self._build_puppet_geometry(ref, rm)
         except Exception as exc:  # noqa: BLE001
             log.warning("rover USD %s: cannot build the SO-101 chain (%s)", model_usd, exc)
             geo = None
         self._puppet_geo[model_usd] = geo
         if geo is not None:
             log.info(
-                "rover USD %s: SO-101 puppet ready in %.1fs (reach table max error %.0f mm; z_ref %.3f m)",
+                "rover USD %s (%s): SO-101 puppet ready in %.1fs (reach table max error %.0f mm; z_ref %.3f m)",
                 model_usd,
+                rm.key,
                 time.monotonic() - t0,
                 geo["table"].max_error_m * 1000,
                 geo["z_ref"],
             )
         return geo
 
-    def _build_puppet_geometry(self, ref: Any) -> dict[str, Any]:
+    def _build_puppet_geometry(self, ref: Any, rm: puppet.RoverModel = puppet.LEKIWI) -> dict[str, Any]:
         from pxr import Gf, Usd, UsdGeom, UsdPhysics  # type: ignore[import-not-found]
 
         base_path = str(ref.GetPath())
+        usd_name = rm.link_map
         rest = {
-            n: from_gf(UsdGeom.Xformable(self.stage.GetPrimAtPath(f"{base_path}/{n}")).GetLocalTransformation())
+            n: from_gf(
+                UsdGeom.Xformable(self.stage.GetPrimAtPath(f"{base_path}/{usd_name[n]}")).GetLocalTransformation()
+            )
             for n in puppet.ARM_LINKS
         }
         found: dict[str, Any] = {}
@@ -1033,8 +1040,8 @@ class IsaacBackend:
             hi = p.GetAttribute("physics:upperLimit")
             return puppet.ArmJoint(
                 name=name,
-                parent=j.GetBody0Rel().GetTargets()[0].name,
-                child=j.GetBody1Rel().GetTargets()[0].name,
+                parent=rm.canonical(j.GetBody0Rel().GetTargets()[0].name),
+                child=rm.canonical(j.GetBody1Rel().GetTargets()[0].name),
                 frame1=puppet.quat_pose(q.GetReal(), im[0], im[1], im[2], pos=(pos[0], pos[1], pos[2])),
                 axis=str(ax.Get() if ax and ax.Get() else "X"),
                 lower_deg=float(lo.Get()) if lo and lo.Get() is not None else -180.0,
@@ -1048,14 +1055,17 @@ class IsaacBackend:
             root_joint=joint(puppet.PAN_JOINT),
         )
         # TCP between the jaw tips (gripper closed), from the visual meshes in each link's frame
-        M = puppet.model_matrix(from_gf(UsdGeom.Xformable(ref).GetLocalTransformation()))
+        M = puppet.model_matrix(from_gf(UsdGeom.Xformable(ref).GetLocalTransformation()), rm)
+        if rm.align_pan:  # robot v3: the SO-101 faces sideways at pan 0 -> turn its rest pose to face forward
+            chain = puppet.align_rest_pan(chain, puppet.forward_pan(chain, M))
+            rest = chain.rest
         fwd = puppet.rotate(puppet.inverse(M), (1.0, 0.0, 0.0))
         closed = {"gripper": math.radians(puppet.GRIPPER_CLOSED_DEG)}
         poses = chain.fk(closed)
         xc = UsdGeom.XformCache()
 
         def tip(link: str) -> puppet.Vec3:
-            lp = self.stage.GetPrimAtPath(f"{base_path}/{link}")
+            lp = self.stage.GetPrimAtPath(f"{base_path}/{usd_name[link]}")
             inv = xc.GetLocalToWorldTransform(lp).GetInverse()
             pts: list[puppet.Vec3] = []
             for mp in Usd.PrimRange(lp, Usd.TraverseInstanceProxies()):
@@ -1082,8 +1092,10 @@ class IsaacBackend:
         tcp_model = puppet.tcp_from_tips(tip("gripper"), tip("jaw"), puppet.position(poses["wrist"]))
         chain.tcp = puppet.apply(puppet.inverse(poses["gripper"]), tcp_model)
         fixed = {"wrist_roll": math.radians(puppet.WRIST_ROLL_DEG), **closed}
-        z_ref = puppet.apply(M, chain.tcp_point(chain.fk(fixed)))[2]
+        z_ref = rm.z_ref_m if rm.z_ref_m is not None else puppet.apply(M, chain.tcp_point(chain.fk(fixed)))[2]
         dx = ARM_MOUNT_X_M + puppet.ARM_PAN_FORWARD_M - puppet.apply(M, puppet.position(rest["shoulder"]))[0]
+        if rm.fixed_lift:  # robot v3: the SO-101 stays on its riser; the IK reaches the rig's gripper point from there
+            dx = 0.0
         m_inv = puppet.inverse(M)
 
         def target(ext: float, drop: float) -> puppet.Vec3:
@@ -1093,19 +1105,29 @@ class IsaacBackend:
             chain,
             target,
             (ARM_STOW_EXT_M, ARM_FULL_EXT_M + puppet.TCP_LEAD_M),
-            drops=PUPPET_DROPS_M,
+            drops=rm.drops_m or PUPPET_DROPS_M,
             base=puppet.robot_delta_in_model(M, (dx, 0.0, 0.0)),
             seed=fixed,
         )
-        kin = puppet.ArmKinematics(chain=chain, model=M, dx=dx, z_ref=z_ref, table=table, lift_mode="offset")
-        return {"chain": chain, "table": table, "M": M, "z_ref": z_ref, "dx": dx, "kin": kin}
+        kin = puppet.ArmKinematics(
+            chain=chain, model=M, dx=dx, z_ref=z_ref, travel_m=rm.lift_travel_m, table=table, lift_mode="offset"
+        )
+        return {
+            "chain": chain,
+            "table": table,
+            "M": M,
+            "z_ref": z_ref,
+            "dx": dx,
+            "kin": kin,
+            "travel": rm.lift_travel_m,
+        }
 
     def _pose_puppet(self, rig: dict[str, Any], lift_height_m: float, arm_ext_m: float, closed: bool) -> float:
         """Pose the SO-101 links for this lift + extension; returns the carriage travel (for the Lift group)."""
         from pxr import Gf  # type: ignore[import-not-found]
 
         geo = rig["geo"]
-        dz = puppet.lift_offset(lift_height_m, geo["z_ref"])
+        dz = puppet.lift_offset(lift_height_m, geo["z_ref"], geo.get("travel", puppet.LIFT_TRAVEL_M))
         drop = max(0.0, geo["z_ref"] - lift_height_m)
         key = (round(arm_ext_m, 4), round(drop, 4), round(dz, 4), closed)
         if key == rig["key"]:
