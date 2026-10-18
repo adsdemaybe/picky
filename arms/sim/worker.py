@@ -45,17 +45,21 @@ from arms.sim.geometry import (
     clamp_lift,
     held_position,
     mount_camera,
+    pan_reach_for,
     project_box,
     robot_camera_pose,
+    to_store,
 )
 from arms.sim.navigation import PurePursuit
 from arms.sim.scene_spec import (
+    BASE_SIZE_M,
     BASKET_OFFSET_M,
+    BASKET_SIZE_M,
     PrimSpec,
     RoverSpec,
     SceneSpec,
     Vec3,
-    basket_drop_position,
+    basket_layout,
     build_rover_spec,
     build_scene_spec,
     camera_infos,
@@ -104,13 +108,36 @@ from contracts.sim import (
     unit_freshness,
 )
 
-# ---- timing (seconds) / speeds
+# ---- timing (seconds) / speeds. Arm motions are eased joint-space interpolations that read well on video
+# (arms/sim/tools/demo_video): reach -> close -> lift off -> retract, then swing to the basket -> release -> back.
 SCAN_S = 0.6
-GRASP_REACH_S = 0.5
-GRASP_CLOSE_S = 0.3
-GRASP_RETRACT_S = 0.5
-PLACE_S = 0.8
+GRASP_REACH_S = 1.0
+GRASP_CLOSE_S = 0.4
+GRASP_RAISE_S = 0.3
+GRASP_RETRACT_S = 0.9
+GRASP_LIFT_OFF_M = 0.025
+"""The unit is lifted this far off the shelf after the jaws close (and lowered back while the arm retracts)."""
+PLACE_SWING_S = 1.1
+PLACE_RELEASE_S = 0.25
+PLACE_DROP_S = 0.35
+PLACE_BACK_S = 0.9
+PLACE_S = PLACE_SWING_S + PLACE_RELEASE_S + PLACE_DROP_S + PLACE_BACK_S
 UNLOAD_S = 1.2
+"""Unload without a checkout counter in front of the robot: the units just leave the scene after this long."""
+UNLOAD_SLOW_UNITS = 3
+"""Checkout unload: the first units get the full-speed arm motion, the rest a quicker one (it is a batch)."""
+UNLOAD_MOVE_S = (0.9, 0.55)
+UNLOAD_GRAB_S = (0.25, 0.15)
+UNLOAD_RELEASE_S = (0.2, 0.15)
+COUNTER_APPROACH_MAX_M = 1.0
+"""Unload drives up to the checkout counter in front of it when the gap is at most this (and backs off after)."""
+COUNTER_GAP_M = 0.05
+COUNTER_SPEED_MPS = 0.25
+CONVEYOR_SPEED_MPS = 0.35
+LEFTOVER_S = 120.0
+"""Unloaded units stay on the counter (visual only, not ground truth) this long (sim seconds)."""
+BASKET_RELEASE_MIN_Y_M = 0.085
+"""The arm swings around the lift mast: its TCP stays this far off the robot's centre line over the basket."""
 LIFT_SPEED_MPS = 0.3
 BLOCKED_TIMEOUT_S = 10.0
 STATE_MIN_PERIOD_S = 0.1  # RobotState <= 10 Hz per robot
@@ -298,8 +325,16 @@ class Rover:
         self.pose: Pose2D = robot.dock
         self.lift: float = LIFT_REST_M
         self.arm_ext: float = ARM_STOW_EXT_M
+        self.pan: float = 0.0
+        """SO-101 pan about its vertical axis (0 = straight ahead, > 0 = toward the robot's left)."""
+        self.grip: float = 0.0
+        """Jaw opening, 0 = closed .. 1 = open (visual)."""
         self.holding: str | None = None
         self.basket: list[str] = []
+        self.carry: str | None = None
+        """Unload: the basket unit the arm is moving to the counter (visual; still listed until the unload ends)."""
+        self.free: dict[str, tuple[Point3, float]] = {}
+        """Units animated on their own (falling into the basket, set down on the counter): store pose + yaw."""
         self.battery: float = robot.battery_pct
         self.active: _Action | None = None
         self.active_started = 0.0
@@ -349,6 +384,50 @@ class _Action:
         r.lift = target if abs(delta) <= stepz else r.lift + math.copysign(stepz, delta)
         return abs(target - r.lift) < 1e-6
 
+    def _relax_arm(self, dt: float, rate: float = 2.5) -> None:
+        """Ease a panned / open arm back to straight ahead + closed (navigate, scan)."""
+        r = self.rover
+        k = min(1.0, rate * dt)
+        r.pan = 0.0 if abs(r.pan) < 1e-3 else r.pan * (1 - k)
+        r.grip = 0.0 if r.grip < 1e-3 else r.grip * (1 - k)
+
+
+def smooth(t: float) -> float:
+    """Smoothstep on [0, 1] (zero velocity at both ends)."""
+    t = max(0.0, min(1.0, t))
+    return t * t * (3 - 2 * t)
+
+
+def smoother(t: float) -> float:
+    """Smootherstep on [0, 1] (zero velocity + acceleration at both ends)."""
+    t = max(0.0, min(1.0, t))
+    return t * t * t * (t * (6 * t - 15) + 10)
+
+
+def lerp(a: float, b: float, t: float) -> float:
+    return a + (b - a) * t
+
+
+def lift_move_s(a: float, b: float) -> float:
+    """Duration of an eased lift move (peak speed ~1.5 x LIFT_SPEED_MPS)."""
+    return max(0.35, abs(b - a) / LIFT_SPEED_MPS)
+
+
+class _Phases:
+    """A fixed sequence of (name, seconds); ``at(t)`` -> (name, local progress 0..1), or None after the end."""
+
+    def __init__(self, phases: list[tuple[str, float]]) -> None:
+        self.phases = [(n, max(0.0, s)) for n, s in phases]
+        self.total = sum(s for _, s in self.phases)
+
+    def at(self, t: float) -> tuple[str, float] | None:
+        acc = 0.0
+        for name, s in self.phases:
+            if t < acc + s:
+                return name, (t - acc) / s if s > 0 else 1.0
+            acc += s
+        return None
+
 
 class _Navigate(_Action):
     status = RobotStatus.NAVIGATING
@@ -381,6 +460,7 @@ class _Navigate(_Action):
         r = self.rover
         self._approach_lift(LIFT_REST_M, dt)
         r.arm_ext = ARM_STOW_EXT_M
+        self._relax_arm(dt)
         new = self.pp.step(r.pose, dt)
         blocker = self.core.blocking_rover(r, new)
         if blocker is not None:
@@ -463,34 +543,57 @@ class _Pick(_Action):
         depth = scene.item_dims(self.target.instance_id)[1]
         self.reach_ext = max(ARM_STOW_EXT_M, min(ARM_FULL_EXT_M, along - depth / 2 - HELD_CLEARANCE_M - ARM_MOUNT_X_M))
         self.attached = False
+        self.lift0, self.ext0, self.pan0, self.grip0 = rover.lift, rover.arm_ext, rover.pan, rover.grip
+        self.phases = _Phases(
+            [
+                ("lift", lift_move_s(rover.lift, self.lift_target)),
+                ("reach", GRASP_REACH_S),
+                ("close", GRASP_CLOSE_S),
+                ("raise", GRASP_RAISE_S),
+                ("retract", GRASP_RETRACT_S),
+            ]
+        )
+
+    def _attach(self) -> None:
+        if self.attached:
+            return
+        scene = self.core.scene_of(self.rover)
+        if self.target.instance_id not in scene.instances:
+            raise _Fail("no_instance", f"{self.target.instance_id} vanished during the grasp")
+        self.rover.holding = self.target.instance_id
+        self.attached = True
 
     def step(self, dt: float) -> CommandResult | None:
         self.elapsed += dt
-        r, t = self.rover, self.elapsed
-        self._approach_lift(self.lift_target, dt)
-        t1 = self.t_lift + GRASP_REACH_S
-        t2 = t1 + GRASP_CLOSE_S
-        t3 = t2 + GRASP_RETRACT_S
-        if t <= self.t_lift:
-            r.arm_ext = ARM_STOW_EXT_M
-        elif t <= t1:
-            r.arm_ext = ARM_STOW_EXT_M + (self.reach_ext - ARM_STOW_EXT_M) * (t - self.t_lift) / GRASP_REACH_S
-        elif t <= t2:
-            r.arm_ext = self.reach_ext
-        else:
-            if not self.attached:
-                scene = self.core.scene_of(r)
-                if self.target.instance_id not in scene.instances:
-                    raise _Fail("no_instance", f"{self.target.instance_id} vanished during the grasp")
-                r.holding = self.target.instance_id
-                self.attached = True
-            r.arm_ext = max(
-                ARM_STOW_EXT_M, self.reach_ext - (self.reach_ext - ARM_STOW_EXT_M) * (t - t2) / GRASP_RETRACT_S
-            )
-        self.core.sync_carried(r)
-        if t < t3:
+        r = self.rover
+        at = self.phases.at(self.elapsed)
+        if at is not None:
+            name, u = at
+            if name == "lift":  # lift to the unit's height while the jaws open, arm folded straight ahead
+                s = smooth(u)
+                r.lift = lerp(self.lift0, self.lift_target, s)
+                r.arm_ext = lerp(self.ext0, ARM_STOW_EXT_M, s)
+                r.pan = lerp(self.pan0, 0.0, s)
+                r.grip = lerp(self.grip0, 1.0, s)
+            elif name == "reach":
+                r.lift, r.pan, r.grip = self.lift_target, 0.0, 1.0
+                r.arm_ext = lerp(ARM_STOW_EXT_M, self.reach_ext, smoother(u))
+            elif name == "close":
+                r.arm_ext = self.reach_ext
+                r.grip = 1.0 - smooth(u)
+            elif name == "raise":  # jaws closed: the unit lifts off the shelf
+                self._attach()
+                r.grip = 0.0
+                r.lift = self.lift_target + GRASP_LIFT_OFF_M * smooth(u)
+            else:  # retract, settling back to the unit's height
+                self._attach()
+                s = smoother(u)
+                r.arm_ext = lerp(self.reach_ext, ARM_STOW_EXT_M, s)
+                r.lift = self.lift_target + GRASP_LIFT_OFF_M * (1 - s)
+            self.core.sync_carried(r)
             return None
-        r.arm_ext = ARM_STOW_EXT_M
+        self._attach()
+        r.arm_ext, r.lift, r.pan, r.grip = ARM_STOW_EXT_M, self.lift_target, 0.0, 0.0
         self.core.sync_carried(r)
         held = self.core.scene_of(r).instances[self.target.instance_id]
         self.core.emit(InstanceInfo(store_id=r.store_id, robot_id=r.robot_id, slot_id=held.slot_id, instances=[held]))
@@ -507,20 +610,96 @@ class _Place(_Action):
         if len(rover.basket) >= rover.robot.basket_capacity:
             raise _Fail("grasp_failed", f"basket full ({rover.robot.basket_capacity} units)")
         self.iid = rover.holding
+        scene = core.scene_of(rover)
+        self.dims = scene.item_dims(self.iid)
+        dims = [scene.item_dims(i) for i in rover.basket] + [self.dims]
+        layout = basket_layout(dims)
+        self.target_local = layout[-1]
+        tops = [p[2] + d[2] / 2 for p, d in zip(layout, dims, strict=True)]
+        # carry the unit over the rim / the heap, swing round the mast, release over its stack
+        self.lift_drop = clamp_lift(max(BASKET_DROP_LIFT_M, max(tops) + self.dims[2] / 2 + 0.06))
+        tx, ty = self.target_local[0], self.target_local[1]
+        ry = math.copysign(max(abs(ty), BASKET_RELEASE_MIN_Y_M), ty if abs(ty) > 1e-6 else 1.0)
+        pan, ext_center = pan_reach_for((tx, ry))
+        self.pan_rel = pan
+        self.ext_rel = max(ARM_STOW_EXT_M, ext_center - self.dims[1] / 2 - HELD_CLEARANCE_M)
+        self.lift0, self.ext0, self.pan0 = rover.lift, rover.arm_ext, rover.pan
+        self.phases = _Phases(
+            [
+                ("lift", lift_move_s(rover.lift, self.lift_drop)),
+                ("swing", PLACE_SWING_S),
+                ("release", PLACE_RELEASE_S),
+                ("drop", PLACE_DROP_S),
+                ("back", PLACE_BACK_S),
+            ]
+        )
+        self.released = False
+        self.fall_from: tuple[Point3, float] | None = None
+
+    def _release(self) -> None:
+        if self.released:
+            return
+        r, scene = self.rover, self.core.scene_of(self.rover)
+        inst = scene.instances[self.iid]
+        self.fall_from = (inst.position, r.pose.theta - math.pi / 2 + r.pan)
+        scene.instances[self.iid] = inst.model_copy(update={"in_basket": True})
+        r.basket.append(self.iid)
+        r.holding = None
+        r.free[self.iid] = self.fall_from
+        self.released = True
+
+    def _fall(self, u: float) -> None:
+        """The released unit drops onto its stack (gravity-like ease-in), turning to the basket yaw."""
+        if self.fall_from is None:
+            return
+        (p0, yaw0), r = self.fall_from, self.rover
+        p1 = to_store(r.pose, self.target_local)
+        yaw1 = r.pose.theta + math.pi / 2
+        s, g = smooth(u), u * u
+        dyaw = math.atan2(math.sin(yaw1 - yaw0), math.cos(yaw1 - yaw0))
+        r.free[self.iid] = (
+            Point3(x=lerp(p0.x, p1.x, s), y=lerp(p0.y, p1.y, s), z=lerp(p0.z, p1.z, g)),
+            yaw0 + dyaw * s,
+        )
 
     def step(self, dt: float) -> CommandResult | None:
         self.elapsed += dt
         r = self.rover
-        self._approach_lift(BASKET_DROP_LIFT_M, dt)
-        r.arm_ext = ARM_STOW_EXT_M
-        self.core.sync_carried(r)
-        if self.elapsed < PLACE_S:
+        at = self.phases.at(self.elapsed)
+        if at is not None:
+            name, u = at
+            if name == "lift":
+                s = smooth(u)
+                r.lift = lerp(self.lift0, self.lift_drop, s)
+                r.arm_ext = lerp(self.ext0, ARM_STOW_EXT_M, s)
+                r.pan, r.grip = lerp(self.pan0, 0.0, s), 0.0
+            elif name == "swing":  # pan round the mast first, then stretch out over the stack
+                r.lift = self.lift_drop
+                r.pan = lerp(0.0, self.pan_rel, smoother(u))
+                r.arm_ext = lerp(ARM_STOW_EXT_M, self.ext_rel, smooth((u - 0.25) / 0.75))
+            elif name == "release":
+                r.pan, r.arm_ext = self.pan_rel, self.ext_rel
+                r.grip = smooth(u)
+                if u >= 0.4:
+                    self._release()
+                    self._fall(0.0)
+            elif name == "drop":
+                self._release()
+                r.grip = 1.0
+                self._fall(u)
+            else:  # back: swing straight ahead, fold, close the jaws
+                self._release()
+                r.free.pop(self.iid, None)
+                s = smoother(u)
+                r.pan = lerp(self.pan_rel, 0.0, s)
+                r.arm_ext = lerp(self.ext_rel, ARM_STOW_EXT_M, smooth(u / 0.7))
+                r.grip = 1.0 - s
+            self.core.sync_carried(r)
             return None
+        self._release()
+        r.free.pop(self.iid, None)
+        r.pan, r.arm_ext, r.grip = 0.0, ARM_STOW_EXT_M, 0.0
         scene = self.core.scene_of(r)
-        inst = scene.instances[self.iid]
-        scene.instances[self.iid] = inst.model_copy(update={"in_basket": True})
-        r.basket.append(self.iid)
-        r.holding = None
         self.core.sync_carried(r)
         placed = scene.instances[self.iid]
         self.core.emit(
@@ -529,24 +708,233 @@ class _Place(_Action):
         return self.core.result(self.cmd, ok=True, rover=r, instance_id=self.iid, instances=[placed])
 
 
+@dataclass
+class _Counter:
+    """The checkout counter in front of an unloading robot: how far to drive up, where units go down, conveyor."""
+
+    drive_m: float
+    top_z: float
+    place_local: tuple[float, float]
+    """Robot-frame (x, y) at the approached pose where the arm sets units down."""
+    belt_dir: tuple[float, float]
+    """Store-frame unit vector along the counter (the conveyor carries units this way)."""
+    belt_room_m: float
+    across: tuple[float, float]
+    """Store-frame unit vector across the counter, away from the robot (next conveyor row)."""
+
+
+def find_counter(scene: StoreScene, pose: Pose2D) -> _Counter | None:
+    """The checkout fixture straight ahead of a robot at ``pose`` (within COUNTER_APPROACH_MAX_M of its bumper)."""
+    c, s = math.cos(pose.theta), math.sin(pose.theta)
+    front = BASE_SIZE_M[0] / 2 + 0.02
+    best: _Counter | None = None
+    b = scene.spec.bounds
+    for fx in scene.planogram.fixtures:
+        if fx.kind != "checkout":
+            continue
+        r = fx.rect
+        # ray from the robot centre along its heading against the (axis-aligned) counter rect
+        tmin, tmax = -math.inf, math.inf
+        hit = True
+        for p0, d, lo, hi in ((pose.x, c, r.x, r.x_max), (pose.y, s, r.y, r.y_max)):
+            if abs(d) < 1e-9:
+                if not lo <= p0 <= hi:
+                    hit = False
+                continue
+            t1, t2 = (lo - p0) / d, (hi - p0) / d
+            tmin, tmax = max(tmin, min(t1, t2)), min(tmax, max(t1, t2))
+        if not hit or tmax < max(tmin, 0.0) or tmin < 0:
+            continue
+        drive = tmin - front - COUNTER_GAP_M
+        if not -0.05 <= drive <= COUNTER_APPROACH_MAX_M:
+            continue
+        drive = max(0.0, drive)
+        long_x = r.w >= r.h
+        axis = (1.0, 0.0) if long_x else (0.0, 1.0)
+        # conveyor runs toward the counter end nearer the store centre (in view of the store)
+        mid = (b.x + b.w / 2, b.y + b.h / 2)
+        here = pose.x + c * tmin, pose.y + s * tmin
+        to_mid = (mid[0] - here[0]) * axis[0] + (mid[1] - here[1]) * axis[1]
+        sign = 1.0 if to_mid >= 0 else -1.0
+        belt = (axis[0] * sign, axis[1] * sign)
+        end = (r.x_max if sign > 0 else r.x) if long_x else (r.y_max if sign > 0 else r.y)
+        start = here[0] if long_x else here[1]
+        room = abs(end - start) - 0.12
+        cand = _Counter(
+            drive_m=drive,
+            top_z=fx.height_m,
+            place_local=(front + COUNTER_GAP_M + 0.11, 0.0),
+            belt_dir=belt,
+            belt_room_m=max(0.3, room),
+            across=(c, s),
+        )
+        if best is None or cand.drive_m < best.drive_m:
+            best = cand
+    return best
+
+
 class _Unload(_Action):
-    """At checkout: every basket unit leaves the scene; the result lists them."""
+    """At checkout: drive up to the counter, the arm moves every basket unit onto it (the conveyor carries them off),
+    back off; the units leave the ground truth and the result lists them (they stay on the counter as visuals for
+    LEFTOVER_S). Without a counter in front: the units just leave the scene after UNLOAD_S."""
 
     status = RobotStatus.PLACING
 
+    def __init__(self, core: "WorkerCore", rover: Rover, cmd: Any) -> None:
+        super().__init__(core, rover, cmd)
+        scene = core.scene_of(rover)
+        self.counter = find_counter(scene, rover.pose) if rover.basket else None
+        self.start_pose = rover.pose
+        self.order = list(reversed(rover.basket))  # top of the heap first
+        self.unit_k = 0
+        self.belt_used = 0.0
+        self.belt_row = 0
+        self.queue: list[tuple[str, float, Callable[[float], None]]] = []
+        self.q_t = 0.0
+        if self.counter is not None:
+            approach_s = max(0.6, self.counter.drive_m / COUNTER_SPEED_MPS)
+            self.queue.append(("approach", approach_s, self._approach))
+            self._plan_unit()
+
+    # -- sub-motions ---------------------------------------------------------------------------------------------------
+    def _approach(self, u: float, back: bool = False) -> None:
+        assert self.counter is not None
+        r, d = self.rover, self.counter.drive_m * (1 - smooth(u) if back else smooth(u))
+        p = self.start_pose
+        self.core.set_pose(r, Pose2D(x=p.x + math.cos(p.theta) * d, y=p.y + math.sin(p.theta) * d, theta=p.theta))
+        r.lift = lerp(r.lift, LIFT_REST_M, smooth(u)) if back else r.lift
+        if back:
+            r.pan = lerp(r.pan, 0.0, smooth(u))
+            r.arm_ext = lerp(r.arm_ext, ARM_STOW_EXT_M, smooth(u))
+            r.grip = lerp(r.grip, 0.0, smooth(u))
+
+    def _plan_unit(self) -> None:
+        """Queue the motions for the next basket unit (or the back-off when the basket is empty)."""
+        if self.unit_k >= len(self.order):
+            self.queue.append(("back_off", max(0.6, self.counter.drive_m / COUNTER_SPEED_MPS), self._back))  # type: ignore[union-attr]
+            return
+        fast = 1 if self.unit_k >= UNLOAD_SLOW_UNITS else 0
+        iid = self.order[self.unit_k]
+        r, scene = self.rover, self.core.scene_of(self.rover)
+        dims = scene.item_dims(iid)
+        # where the unit sits in the basket now (robot frame)
+        layout = basket_layout([scene.item_dims(i) for i in r.basket])
+        idx = r.basket.index(iid) if iid in r.basket else len(r.basket) - 1
+        bx, by, bz = layout[idx] if layout else BASKET_OFFSET_M
+        ry = math.copysign(max(abs(by), BASKET_RELEASE_MIN_Y_M), by if abs(by) > 1e-6 else 1.0)
+        pan_b, ext_b = pan_reach_for((bx, ry))
+        ext_b = max(ARM_STOW_EXT_M, ext_b - dims[1] / 2 - HELD_CLEARANCE_M)
+        lift_b = clamp_lift(bz)
+        assert self.counter is not None
+        px, py = self.counter.place_local
+        pan_c, ext_c = pan_reach_for((px, py))
+        ext_c = max(ARM_STOW_EXT_M, min(ARM_FULL_EXT_M, ext_c - dims[1] / 2 - HELD_CLEARANCE_M))
+        lift_c = clamp_lift(self.counter.top_z + dims[2] / 2 + 0.02)
+        rim = BASKET_OFFSET_M[2] + BASKET_SIZE_M[2] + dims[2] / 2 + 0.04
+        state: dict[str, float] = {}
+
+        def to_basket(u: float) -> None:
+            if not state:
+                state.update(lift=r.lift, pan=r.pan, ext=r.arm_ext)
+            s = smoother(u)
+            r.pan = lerp(state["pan"], pan_b, s)
+            r.arm_ext = lerp(state["ext"], ext_b, smooth((u - 0.3) / 0.7))
+            # over the rim first, then down to the unit
+            hi = max(rim, lift_b)
+            r.lift = lerp(state["lift"], hi, smooth(u / 0.5)) if u < 0.5 else lerp(hi, lift_b, smooth((u - 0.5) / 0.5))
+            r.grip = smooth(u)
+
+        def grab(u: float) -> None:
+            r.grip = 1.0 - smooth(u)
+            if u >= 0.6 and r.carry != iid:
+                r.carry = iid
+                if iid in r.basket:
+                    r.basket.remove(iid)
+
+        def to_counter(u: float) -> None:
+            r.carry = iid
+            s = smoother(u)
+            hi = max(rim, lift_c)
+            r.pan = lerp(pan_b, pan_c, s)
+            r.arm_ext = lerp(ext_b, ext_c, smooth((u - 0.2) / 0.8))
+            r.lift = lerp(lift_b, hi, smooth(u / 0.4)) if u < 0.4 else lerp(hi, lift_c, smooth((u - 0.4) / 0.6))
+
+        def release(u: float) -> None:
+            r.grip = smooth(u)
+            if u >= 0.5 and r.carry == iid:
+                r.carry = None
+                self._to_belt(iid, dims)
+            if u >= 1.0 - 1e-9:
+                self.unit_k += 1
+                self._plan_unit()
+
+        self.queue += [
+            ("to_basket", UNLOAD_MOVE_S[fast], to_basket),
+            ("grab", UNLOAD_GRAB_S[fast], grab),
+            ("to_counter", UNLOAD_MOVE_S[fast], to_counter),
+            ("release", UNLOAD_RELEASE_S[fast], release),
+        ]
+
+    def _back(self, u: float) -> None:
+        self._approach(u, back=True)
+
+    def _to_belt(self, iid: str, dims: Vec3) -> None:
+        """Set the unit down on the counter and hand it to the conveyor (core.leftovers slides it to its spot)."""
+        assert self.counter is not None
+        r, cnt = self.rover, self.counter
+        scene = self.core.scene_of(r)
+        here = to_store(r.pose, (*cnt.place_local, cnt.top_z + dims[2] / 2))
+        w = dims[0]
+        if self.belt_used + w > cnt.belt_room_m and self.belt_used > 0:
+            self.belt_row, self.belt_used = self.belt_row + 1, 0.0
+        along = 0.18 + self.belt_used + w / 2
+        self.belt_used += w + 0.03
+        depth = 0.2 * self.belt_row
+        goal = Point3(
+            x=here.x + cnt.belt_dir[0] * along + cnt.across[0] * depth,
+            y=here.y + cnt.belt_dir[1] * along + cnt.across[1] * depth,
+            z=here.z,
+        )
+        yaw = math.atan2(cnt.belt_dir[1], cnt.belt_dir[0])
+        r.free.pop(iid, None)
+        self.core.move_instance(scene, iid, here, yaw)
+        self.core.add_leftover(scene.store_id, iid, here, goal, yaw)
+
+    # -- state machine -------------------------------------------------------------------------------------------------
     def step(self, dt: float) -> CommandResult | None:
         self.elapsed += dt
-        if self.elapsed < (UNLOAD_S if self.rover.basket else 0.0):
-            return None
+        r = self.rover
+        if self.counter is None:
+            if self.elapsed < (UNLOAD_S if r.basket else 0.0):
+                return None
+            return self._finish(remove=True)
+        self.q_t += dt
+        while self.queue:
+            name, dur, fn = self.queue[0]
+            if self.q_t < dur:
+                fn(self.q_t / dur if dur > 0 else 1.0)
+                self.core.sync_carried(r)
+                return None
+            self.q_t -= dur
+            self.queue.pop(0)
+            fn(1.0)  # may queue the next unit's motions
+        self.core.sync_carried(r)
+        return self._finish(remove=False)
+
+    def _finish(self, remove: bool) -> CommandResult:
         r = self.rover
         scene = self.core.scene_of(r)
         out: list[ItemInstance] = []
-        for iid in r.basket:
+        for iid in list(reversed(self.order)) if not remove else list(r.basket):
             inst = scene.instances.pop(iid, None)
             if inst is not None:
-                out.append(inst)
-                self.core.backend.remove_instance(scene.store_id, iid)
-        r.basket = []
+                out.append(inst.model_copy(update={"in_basket": True}))
+                if remove:
+                    self.core.backend.remove_instance(scene.store_id, iid)
+        r.basket, r.carry = [], None
+        r.pan, r.arm_ext, r.grip = 0.0, ARM_STOW_EXT_M, 0.0
+        if not remove:
+            self.core.set_pose(r, self.start_pose)
         return self.core.result(self.cmd, ok=True, rover=r, instances=out)
 
 
@@ -612,6 +1000,13 @@ class WorkerCore:
         """camera_id -> next due time (monotonic clock)."""
         self.stream_fps = DEFAULT_STREAM_FPS
         self._frame_n = 0
+        self.leftovers: dict[str, dict[str, list[Any]]] = {}
+        """store_id -> instance_id -> [position, goal, yaw, seconds left]: unloaded units on the checkout counter
+        (visual only: no longer ground truth), slid along the conveyor, removed after LEFTOVER_S."""
+        self.sim_time = 0.0
+        """Sum of tick dt (sim seconds; the recorder steps it at a fixed rate)."""
+        self.on_command: Callable[[str, Any, Any], None] | None = None
+        """Optional observer (recorder timing log): ('start' | 'done', cmd, result-or-None)."""
 
     # ---- hosting ---------------------------------------------------------------------------------------------------
     def load_store(
@@ -683,6 +1078,7 @@ class WorkerCore:
             instances={i.instance_id: i for i in spec.instances},
         )
         self.stores[sid] = scene
+        self.leftovers.pop(sid, None)  # the rebuild drops their prims
         self._update_offsets()
         self.backend.build_store(spec, self.offsets[sid])
         for r in robots:
@@ -730,8 +1126,9 @@ class WorkerCore:
             del self.rovers[rover.robot_id]
             return self._spawn(robot)
         rover.basket, rover.holding, rover.error = [], None, None
+        rover.carry, rover.free = None, {}
         rover.battery = rover.robot.battery_pct
-        rover.lift, rover.arm_ext = LIFT_REST_M, ARM_STOW_EXT_M
+        rover.lift, rover.arm_ext, rover.pan, rover.grip = LIFT_REST_M, ARM_STOW_EXT_M, 0.0, 0.0
         self.set_pose(rover, rover.robot.dock)
         return rover
 
@@ -825,28 +1222,80 @@ class WorkerCore:
         self.sync_carried(rover)
 
     def move_instance(self, scene: StoreScene, iid: str, position: Point3, yaw: float | None = None) -> None:
-        scene.instances[iid] = scene.instances[iid].model_copy(update={"position": position})
+        inst = scene.instances.get(iid)
+        if inst is None:
+            return
+        if inst.position == position and (yaw is None or self._last_yaw.get((scene.store_id, iid)) == yaw):
+            return  # unchanged: keep the renderer's scene clean (no extra synchronous render step)
+        scene.instances[iid] = inst.model_copy(update={"position": position})
+        if yaw is not None:
+            self._last_yaw[(scene.store_id, iid)] = yaw
         self.backend.set_instance_pose(scene.store_id, iid, position, yaw)
 
+    @functools.cached_property
+    def _last_yaw(self) -> dict[tuple[str, str], float]:
+        return {}
+
     def sync_carried(self, rover: Rover) -> None:
-        """Held + basket units ride with the robot (and the lift / arm)."""
+        """Held + carried + basket units ride with the robot (and the lift / arm); ``rover.free`` units are posed by
+        their action (falling into the basket, set down on the counter)."""
         scene = self.stores.get(rover.store_id)
         if scene is None:
             return
-        gripper = getattr(self.backend, "set_robot_gripper", None)
-        if gripper is not None:  # jaws open while reaching for a unit, closed when holding or stowed
-            gripper(rover.robot_id, rover.holding is not None or rover.arm_ext <= ARM_STOW_EXT_M + 1e-6)
+        arm = getattr(self.backend, "set_robot_arm", None)
+        if arm is not None:
+            arm(rover.robot_id, rover.pan, rover.grip)
+        else:
+            gripper = getattr(self.backend, "set_robot_gripper", None)
+            if gripper is not None:  # jaws open while reaching for a unit, closed when holding or stowed
+                gripper(rover.robot_id, rover.grip < 0.5)
         self.backend.set_robot_pose(rover.robot_id, rover.pose, rover.lift, rover.arm_ext)
-        yaw = rover.pose.theta + math.pi / 2
-        if rover.holding is not None and rover.holding in scene.instances:
-            dims = scene.item_dims(rover.holding)
-            # held: label (item -y) toward the robot, as it faced the robot on the shelf, so the wrist camera reads it
-            # (yaw + pi flipped it at the grasp and the wrist camera only saw the unit's blank back)
-            pos = held_position(rover.pose, rover.lift, rover.arm_ext, dims)
-            self.move_instance(scene, rover.holding, pos, rover.pose.theta - math.pi / 2)
-        for k, iid in enumerate(rover.basket):
-            if iid in scene.instances:
-                self.move_instance(scene, iid, basket_drop_position(rover.pose, k, scene.item_dims(iid)), yaw)
+        for iid in (rover.holding, rover.carry):
+            if iid is not None and iid in scene.instances and iid not in rover.free:
+                dims = scene.item_dims(iid)
+                # held: label (item -y) toward the robot, as it faced the robot on the shelf, so the wrist camera reads
+                # it (yaw + pi flipped it at the grasp and the wrist camera only saw the unit's blank back)
+                pos = held_position(rover.pose, rover.lift, rover.arm_ext, dims, pan=rover.pan)
+                self.move_instance(scene, iid, pos, rover.pose.theta - math.pi / 2 + rover.pan)
+        in_basket = [i for i in rover.basket if i in scene.instances]
+        if in_basket:
+            yaw = rover.pose.theta + math.pi / 2
+            layout = basket_layout([scene.item_dims(i) for i in in_basket])
+            for iid, local in zip(in_basket, layout, strict=True):
+                if iid not in rover.free:
+                    self.move_instance(scene, iid, to_store(rover.pose, local), yaw)
+        for iid, (pos, fyaw) in list(rover.free.items()):
+            self.move_instance(scene, iid, pos, fyaw)
+
+    def add_leftover(self, store_id: str, iid: str, position: Point3, goal: Point3, yaw: float) -> None:
+        """An unloaded unit on the checkout counter: the conveyor slides it to ``goal`` (visual only)."""
+        self.leftovers.setdefault(store_id, {})[iid] = [position, goal, yaw, LEFTOVER_S]
+
+    def _tick_leftovers(self, dt: float) -> None:
+        for sid, units in list(self.leftovers.items()):
+            scene = self.stores.get(sid)
+            for iid, item in list(units.items()):
+                pos, goal, yaw, left = item
+                left -= dt
+                if left <= 0 or scene is None:
+                    units.pop(iid, None)
+                    if scene is not None and iid not in scene.instances:
+                        self.backend.remove_instance(sid, iid)
+                    continue
+                item[3] = left
+                dx, dy = goal.x - pos.x, goal.y - pos.y
+                dist = math.hypot(dx, dy)
+                if dist < 1e-4:
+                    continue
+                stepm = min(dist, CONVEYOR_SPEED_MPS * dt * min(1.0, 0.3 + dist / 0.15))
+                new = Point3(x=pos.x + dx / dist * stepm, y=pos.y + dy / dist * stepm, z=pos.z)
+                item[0] = new
+                if scene is not None and iid in scene.instances:
+                    self.move_instance(scene, iid, new, yaw)
+                else:
+                    self.backend.set_instance_pose(sid, iid, new, yaw)
+            if not units:
+                self.leftovers.pop(sid, None)
 
     def state(self, rover: Rover) -> RobotState:
         scene = self.stores.get(rover.store_id)
@@ -909,7 +1358,9 @@ class WorkerCore:
         aim = None
         if slot is not None and kind == "front":
             aim = self._slot_aim(self.stores[store_id], slot)
-        return robot_camera_pose(kind, rover.pose, lift_height_m=rover.lift, arm_ext_m=rover.arm_ext, aim_at=aim)
+        return robot_camera_pose(
+            kind, rover.pose, lift_height_m=rover.lift, arm_ext_m=rover.arm_ext, aim_at=aim, pan=rover.pan
+        )
 
     @staticmethod
     def _slot_aim(scene: StoreScene, slot: Slot) -> Point3:
@@ -1002,10 +1453,20 @@ class WorkerCore:
             **kw,
         )
 
+    def _observe(self, phase: str, cmd: Any, res: Any = None) -> None:
+        if self.on_command is not None:
+            try:
+                self.on_command(phase, cmd, res)
+            except Exception:  # noqa: BLE001 - an observer must never break the protocol
+                pass
+
     def _finish(self, rover: Rover, res: CommandResult) -> None:
+        cmd = rover.active.cmd if rover.active is not None else None
         rover.active = None
         self.emit(res.model_copy(update={"state": self.state(rover)}))
         self.publish_state(rover, force=True)
+        if cmd is not None:
+            self._observe("done", cmd, res)
 
     def _fail(self, cmd: Any, code: SimErrorCode, message: str, rover: Rover | None = None) -> None:
         res = self.result(cmd, ok=False, rover=rover, error_code=code, error=message)
@@ -1053,6 +1514,7 @@ class WorkerCore:
                 rover.active_started = self.clock()
                 rover.error = None
                 self.publish_state(rover, force=True)
+                self._observe("start", cmd)
             else:
                 raise _Fail("internal", f"unsupported command {kind!r}")
         except _Fail as exc:
@@ -1224,6 +1686,9 @@ class WorkerCore:
     # ---- loop ------------------------------------------------------------------------------------------------------
     def tick(self, dt: float) -> None:
         """Advance every robot by ``dt`` seconds (call once per main-loop iteration)."""
+        self.sim_time += dt
+        if self.leftovers:
+            self._tick_leftovers(dt)
         for rover in list(self.rovers.values()):
             if rover.active is None:
                 if rover.on_dock and rover.error is None:

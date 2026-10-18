@@ -123,13 +123,32 @@ def clamp_lift(z: float) -> float:
     return max(LIFT_MIN_M, min(LIFT_MAX_M, z))
 
 
-def gripper_local(lift_height_m: float, arm_ext_m: float) -> Vec3:
-    """Gripper TCP in the robot frame for a lift height + arm extension."""
-    return (ARM_MOUNT_X_M + arm_ext_m, 0.0, lift_height_m)
+ARM_PAN_FORWARD_M = 0.04
+"""The SO-101 pan axis sits this far ahead of ARM_MOUNT_X_M (= ``rover_puppet.ARM_PAN_FORWARD_M``)."""
+PAN_AXIS_X_M = ARM_MOUNT_X_M + ARM_PAN_FORWARD_M
+"""Robot-frame x of the vertical SO-101 pan axis: a panned arm swings its TCP around this point."""
 
 
-def gripper_position(pose: Pose2D, lift_height_m: float = LIFT_REST_M, arm_ext_m: float = ARM_STOW_EXT_M) -> Point3:
-    return to_store(pose, gripper_local(lift_height_m, arm_ext_m))
+def gripper_local(lift_height_m: float, arm_ext_m: float, pan: float = 0.0) -> Vec3:
+    """Gripper TCP in the robot frame for a lift height + arm extension (+ pan about the SO-101 pan axis: 0 = straight
+    ahead, > 0 swings toward the robot's left)."""
+    if pan == 0.0:
+        return (ARM_MOUNT_X_M + arm_ext_m, 0.0, lift_height_m)
+    r = ARM_MOUNT_X_M + arm_ext_m - PAN_AXIS_X_M
+    return (PAN_AXIS_X_M + r * math.cos(pan), r * math.sin(pan), lift_height_m)
+
+
+def pan_reach_for(local_xy: tuple[float, float]) -> tuple[float, float]:
+    """(pan, arm_ext) that puts the TCP over a robot-frame (x, y) point (inverse of ``gripper_local``)."""
+    dx, dy = local_xy[0] - PAN_AXIS_X_M, local_xy[1]
+    r = math.hypot(dx, dy)
+    return math.atan2(dy, dx), r + PAN_AXIS_X_M - ARM_MOUNT_X_M
+
+
+def gripper_position(
+    pose: Pose2D, lift_height_m: float = LIFT_REST_M, arm_ext_m: float = ARM_STOW_EXT_M, pan: float = 0.0
+) -> Point3:
+    return to_store(pose, gripper_local(lift_height_m, arm_ext_m, pan))
 
 
 HELD_CLEARANCE_M = NEAR_CLIP_M + 0.01
@@ -141,13 +160,13 @@ def held_position(
     lift_height_m: float = LIFT_REST_M,
     arm_ext_m: float = ARM_STOW_EXT_M,
     item_dims: Vec3 = (0.08, 0.08, 0.15),
+    pan: float = 0.0,
 ) -> Point3:
     """Center of the unit held by the magic grasp: just ahead of the jaws (its near face HELD_CLEARANCE_M in front of
-    the TCP; a held unit is yawed pose.theta - pi/2, label toward the robot, so its depth item_dims[1] lies along the
-    robot's x). Centered ON the TCP the wrist camera sat inside the unit and Isaac showed the aisle through a wash of
-    the unit's color."""
-    x, y, z = gripper_local(lift_height_m, arm_ext_m)
-    return to_store(pose, (x + item_dims[1] / 2 + HELD_CLEARANCE_M, y, z))
+    the TCP; a held unit is yawed pose.theta - pi/2 (+ pan), label toward the robot, so its depth item_dims[1] lies
+    along the arm). Centered ON the TCP the wrist camera sat inside the unit and Isaac showed the aisle through a wash
+    of the unit's color. ``pan`` swings it around the SO-101 pan axis with the arm (basket / counter moves)."""
+    return to_store(pose, gripper_local(lift_height_m, arm_ext_m + item_dims[1] / 2 + HELD_CLEARANCE_M, pan))
 
 
 def mount_camera(
@@ -157,6 +176,7 @@ def mount_camera(
     lift_height_m: float = LIFT_REST_M,
     arm_ext_m: float = ARM_STOW_EXT_M,
     aim_at: Point3 | None = None,
+    pan: float = 0.0,
 ) -> CameraPose:
     """CameraPose of a mounted camera.
 
@@ -171,16 +191,18 @@ def mount_camera(
     else:
         if robot_pose is None:
             raise ValueError(f"camera mount frame {mount.frame!r} needs the robot pose")
+        yaw_extra = 0.0
         if mount.frame == "gripper":
-            gx, gy, gz = gripper_local(lift_height_m, arm_ext_m)
+            gx, gy, gz = gripper_local(lift_height_m, arm_ext_m, pan)
             local = (gx + mount.x, gy + mount.y, gz + mount.z + 0.03)  # camera sits just above the jaws
             pitch = mount.pitch + WRIST_CAM_PITCH
+            yaw_extra = pan  # rides the panned arm
         else:
             local = (mount.x, mount.y, mount.z)
             pitch = mount.pitch
         p = to_store(robot_pose, local)
         eye = (p.x, p.y, p.z)
-        yaw = robot_pose.theta + mount.yaw
+        yaw = robot_pose.theta + mount.yaw + yaw_extra
     if aim_at is not None:
         return look_at(eye, (aim_at.x, aim_at.y, aim_at.z), hfov=hfov, w=mount.width, h=mount.height)
     return CameraPose(eye[0], eye[1], eye[2], yaw, pitch, hfov, mount.width, mount.height)
@@ -193,11 +215,12 @@ def robot_camera_pose(
     lift_height_m: float = LIFT_REST_M,
     arm_ext_m: float = ARM_STOW_EXT_M,
     aim_at: Point3 | None = None,
+    pan: float = 0.0,
 ) -> CameraPose:
     """Pose of a robot camera ('front' / 'wrist' / 'basket') from DEFAULT_ROBOT_CAMERA_MOUNTS."""
     kind = "front" if kind == "head" else kind
     mount = DEFAULT_ROBOT_CAMERA_MOUNTS[kind]
-    return mount_camera(mount, robot_pose, lift_height_m=lift_height_m, arm_ext_m=arm_ext_m, aim_at=aim_at)
+    return mount_camera(mount, robot_pose, lift_height_m=lift_height_m, arm_ext_m=arm_ext_m, aim_at=aim_at, pan=pan)
 
 
 def box_corners(center: Point3 | Vec3, dims: Vec3, yaw: float) -> list[Vec3]:

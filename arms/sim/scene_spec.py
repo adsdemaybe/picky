@@ -347,6 +347,39 @@ def basket_drop_position(pose: Pose2D, index: int, item_dims: Vec3 = (0.08, 0.08
     return to_world(pose, (lx, ly, lz))
 
 
+BASKET_CELLS: tuple[int, int] = (2, 3)
+"""Basket packing grid (along the robot's x, along its y): each unit goes on the lowest stack."""
+BASKET_NEST = 0.9
+"""Stacked units settle into each other a little (soft packs, round produce): stack height per unit = h * this."""
+
+
+def basket_layout(dims: Sequence[Vec3]) -> list[Vec3]:
+    """Robot-local centers for the basket units in drop order: a 2 x 3 grid of stacks, each unit on the currently
+    lowest stack (ties: first cell), so a full basket (24+ units) is a packed heap instead of interpenetrating
+    layers. Footprints are pulled in so a unit stays inside the walls (yaw pose.theta + pi/2: width along y)."""
+    bx, by, _ = BASKET_SIZE_M
+    nx, ny = BASKET_CELLS
+    ox, oy, oz = BASKET_OFFSET_M
+    heights = [0.0] * (nx * ny)
+    out: list[Vec3] = []
+    for w, d, h in dims:
+        cell = min(range(nx * ny), key=lambda c: (round(heights[c], 3), c))
+        col, row = cell % nx, cell // nx
+        lx = ox + (col - (nx - 1) / 2) * bx / nx
+        ly = oy + (row - (ny - 1) / 2) * by / ny
+        hx, hy = max(0.0, (bx - d) / 2), max(0.0, (by - w) / 2)
+        lx = min(ox + hx, max(ox - hx, lx))
+        ly = min(oy + hy, max(oy - hy, ly))
+        out.append((lx, ly, oz + heights[cell] + h / 2))
+        heights[cell] += h * BASKET_NEST
+    return out
+
+
+def basket_positions(pose: Pose2D, dims: Sequence[Vec3]) -> list[Point3]:
+    """``basket_layout`` in the store frame for a robot at ``pose``."""
+    return [to_world(pose, p) for p in basket_layout(dims)]
+
+
 def _wrap(theta: float) -> float:
     return math.atan2(math.sin(theta), math.cos(theta))
 
