@@ -93,6 +93,26 @@ python -m arms.robot.so101.pick_place "pick up the oat milk and put it in the ba
 - If IK poses are mirrored or offset vs. the real arm, set `joint_sign` / `joint_offset_deg` per joint in `config.py`
   (the `so101_new_calib` URDF is meant to match LeRobot's calibration zero, but verify by commanding `home_deg`).
 
+## First successful pick (2026-10-17, team SO-101)
+
+Picked a gum pack standing on its long edge (2 cm thick) and set it back down, driven step-by-step with
+`step_ctl` (camera feedback after every move):
+
+```text
+{"xyz": [0.215, -0.115, 0.06], "roll": 40,  "max_jump": 100, "gripper": 97}   hover 1 cm above the pack
+{"xyz": [0.215, -0.115, 0.06], "roll": 120, "max_jump": 100}                  jaws close across the 2 cm thickness
+{"xyz": [0.225, -0.10, 0.06],  "roll": 120}                                   centre over the pack (both cameras)
+{"xyz": [0.225, -0.10, 0.035], "roll": 120}                                   straddle: one jaw each side
+{"gripper": 5}                                                                stalls at ~11 = holding
+{"xyz": [0.225, -0.10, 0.065], "roll": 120, "gripper": 5}                    lift clear of the table
+```
+
+What made it work: `SO101_JOINT_OFFSETS=wrist_flex=92` (this arm's wrist was calibrated bent 90°; derived from
+camera frames of the gripper pointing straight down), IK limited to the calibrated joint ranges, and `settle()`
+closing the ~3° steady-state error of LeRobot's P=16 gains. Lessons: the jaws always close left↔right in the
+wrist-camera image (use it to set `roll`), the front-facing camera can't judge depth, and a 5 × 7.5 cm pack lying
+flat is wider than the jaws can open.
+
 ## Known limitations
 
 - Fixed grasp height per run (no depth): fine for upright boxes/cans of similar height.
