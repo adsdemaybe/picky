@@ -72,6 +72,16 @@ _SKIP_RE = re.compile(
     r"[.!?]*$",
     re.I,
 )
+_WHERE_RE = re.compile(
+    r"(?:where(?:'s| is| are| do you keep| can i (?:find|get))|do you (?:have|sell|carry)|i'?m looking for|"
+    r"looking for|can you find(?: me)?|help me find)\s+(?:the |some |a |an |any )?(?P<q>[^?.!]+)",
+    re.IGNORECASE,
+)
+_CHEAPER_RE = re.compile(
+    r"(?:cheaper|less expensive|budget|cheapest)\s+(?:alternative|option|version|one|brand)?s?\s*"
+    r"(?:to|for|than|of)?\s+(?:the |a |an |that |this )?(?P<q>[^?.!]+)",
+    re.IGNORECASE,
+)
 _SEE_RE = re.compile(r"\b(?:see|look|camera|in front of you|around you|what'?s there)\b", re.I)
 _STATUS_RE = re.compile(
     r"\b(?:what(?:'re| are) you (?:doing|up to|working on)|status|progress|how(?:'s| is) it going|where are you"
@@ -485,6 +495,9 @@ class _BrainBase:
             return f"OK, skipping {target.name or target.query}."
         if goal is not None and self._queue_for_llm(rt, text):
             return "Got it."
+        where = await self._where(text, store_id)
+        if where:
+            return where
         if _SEE_RE.search(text):
             wants_status = bool(_STATUS_RE.search(text))
             seen = await self._look(rt, goal, _see_clause(text) if wants_status else text, store_id)
@@ -494,6 +507,89 @@ class _BrainBase:
 
     def _queue_for_llm(self, rt: BrainRuntime, text: str) -> bool:
         return False
+
+    async def _where(self, text: str, store_id: str | None) -> str | None:
+        """In-store help from the live catalog (deterministic, so it works with or without an LLM key):
+        'where is the salsa?', 'do you have oat milk' -> aisle, section, shelf, price and stock;
+        'what's a cheaper alternative to the salsa?' -> cheaper in-stock products of the same category here."""
+        catalog = self._services.catalog
+        if catalog is None or not store_id:
+            return None
+        cheaper = _CHEAPER_RE.search(text)
+        m = cheaper or _WHERE_RE.search(text)
+        if m is None:
+            return None
+        from contracts.catalog import SearchQuery
+
+        query = m.group("q").strip()
+        try:
+            hits = await catalog.search(SearchQuery(text=query, store_ids=[store_id], limit=3))
+        except Exception:  # noqa: BLE001 - the shopper still gets an answer
+            return None
+        if not hits:
+            return f"Sorry, I couldn't find {query} in this store."
+        hit = hits[0]
+        p = hit.product
+        offer = hit.offer_for(store_id)
+        words = [w for w in re.findall(r"[a-z]+", query.lower()) if len(w) > 2]
+        exact = all(w.rstrip("s") in p.name.lower() for w in words)
+        lead = "" if exact else f"I don't see {query} exactly; the closest is "
+        if cheaper:
+            return await self._cheaper(p, offer, store_id, lead)
+        locs = await catalog.get_locations(p.sku, store_id)
+        if not locs:
+            return f"We don't carry {p.name} in this store."
+        loc = locs[0]
+        where, shelf = await self._shelf_words(loc, store_id)
+        price = f" It's ${offer.price_cents / 100:.2f}" if offer is not None else ""
+        stock = ""
+        if offer is not None:
+            stock = f", {offer.qty} on the shelf" if offer.qty > 0 else ", but it's out of stock right now"
+        return f"{lead}{p.name} is in {where}, {shelf}.{price}{stock}. Want me to take you there?"
+
+    async def _shelf_words(self, loc: Any, store_id: str) -> tuple[str, str]:
+        fx = None
+        with contextlib.suppress(Exception):
+            plan = await self._services.catalog.get_planogram(store_id)
+            fx = next((f for f in plan.fixtures if f.fixture_id == loc.fixture_id), None)
+        where = loc.aisle_label or (fx.label if fx is not None and fx.label else None) or "the store"
+        if fx is not None and fx.kind == "produce_bin":
+            return where, f"on {fx.label or 'the produce table'}"
+        levels = {0: "bottom shelf", 1: "second shelf", 2: "third shelf", 3: "top shelf"}
+        return where, levels.get(loc.level, f"shelf {loc.level + 1}")
+
+    async def _cheaper(self, p: Any, offer: Any, store_id: str, lead: str) -> str:
+        from contracts.catalog import SearchQuery
+
+        catalog = self._services.catalog
+        base = offer.price_cents if offer is not None else p.price_cents
+        hits = await catalog.search(
+            SearchQuery(category=p.category, store_ids=[store_id], in_stock_only=True, max_price_cents=base, limit=20)
+        )
+        alts = []
+        for h in hits:
+            o = h.offer_for(store_id)
+            if h.product.sku == p.sku or o is None or o.price_cents >= base:
+                continue
+            if p.subcategory and h.product.subcategory and h.product.subcategory != p.subcategory:
+                continue  # same kind of thing (salsa for salsa, not salsa for beans)
+            alts.append((o.price_cents, h.product, o))
+        alts.sort(key=lambda a: a[0])
+        if not alts:
+            return f"{lead}{p.name} (${base / 100:.2f}) is already the cheapest of its kind here."
+        cents, alt, _o = alts[0]
+        locs = await catalog.get_locations(alt.sku, store_id)
+        where = ""
+        if locs:
+            aisle, shelf = await self._shelf_words(locs[0], store_id)
+            where = f" It's in {aisle}, {shelf}."
+        more = (
+            f" I also see {len(alts) - 1} other cheaper option{'s' if len(alts) > 2 else ''}." if len(alts) > 1 else ""
+        )
+        return (
+            f"{lead}{p.name} is ${base / 100:.2f}. {alt.name} is ${cents / 100:.2f}, "
+            f"saving ${(base - cents) / 100:.2f}.{where}{more} Want me to grab it or take you there?"
+        )
 
     async def _look(self, rt: BrainRuntime, goal: Goal | None, question: str, store_id: str | None) -> str | None:
         cameras = self._services.cameras
