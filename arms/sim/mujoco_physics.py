@@ -56,6 +56,7 @@ FIXTURE_ROLES = {"board", "panel", "base", "wall", "floor", "obstacle"}
 ROVER_COLLIDERS = ("chassis", "mast", "basket_floor", "basket_front", "basket_back", "basket_left", "basket_right")
 WHEEL_RADIUS_M = 0.06
 STOW_EXT_M = 0.13
+SYNC_MIN_S = 0.03
 HOLD_RADIUS_M = 0.09  # a grasped unit whose center stays this close to the fingertips is still held
 
 
@@ -129,6 +130,45 @@ class MujocoPhysicsBackend(MujocoBackend):
             self._pending.add(key)  # released: the core's pose for it (basket / shelf) wins again
 
     # ---- build hooks
+    def _build(self) -> None:
+        self._supported = self._supported_units()
+        super()._build()
+
+    def _supported_units(self) -> set[tuple[str, str]]:
+        """Units whose bottom rests on a board / base / floor or on another unit of the same slot (start asleep);
+        anything else starts awake and settles under gravity instead of hovering."""
+        tops: dict[str, list[tuple[float, float, float, float, float]]] = {}
+        for sid, spec in self.stores.items():
+            tops[sid] = [
+                (
+                    q.center[0] - q.size[0] / 2,
+                    q.center[0] + q.size[0] / 2,
+                    q.center[1] - q.size[1] / 2,
+                    q.center[1] + q.size[1] / 2,
+                    q.center[2] + q.size[2] / 2,
+                )
+                for q in spec.prims
+                if q.role in ("board", "base", "floor")
+            ]
+        by_slot: dict[tuple[str, str | None], list[PrimSpec]] = {}
+        for (sid, _iid), p in self.instance_prims.items():
+            by_slot.setdefault((sid, p.slot_id), []).append(p)
+        out = set()
+        for (sid, iid), p in self.instance_prims.items():
+            x, y, bot = p.center[0], p.center[1], p.center[2] - p.size[2] / 2
+            ok = any(x0 <= x <= x1 and y0 <= y <= y1 and abs(z - bot) < 0.01 for x0, x1, y0, y1, z in tops[sid])
+            if not ok:
+                ok = any(
+                    q is not p
+                    and abs(q.center[0] - x) < q.size[0] / 2
+                    and abs(q.center[1] - y) < q.size[1] / 2
+                    and abs(q.center[2] + q.size[2] / 2 - bot) < 0.01
+                    for q in by_slot[(sid, p.slot_id)]
+                )
+            if ok:
+                out.add((sid, iid))
+        return out
+
     def _static_geom(self, prim: PrimSpec, pos: Vec3, material: str) -> str:
         g = super()._static_geom(prim, pos, material)
         if prim.role in FIXTURE_ROLES:
@@ -141,6 +181,7 @@ class MujocoPhysicsBackend(MujocoBackend):
         q = _quat(prim.yaw)
         sx, sy, sz = (max(0.006, v) for v in prim.size)
         mass = max(0.02, float(prim.mass_kg or 0.3))
+        sleep = "init" if key in getattr(self, "_supported", set()) else "auto"
         collider = (
             f'<geom type="box" size="{sx * 0.48:.4f} {sy * 0.48:.4f} {sz / 2 - 0.001:.4f}" mass="{mass:.3f}" '
             f'contype="2" conaffinity="7" friction="1.0 0.02 0.002" group="3" rgba="0 0 0 0"/>'
@@ -148,7 +189,7 @@ class MujocoPhysicsBackend(MujocoBackend):
         return (
             f"<body name={quoteattr('i/' + '/'.join(key))} "
             f'pos="{c[0] + ox:.4f} {c[1] + oy:.4f} {c[2] + oz + 0.0015:.4f}" '
-            f'quat="{q[0]:.6f} {q[1]:.6f} {q[2]:.6f} {q[3]:.6f}" sleep="init"><freejoint/>{collider}{inner}</body>'
+            f'quat="{q[0]:.6f} {q[1]:.6f} {q[2]:.6f} {q[3]:.6f}" sleep="{sleep}"><freejoint/>{collider}{inner}</body>'
         )
 
     def _rover_bodies(self, rid: str, rover: RoverSpec) -> str:
@@ -170,11 +211,18 @@ class MujocoPhysicsBackend(MujocoBackend):
             target.append(g)
         sx, sy, sz = mujoco_screen.SCREEN_LOCAL
         w, h = mujoco_screen.SCREEN_SIZE_M
-        base.append(  # bezel + the live screen, facing the rover's +x (shoppers in front of it)
-            f'<geom type="box" pos="{sx - 0.006:.3f} {sy:.3f} {sz:.3f}" '
+        base.append(  # rear post + extended base plate, bezel and the live screen facing backwards (-x): a shopper
+            # being guided walks behind the robot; the mast front stays clear for the arm and the front camera
+            f'<geom type="box" pos="-0.265 0 0.215" size="0.035 0.15 0.02" rgba="0.20 0.21 0.23 1" '
+            f'contype="4" conaffinity="0"/>'
+            f'<geom type="box" pos="-0.27 0 {(0.235 + sz) / 2:.3f}" size="0.015 0.02 {(sz - 0.235) / 2:.3f}" '
+            f'rgba="0.75 0.76 0.78 1" contype="0" conaffinity="0"/>'
+        )
+        base.append(
+            f'<geom type="box" pos="{sx + 0.006:.3f} {sy:.3f} {sz:.3f}" '
             f'size="0.008 {w / 2 + 0.012:.3f} {h / 2 + 0.012:.3f}" '
             f'rgba="0.08 0.08 0.09 1" contype="0" conaffinity="0"/>'
-            f'<geom type="box" pos="{sx + 0.0025:.4f} {sy:.3f} {sz:.3f}" size="0.0015 {w / 2:.3f} {h / 2:.3f}" '
+            f'<geom type="box" pos="{sx - 0.0025:.4f} {sy:.3f} {sz:.3f}" size="0.0015 {w / 2:.3f} {h / 2:.3f}" '
             f'material="screen.{rid}" contype="0" conaffinity="0"/>'
         )
         lift_xml = "".join(lift) or '<geom size="0.01" contype="0" conaffinity="0"/>'
@@ -276,6 +324,7 @@ class MujocoPhysicsBackend(MujocoBackend):
         else:
             self._screen_feed.robot_ids = list(rover_parts)
         self._screen_tick.last = 0.0
+        self._synced_at = 0.0
         self._ikd = mj.MjData(model)
         self._pending = set()
         self._grasped = {}
@@ -292,7 +341,11 @@ class MujocoPhysicsBackend(MujocoBackend):
         return (pose.x + c * local[0] - s * local[1] + ox, pose.y + s * local[0] + c * local[1] + oy, local[2] + oz)
 
     def _sync(self) -> None:
-        d, _m = self._data, self._model
+        now = time.monotonic()
+        if now - getattr(self, "_synced_at", 0.0) < SYNC_MIN_S:
+            return  # several cameras render per worker tick: sync (and step physics) once
+        self._synced_at = now
+        d = self._data
         for rid, rover in self.rovers.items():
             ids = self._rmocap.get(rid)
             if not ids:
@@ -345,8 +398,12 @@ class MujocoPhysicsBackend(MujocoBackend):
                 continue
             rover = self.rovers[rid]
             info = feed.get(rid) or {}
-            local = {"basket": info.get("basket_count", 0), "holding": info.get("holding")}
-            img = mujoco_screen.draw(rover.name, rover.color, local, info)
+            local = {
+                "basket": info.get("basket_count", 0),
+                "holding": info.get("holding"),
+                "approvals": (self._screen_feed.approvals.get(rid) if self._screen_feed else None) or [],
+            }
+            img = mujoco_screen.draw(rover.name, rover.color, local, info)[:, ::-1]  # rear (-x) face maps mirrored
             adr, n = m.tex_adr[tex], m.tex_width[tex] * m.tex_height[tex] * m.tex_nchannel[tex]
             m.tex_data[adr : adr + n] = img.reshape(-1)[:n]
             for r in self._renderers.values():

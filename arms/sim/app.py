@@ -91,7 +91,7 @@ log = get_logger(__name__)
 
 JPEG_QUALITY = 75
 LOOP_HZ = 60.0
-MAX_DT_S = 0.25
+MAX_DT_S = 0.5  # a busy renderer (MuJoCo on a laptop) must not slow the robots down
 RECONNECT_MAX_S = 10.0
 CAMERA_IDLE_PAUSE_S = 3.0
 """Render products unused this long stop rendering (every enabled one makes each synchronous step slower)."""

@@ -17,7 +17,7 @@ import numpy as np
 
 SCREEN_W, SCREEN_H = 512, 320
 SCREEN_SIZE_M = (0.26, 0.165)  # 12" class display
-SCREEN_LOCAL = (0.155, 0.0, 1.12)  # rover frame: on the mast, facing forward at shopper chest height
+SCREEN_LOCAL = (-0.29, 0.0, 1.02)  # rover frame: rear post, facing backwards at shopper chest height
 POLL_S = 2.0
 REDRAW_S = 1.0
 
@@ -29,6 +29,7 @@ class ScreenFeed:
         self.url = (gateway_url or "").rstrip("/")
         self.robot_ids = list(robot_ids)
         self.info: dict[str, dict[str, Any]] = {}
+        self.approvals: dict[str, list[dict[str, Any]]] = {}
         self._stop = threading.Event()
         if self.url:
             threading.Thread(target=self._run, name="screen-feed", daemon=True).start()
@@ -39,6 +40,8 @@ class ScreenFeed:
                 try:
                     with urllib.request.urlopen(f"{self.url}/api/fleet/robots/{rid}", timeout=1.5) as r:
                         self.info[rid] = json.load(r)
+                    with urllib.request.urlopen(f"{self.url}/api/approvals?robot_id={rid}", timeout=1.5) as r:
+                        self.approvals[rid] = json.load(r)
                 except Exception:  # noqa: BLE001 - offline gateway: keep the last state
                     pass
             self._stop.wait(POLL_S)
@@ -79,7 +82,27 @@ def draw(name: str, color: str, local: dict[str, Any], info: dict[str, Any] | No
     )
     y += 34
     said = (info or {}).get("last_thought") or (info or {}).get("error") or ""
-    if said:
+    pending = local.get("approvals") or []
+    checkout = next((a for a in pending if a.get("kind") == "checkout"), None)
+    ask = checkout or (pending[0] if pending else None)
+    if ask is not None:
+        box = (12, y - 4, SCREEN_W - 12, SCREEN_H - 52)
+        d.rounded_rectangle(box, radius=12, fill=(250, 250, 245) if checkout else (36, 52, 70))
+        ink = (20, 24, 30) if checkout else (255, 255, 255)
+        head = "Ready to check out" if checkout else "Quick question"
+        d.text((26, y + 6), head, fill=(200, 40, 50) if checkout else (170, 230, 190), font=font(22))
+        amt = ask.get("amount_cents")
+        if isinstance(amt, int):
+            d.text((SCREEN_W - 26, y + 6), f"${amt // 100}.{amt % 100:02d}", fill=ink, font=font(30), anchor="ra")
+        for i, line in enumerate(textwrap.wrap(str(ask.get("title") or ""), 38)[:3]):
+            d.text((26, y + 42 + i * 28), line, fill=ink, font=font(21))
+        d.text(
+            (26, box[3] - 30),
+            "Approve on my screen page or in the app",
+            fill=(110, 120, 130) if checkout else (170, 185, 200),
+            font=font(18),
+        )
+    elif said:
         for line in textwrap.wrap(str(said), 40)[:5]:
             d.text((18, y), line, fill=(255, 255, 255), font=font(22))
             y += 30

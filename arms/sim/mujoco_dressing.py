@@ -19,10 +19,25 @@ import os
 import tempfile
 from pathlib import Path
 
-from contracts.planogram import Fixture, Planogram  # noqa: I001
+from arms.sim.scene_spec import CEILING_HEIGHT_M
+from contracts.planogram import Fixture, Planogram
 
 SIGN_DIR = Path(os.environ.get("PICKY_SIM_LABEL_DIR") or tempfile.gettempdir()) / "picky-mj-signs"
 VISUAL = 'contype="0" conaffinity="0"'
+
+
+def _side_label(label: str | None, side: int) -> str:
+    """'Gondola 1: beverages & wine | snacks' -> side 0 'Beverages & wine', side 1 'Snacks'; walls drop ' wall'."""
+    if not label:
+        return ""
+    head, _, rest = label.partition(":")
+    body = rest if rest else head
+    parts = [s.strip() for s in body.split("|")]
+    text = parts[min(side, len(parts) - 1)] if parts else body
+    for suffix in (" wall", " endcap"):
+        if text.lower().endswith(suffix) and len(text) > len(suffix) + 3:
+            text = text[: -len(suffix)]
+    return text[:1].upper() + text[1:]
 
 
 def _axis(yaw: float) -> tuple[int, int]:
@@ -39,18 +54,29 @@ def _box(c: tuple[float, float, float], size: tuple[float, float, float], rgba: 
     return f'<geom type="box" pos="{pos}" size="{hx:.4f} {hy:.4f} {hz:.4f}"{col}{mat} {VISUAL}/>'
 
 
-def _sign_png(text: str, fg: tuple[int, int, int], bg: tuple[int, int, int], name: str) -> str:
+def _sign_png(text: str, fg: tuple[int, int, int], bg: tuple[int, int, int], name: str, aspect: float) -> str:
+    """Sign texture with the sign's own aspect (w / h) and the text auto-fitted inside a margin (never cut off)."""
     from PIL import Image, ImageDraw, ImageFont
 
     SIGN_DIR.mkdir(parents=True, exist_ok=True)
     path = SIGN_DIR / f"{name}.png"
-    img = Image.new("RGB", (1024, 128), bg)
+    W = 1024
+    H = int(max(48, min(512, W / max(aspect, 0.5))))
+    img = Image.new("RGB", (W, H), bg)
     d = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.load_default(size=64)
-    except TypeError:  # Pillow < 10.1
-        font = ImageFont.load_default()
-    d.text((512, 64), text.upper()[:34], fill=fg, font=font, anchor="mm")
+    text = text.upper()
+    px = int(H * 0.62)
+    while True:
+        try:
+            font = ImageFont.load_default(size=px)
+        except TypeError:  # Pillow < 10.1
+            font = ImageFont.load_default()
+            break
+        x0, y0, x1, y1 = d.textbbox((0, 0), text, font=font)
+        if (x1 - x0) <= W * 0.92 and (y1 - y0) <= H * 0.8 or px <= 10:
+            break
+        px -= 2
+    d.text((W / 2, H / 2), text, fill=fg, font=font, anchor="mm")
     img.transpose(Image.Transpose.FLIP_LEFT_RIGHT).save(path)  # MuJoCo maps the box's facing side mirrored
     return str(path)
 
@@ -65,7 +91,7 @@ class Dressing:
             '<texture name="d.tiles" type="2d" builtin="checker" rgb1="0.90 0.89 0.86" rgb2="0.84 0.83 0.80" '
             'width="256" height="256" mark="edge" markrgb="0.70 0.69 0.66"/>',
             '<material name="d.tiles" texture="d.tiles" texrepeat="0.83 0.83" texuniform="true" '
-            'specular="0.25" shininess="0.4" reflectance="0.03"/>',
+            'specular="0.25" shininess="0.4"/>',
             '<material name="d.wall" rgba="0.93 0.92 0.88 1" specular="0.05"/>',
             '<material name="d.metal" rgba="0.80 0.81 0.83 1" specular="0.5" shininess="0.6"/>',
             '<material name="d.dark" rgba="0.16 0.17 0.19 1" specular="0.3" shininess="0.4"/>',
@@ -75,12 +101,13 @@ class Dressing:
         ]
         self.geoms: list[str] = []
         self._signs = 0
+        self.replaced_fixtures: set[str] = set()  # fixtures drawn by a model: hide their scene box (keep its collider)
         self._meshes: set[str] = set()
         self._textures: set[str] = set()
         tex = self.fx_root / "tex"
         # real CC0 surface textures when built (arms/sim/tools/mujoco_fixtures.py), else the flat fallbacks above
         for surface, repeat, extra in (
-            ("floor", "1.0 1.0", 'specular="0.3" shininess="0.5" reflectance="0.04"'),
+            ("floor", "1.0 1.0", 'specular="0.35" shininess="0.6"'),  # no reflectance: it re-renders the scene
             ("wall", "0.5 0.5", 'specular="0.05"'),
             ("ceiling", "1.0 1.0", 'specular="0.02"'),
             ("metal", "2 2", 'specular="0.6" shininess="0.7"'),
@@ -133,11 +160,21 @@ class Dressing:
             )
         return True
 
-    def _sign(self, text: str, fg, bg, c, size, face: tuple[int, int]) -> None:
-        """A flat sign whose texture faces ``face`` (unit axis in the floor plane)."""
+    def _sign(self, text: str, fg, bg, c, size, face: tuple[int, int], hang_to: float | None = None) -> None:
+        """A flat sign whose texture faces ``face`` (unit axis in the floor plane); ``hang_to``: ceiling z for rods."""
         self._signs += 1
         name = f"d.sign{self._signs}"
-        png = _sign_png(text, fg, bg, f"{os.getpid()}_{self._signs}")
+        png = _sign_png(text, fg, bg, f"{os.getpid()}_{self._signs}", size[0] / max(size[2], 1e-3))
+        if hang_to is not None:
+            top = c[2] + size[2] / 2
+            along = (-face[1], face[0])  # the sign's width direction
+            for k in (-0.4, 0.4):
+                rx, ry = c[0] + along[0] * size[0] * k, c[1] + along[1] * size[0] * k
+                self.geoms.append(
+                    _box(
+                        (rx, ry, (top + hang_to) / 2), (0.008, 0.008, max(0.01, hang_to - top)), rgba="0.55 0.56 0.58 1"
+                    )
+                )
         self.assets.append(f'<texture name="{name}" type="2d" file="{png}"/>')
         self.assets.append(f'<material name="{name}" texture="{name}" emission="0.35"/>')
         # a thin box whose +y local face carries the texture: yaw it so +y points along `face`
@@ -220,15 +257,13 @@ class Dressing:
                 self.geoms.append(
                     _box(P(0, edge - sgn * 0.002, z - 0.015), S(length, 0.004, 0.022), rgba="0.98 0.82 0.20 1")
                 )
-            if fx.label:
+            text = _side_label(fx.label, fronts.index((fu, fv)))
+            if text:
                 face = (0, int(sgn)) if along_x else (int(sgn), 0)
+                sw, sh = min(length * 0.9, 2.6), 0.24
+                # header sign standing flush on the top board, at the pick face (like a gondola header)
                 self._sign(
-                    fx.label,
-                    (255, 255, 255),
-                    (32, 105, 70),
-                    P(0, edge - sgn * 0.02, h + 0.16),
-                    S(min(length, 3.0), 0.02, 0.26) if along_x else (min(length, 3.0), 0.02, 0.26),
-                    face,
+                    text, (255, 255, 255), (32, 105, 70), P(0, edge - sgn * 0.02, h + sh / 2), (sw, 0.02, sh), face
                 )
 
     def _cooler(self, fx: Fixture, off) -> None:
@@ -270,8 +305,8 @@ class Dressing:
             label,
             (255, 255, 255),
             bg,
-            P(0, front - sgn * 0.01, h + 0.15),
-            S(min(length - 0.2, 4.0), 0.02, 0.24) if along_x else (min(length - 0.2, 4.0), 0.02, 0.24),
+            P(0, front + sgn * 0.012, h + 0.15),  # on the canopy's front face, not inside it
+            (min(length - 0.2, 4.0), 0.02, 0.22),
             face,
         )
 
@@ -280,14 +315,16 @@ class Dressing:
         r, along_x, length, depth, cx, cy, fronts = self._frame(fx)
         h = fx.height_m
         if self._model("checkout", (cx + ox, cy + oy, oz), (length, depth, h), 0.0 if along_x else math.pi / 2):
+            self.replaced_fixtures.add(fx.fixture_id)
             face = fronts[0]
             self._sign(
-                "Checkout",
+                fx.label or "Checkout",
                 (255, 255, 255),
                 (200, 40, 50),
-                (cx + ox, cy + oy, h + 0.9 + oz),
-                (1.2, 0.02, 0.25),
+                (cx + ox, cy + oy, CEILING_HEIGHT_M - 0.75 + oz),
+                (1.4, 0.02, 0.3),
                 (face[0] or 0, face[1] or -1),
+                hang_to=CEILING_HEIGHT_M + oz,
             )
             return
 

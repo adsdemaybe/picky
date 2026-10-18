@@ -131,12 +131,17 @@ class ModelLibrary:
         if not e or not self.has_model(sku):
             return None
         bottom = -unit_size[2] / 2
+        unit_size = tuple(float(v) for v in unit_size)
         cache_key = (sku, unit_size)
         if e.get("render") == "asset" and key == "" and cache_key in self._plans:
             return self._plans[cache_key]
         geoms: list = []
         if e["render"] == "asset":
             dims = tuple(e.get("target_dims_m") or unit_size)
+            # fit uniformly inside the unit's box (its collider and slot spacing): no overlap with neighbours, no
+            # float above the shelf, proportions kept
+            k = min(1.0, *(u / max(t, 1e-4) for u, t in zip(unit_size, dims, strict=True)))
+            dims = (dims[0] * k, dims[1] * k, dims[2] * k)
             yaw = math.radians(float((e.get("facing") or {}).get("yaw_offset_deg") or 0.0))
             geoms = self._mesh_geoms(sku, e["asset_id"], dims, yaw, (0.0, 0.0, bottom))
             self._plans[cache_key] = geoms or None

@@ -15,6 +15,7 @@ offscreen with ``mujoco.Renderer`` (CGL on macOS, EGL / OSMesa on Linux via ``MU
 
 import io
 import math
+import re
 import threading
 import time
 from typing import Any
@@ -116,6 +117,14 @@ def _geom_xml(
     return f'<geom {attrs}{where} rgba="{_rgba(prim.color)}" contype="0" conaffinity="0"{extra}/>'
 
 
+STORE_GROUPS = (4, 5)  # geom groups for the first two stores (0-2 robots / arm visuals, 3 ceilings + colliders)
+
+
+def _in_group(xml: str, group: int) -> str:
+    """Put every <geom> in ``xml`` that has no group yet into ``group``."""
+    return re.sub(r"<geom (?![^>]*\bgroup=)", f'<geom group="{group}" ', xml)
+
+
 class MujocoBackend(SketchBackend):
     """SketchBackend bookkeeping (stores, rovers, instance poses) + a MuJoCo model built from it."""
 
@@ -183,12 +192,10 @@ class MujocoBackend(SketchBackend):
         instance_keys: list[tuple[str, str]] = []
         rover_parts: dict[str, int] = {}
         dressing = mujoco_dressing.Dressing()
+        self._store_group = {sid: STORE_GROUPS[i] for i, sid in enumerate(self.stores) if i < len(STORE_GROUPS)}
         for sid, spec in self.stores.items():
             ox, oy, oz = self._offset(sid)
-            for p in self._static_prims(spec):
-                c = p.center
-                mat = dressing.material_for_role(p.role)
-                static.append(self._static_geom(p, (c[0] + ox, c[1] + oy, c[2] + oz), mat))
+            n_static, n_dress = len(static), len(dressing.geoms)
             try:
                 from arms.sim.scene_spec import fixture_style
                 from utils.data import load_planogram
@@ -198,6 +205,20 @@ class MujocoBackend(SketchBackend):
                 dressing.add_store(plan, (ox, oy, oz), tables)
             except Exception as exc:  # noqa: BLE001 - dressing is cosmetic; the bare fixtures still render
                 log.warning("store %s: no fixture dressing (%s)", sid, exc)
+            for p in self._static_prims(spec):
+                c = p.center
+                mat = dressing.material_for_role(p.role)
+                g = self._static_geom(p, (c[0] + ox, c[1] + oy, c[2] + oz), mat)
+                if p.fixture_id in dressing.replaced_fixtures and p.role == "base":
+                    # a real model draws this fixture: keep the box as an invisible collider only
+                    g = re.sub(r' rgba="[^"]*"', "", g).replace("<geom ", '<geom rgba="0 0 0 0" group="3" ', 1)
+                    g = re.sub(r' material="[^"]*"', "", g)
+                static.append(g)
+            # this store's geoms go in its own group: a camera draws only its store (see render)
+            grp = self._store_group.get(sid)
+            if grp is not None:
+                static[n_static:] = [_in_group(g, grp) for g in static[n_static:]]
+                dressing.geoms[n_dress:] = [_in_group(g, grp) for g in dressing.geoms[n_dress:]]
         static.append(dressing.geoms_xml())
         for key, prim in self.instance_prims.items():
             instance_keys.append(key)
@@ -206,6 +227,8 @@ class MujocoBackend(SketchBackend):
                 inner = "".join(mujoco_models.geom_xml(g, _quat) for g in plan)
             else:
                 inner = _geom_xml(prim)
+            if key[0] in self._store_group:
+                inner = _in_group(inner, self._store_group[key[0]])
             bodies.append(self._instance_body(key, prim, inner))
         for rid, rover in self.rovers.items():
             rover_parts[rid] = len(rover.prims)
@@ -285,6 +308,8 @@ class MujocoBackend(SketchBackend):
         b = spec.bounds
         cam.lookat[:] = (ox + b.x + b.w / 2, oy + b.y + b.h / 2, 0.8)
         cam.distance, cam.elevation, cam.azimuth = 1.1 * max(b.w, b.h), -55.0, 60.0
+        for grp in STORE_GROUPS:
+            self._viewer.opt.geomgroup[grp] = 1  # the window shows every store (ceilings stay hidden)
 
     def _sync_viewer(self) -> None:
         v = self._viewer
@@ -359,7 +384,10 @@ class MujocoBackend(SketchBackend):
             self._model.cam_fovy[self._cam_id] = math.degrees(2 * math.atan(math.tan(cam.hfov / 2) * h / w))
             self._forward_for_render()
             renderer = self._renderer(w, h)
-            renderer.update_scene(d, camera=self._cam_id, scene_option=self._scene_option)
+            opt = self._scene_option
+            for sid, grp in getattr(self, "_store_group", {}).items():
+                opt.geomgroup[grp] = 1 if sid == store_id else 0
+            renderer.update_scene(d, camera=self._cam_id, scene_option=opt)
             pixels = renderer.render()
             self._sync_viewer()
         from PIL import Image
