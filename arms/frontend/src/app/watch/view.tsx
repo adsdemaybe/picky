@@ -15,6 +15,7 @@ import { LottieSlot } from "@/components/media";
 import { Panel, ProductTile } from "@/components/picky";
 import { CameraInset, CameraPanel, directorRungs, overheadRungs, perceivedRungs, useCeilingCameras, useSimNames, wristRungs, type Rung } from "@/components/StageCamera";
 import { VerifyStack } from "@/components/TripReview";
+import { TripWhisperPanel } from "@/components/Whisper";
 import { MapLegend, StoreMap } from "@/components/StoreMap";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -135,6 +136,7 @@ export default function WatchPage() {
           />
           <HandoffPanel />
           <ApprovalPanel />
+          <TripWhisperPanel />
           <VerifyStack />
           <Basket />
           <EventLog />

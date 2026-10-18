@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState, useTransition } from "react";
 import { GroceryTrips } from "@/components/GroceryTrips";
 import { TripRoutePreview } from "@/components/TripRoutePreview";
+import { PlanningWhisper } from "@/components/Whisper";
 import { groupFoodLines } from "@/lib/grocery-trips";
 import { toast } from "sonner";
 import { StoreThumb } from "@/components/art";
@@ -46,6 +47,8 @@ function OrderBuilder() {
   const [mode, setMode] = useState<Mode>("with_me");
   const [thinking, startTransition] = useTransition();
   const [sending, setSending] = useState(false);
+  // accepted Cart Whisperer cards edited the list: the gateway order then carries the exact SKUs, not the text
+  const [whisperEdited, setWhisperEdited] = useState(false);
   const placeOrder = useTrip((s) => s.placeOrder);
   const router = useRouter();
   const gatewayLive = useGateway((s) => s.status === "live");
@@ -66,7 +69,8 @@ function OrderBuilder() {
     }
     setSending(true);
     const text = draft.intent + (add && productBySku[add] ? `, plus 1 ${productBySku[add].name}` : "");
-    const r = await startGatewayOrder(useTrip, { text, storeId, mode, title: draft.title });
+    const items = whisperEdited ? draft.lines.map((l) => ({ sku: l.sku, qty: l.qty, note: l.line_id.startsWith("ln_cw_") ? l.note : undefined })) : undefined;
+    const r = await startGatewayOrder(useTrip, { text, storeId, mode, title: draft.title, items });
     setSending(false);
     if (r.kind === "following") {
       toast(r.reply);
@@ -83,6 +87,7 @@ function OrderBuilder() {
 
   const submit = (t: string, sid: StoreId = storeId) => {
     setText(t);
+    setWhisperEdited(false);
     startTransition(() => {
       const d = expandIntent(t, sid);
       setDraft(d);
@@ -256,28 +261,37 @@ function OrderBuilder() {
             </div>
           </section>
 
-          {draft.advice.length > 0 && (
-            <section>
-              <SectionTitle>Picky&apos;s advice</SectionTitle>
-              <div className="grid gap-3 md:grid-cols-2">
-                {draft.advice.map((a) => {
-                  const skip = a.kind === "skip";
-                  return (
-                    <div key={a.sku + a.kind} className={cn("rounded-2xl p-4", skip ? "bg-tomato-wash" : "bg-amber-wash")}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={cn("flex items-center gap-1.5 font-semibold", skip ? "text-tomato" : "text-amber-ink")}>
-                          {skip ? <Ban className="size-4" aria-hidden /> : <Clock className="size-4" aria-hidden />}
-                          {skip ? "Skip it" : "Worth waiting"}
-                        </span>
-                        {a.save_cents ? <span className="rounded-full bg-white/70 px-2.5 py-0.5 text-[12.5px] font-semibold">Saves {fmt(a.save_cents)}</span> : null}
-                      </div>
-                      <p className="mt-2 text-[14.5px] leading-snug">{a.text}</p>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
+          <PlanningWhisper
+            draft={draft}
+            onDraft={(fn) => {
+              setDraft(fn);
+              setWhisperEdited(true);
+            }}
+            fallback={
+              draft.advice.length > 0 && (
+                <section>
+                  <SectionTitle>Picky&apos;s advice</SectionTitle>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {draft.advice.map((a) => {
+                      const skip = a.kind === "skip";
+                      return (
+                        <div key={a.sku + a.kind} className={cn("rounded-2xl p-4", skip ? "bg-tomato-wash" : "bg-amber-wash")}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className={cn("flex items-center gap-1.5 font-semibold", skip ? "text-tomato" : "text-amber-ink")}>
+                              {skip ? <Ban className="size-4" aria-hidden /> : <Clock className="size-4" aria-hidden />}
+                              {skip ? "Skip it" : "Worth waiting"}
+                            </span>
+                            {a.save_cents ? <span className="rounded-full bg-white/70 px-2.5 py-0.5 text-[12.5px] font-semibold">Saves {fmt(a.save_cents)}</span> : null}
+                          </div>
+                          <p className="mt-2 text-[14.5px] leading-snug">{a.text}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )
+            }
+          />
 
           <section>
             <SectionTitle>Worth a stop on the way?</SectionTitle>
@@ -410,10 +424,10 @@ function OrderBuilder() {
             <Button
               size="lg"
               className="h-14 text-[16px]"
-              disabled={verdict.verdict === "deny" || thinking || sending}
+              disabled={verdict.verdict === "deny" || thinking || sending || draft.lines.length === 0}
               onClick={send}
             >
-              <Bot className="size-5" /> {sending ? "Sending…" : `Send the robot, about ${fmt(totals.total)}`}
+              <Bot className="size-5" /> {sending ? "Sending…" : draft.lines.length === 0 ? "Nothing left to buy" : `Send the robot, about ${fmt(totals.total)}`}
             </Button>
             <p className="text-center text-[13px] text-muted-foreground">Nothing is charged until you approve checkout.</p>
           </div>
