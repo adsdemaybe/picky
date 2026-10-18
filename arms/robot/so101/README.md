@@ -102,7 +102,7 @@ python -m arms.robot.so101.pick_place "pick up the oat milk and put it in the ba
 ..\.venv-robot\Scripts\python -m arms.robot.so101.pick_routine "pick up the gum and put it on the plate" --dry
 ..\.venv-robot\Scripts\python -m arms.robot.so101.pick_routine "pick up the gum and put it on the plate"
 :: human-in-the-loop RL: Enter = run, type s / f + Enter (any time) = success / failure, q = quit
-armsobot\so101	rain.bat "pick up the gum and put it on the plate"
+arms\robot\so101\train.bat "pick up the gum and put it on the plate"
 ```
 
 `train_loop` steers the frozen pick routine (DSRL-style: learn the *inputs* of a base policy, not the policy): a
