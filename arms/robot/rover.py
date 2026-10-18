@@ -47,6 +47,8 @@ BASE_DURATIONS_S: dict[str, float] = {
     "pick": 2.2,  # + lift travel
     "place_in_basket": 1.5,  # + lift travel back to stow
     "unload_basket": 1.0,  # + per unit
+    "pick_from_basket": 2.0,  # 0.2.4 checkout unload: + lift travel down to the basket
+    "place_on_counter": 2.0,  # + lift travel up to the counter
 }
 UNLOAD_PER_UNIT_S = 0.25
 

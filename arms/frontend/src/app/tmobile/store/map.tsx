@@ -8,12 +8,12 @@ import { cn } from "@/lib/utils";
 
 const LABEL: Record<string, string> = {
   "ACC-WALL": "Accessories",
-  "TABLE-A": "Apple",
-  "TABLE-B": "Google · Moto",
+  "TABLE-A": "Apple · value",
+  "TABLE-B": "Samsung · Google",
   "TABLE-C": "Samsung",
   "AUDIO-WALL": "Audio",
   "HOME-INET": "Home Internet",
-  "WEAR-CASE": "Watches",
+  "WEAR-CASE": "Watches · tablets · internet",
   COUNTER: "Counter",
   "BACK-STOCK": "Back room",
 };

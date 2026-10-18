@@ -13,9 +13,9 @@ const RUBRIC = [
     weight: 30,
     proof: [
       `At most ${MAX_CARDS} cards per phase, and zero is a valid answer ("Nothing worth adding today")`,
-      "Explicit SKIP (you own a charger that works; that Pixel 7 case won't fit) and WAIT (Beats Flex $20 off Fri Oct 23; 4 payments left on the Pixel 7 and $200 off expected Nov 27)",
+      "Explicit SKIP (you own a charger that works; that Pixel 7 case won't fit) and WAIT (Galaxy Buds4 $40 off Fri Oct 23; 4 payments left on the Pixel 7 and $200 off expected Nov 27)",
       "Every card shows the dollars saved, avoided (estimate) or added, and one tap accepts or declines it",
-      "In store, Magenta does the floor associate's job: walks you to the right wall, brings a sealed phone from the back room, and pages a person for account work",
+      "In store, Magenta does the floor associate's job: walks you to the right wall, brings your phone over from the table, and pages a person for account work",
       "Every advisor handles the no-good-recommendation case: keep your phone (Timekeeper, Matchmaker), you're already on the best plan (Household Mix), leave them alone (Next Best Moment)",
     ],
   },
@@ -26,7 +26,7 @@ const RUBRIC = [
       `Commerce: cart, ${tmobileProducts.length}-product catalog with real prices, shelf deals, stock, compatibility (fits: tags), promo calendar, real line offers`,
       "Customer: the phone she owns (34 months, 4 installments left), items she owns + purchase dates, lines on the account, budget, tech mandate, past declines",
       "Account & household: per-line usage and hotspot, current plan, tenure, support contacts, bill change, promo credits ending, phone health (battery, storage, security updates), trade-in values",
-      "Physical: the slot each item sits in, demo unit vs. sealed back-room stock, where the shopper is standing, detour from the planned route (+0 m when it's on the same wall), what the robot just picked, checkout leg",
+      "Physical: the slot each item sits in (the same planogram the Isaac Sim store is built from), where the shopper is standing, detour from the planned route (+0 m when it's on the same wall), what the robot just picked, checkout leg",
     ],
   },
   {
@@ -62,21 +62,21 @@ const EXAMPLES = [
 
 const CHECK = [
   "Leads with one direction, Cart Whisperer, and also ships the other four with worked examples (Advisors)",
-  "Shows a phone-shopping store: T-Mobile, University Way NE (demo layout, 91 real products)",
+  `Shows a phone-shopping store: T-Mobile, University Way NE (demo layout, ${tmobileProducts.length} real products, the same floor as the Isaac Sim store)`,
   "Shows SKIP and WAIT moments live, on the shop page and during the robot trip",
   "Says it plainly: synthetic shoppers, households, usage, support histories, plan prices and promo calendar",
   "In person too: a talking robot associate on the floor (In store), same brain, data and basket as the website",
 ];
 
 const SCRIPT = [
-  ["Shop → \"New Pixel 9 setup\"", "Case $29.99 + ZAGG glass $39.99 (20% off with a Pixel 9 case). Cards: SKIP a new charger (she owns a USB-C 20W from March), WAIT on the phone itself (4 payments left, $200 off expected Nov 27)."],
-  ["Add the UAG rugged case", "Quantity card: two cases for one Pixel 9? Keep the $29.99 Case-Mate, drop the $49.95 UAG. One tap: the cart and the metrics update."],
+  ["Shop → \"New Pixel 9 setup\"", "GoTo clear case $24.99 + GoTo glass $31.99 (20% off with a Pixel 9 case). Cards: SKIP a new charger (she owns a Samsung 25W from March), WAIT on the phone itself (4 payments left, $200 off expected Nov 27)."],
+  ["Add the GoTo rugged case", "Quantity card: two cases for one Pixel 9? Keep the $24.99 clear case, drop the $39.99 rugged one. One tap: the cart and the metrics update."],
   ["Add the $9.99 Pixel 7 clearance case", "SKIP: it's made for the Pixel 7, it won't fit the Pixel 9. Clearance isn't a deal if it doesn't fit."],
-  ["Add a Belkin power bank", "Over budget: \"Drop the power bank? It puts you $9.96 over $100.\""],
-  ["\"Running earbuds\"", "Beats Flex $69.99 + WAIT: $49.99 from Fri Oct 23. Accept → \"I'll text you\". Then zero cards: Cart Whisperer stays quiet."],
+  ["Add a Belkin power bank and AirPods", "Over budget: Cart Whisperer suggests the add that hurts least to drop, with the exact overage."],
+  ["\"Running earbuds\"", "Galaxy Buds4 $179.99 + WAIT: $139.99 in the weekend sale from Fri Oct 23. Accept → \"I'll text you\". Then zero cards: Cart Whisperer stays quiet."],
   ["Shop with robot", "Magenta drives the store; tap \"grab the clearance case too\" → live SKIP. At checkout, the Before-you-pay pass and the metrics: accepted, saved, avoided."],
   ["In store → \"Tap to talk to me\"", "Ask \"where are the AirPods?\" out loud. Magenta answers and walks you to the audio wall on the live floor map."],
-  ["Check in, then \"I'll take the Pixel 9\"", "She brings a sealed box from the back, then is honest: 4 payments left and $200 off expected Nov 27, so wait. \"Do I need a charger?\" Skip it, you own one."],
+  ["Check in, then \"I'll take the Pixel 9\"", "She brings it over from the table, then is honest: 4 payments left and $200 off expected Nov 27, so wait. \"Do I need a charger?\" Skip it, you own one."],
   ["\"Can I port my number?\" → \"Check out\"", "Account work needs a person, so she pages a T-Mobile expert. Checkout: pay with the app, she walks you to the counter."],
 ];
 
@@ -115,7 +115,7 @@ export default function TmoTrack() {
       </section>
 
       <section>
-        <SectionTitle>One agent, five skills: open each skill's engine and its worked examples</SectionTitle>
+        <SectionTitle>One agent, five skills: open each skill&apos;s engine and its worked examples</SectionTitle>
         <div className="grid gap-2 md:grid-cols-5">
           {DIRECTIONS.map((d, i) => (
             <Link key={d.href} href={d.href} className="rounded-xl bg-card p-3 ring-1 ring-foreground/[0.07] hover:ring-magenta">

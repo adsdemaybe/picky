@@ -41,12 +41,13 @@ Which backend drives a store (decided by the robot arm, PER STORE, never per rob
 
 Command rules
 - ``robot_id`` semantics are per command (there is NO default robot on the wire):
-  navigate / scan / pick / place_in_basket / unload_basket: REQUIRED (missing or unknown -> ok=False,
+  navigate / scan / pick / place_in_basket / unload_basket / arm_joints: REQUIRED (missing or unknown -> ok=False,
   error_code='unknown_robot'). capture: ``camera_id`` (any camera incl. ceiling) or ``robot_id`` + ``camera``
   (neither -> unknown_robot). stop: None = EVERY robot (emergency stop). reset: None = (re)build the whole
   ``store_id`` scene (store_id required). list_instances / set_slot_stock: store-level (``store_id`` required, or the
   robot's store). set_streams: global (robot_id ignored).
-- One MOTION command (navigate / scan / pick / place_in_basket / unload_basket / reset) runs at a time PER ROBOT; a
+- One MOTION command (navigate / scan / pick / place_in_basket / unload_basket / reset / arm_joints) runs at a time
+  PER ROBOT; a
   second one for the same robot while busy resolves immediately with ``ok=False, error_code="busy"``. Different robots
   move concurrently. ``capture``, ``list_instances``, ``set_streams``, ``set_slot_stock`` and ``stop`` are always
   allowed. ``stop`` makes that robot's in-flight motion resolve ``ok=False, error_code="cancelled"``.
@@ -61,6 +62,20 @@ Command rules
   slot.approach_pose, slot.item_position)``: it checks the SLOT, never the unit, so any instance of a reachable slot
   (incl. back rows) can be grasped; unreachable -> ``grasp_failed``. ``place_in_basket`` reparents the item into the
   basket at ``BASKET_OFFSET_LOCAL``; ``unload_basket`` (at checkout) removes every basket instance from the scene.
+- ``arm_joints`` (0.2.2, worker capability ``ARM_JOINTS_CAPABILITY``): joint-level SO-101 control for learned
+  policies; the robot arm runs the policy loop, one command per action chunk, and gets the joint state + the two
+  policy-camera frames back in the same result (``ArmJointsCmd`` docstring). Grasps there are the "sticky grasp"
+  physics substitute (attach on close within ~3 cm of the jaw center), reported in ``ArmJointState.events``.
+  ``arm_ik`` (0.2.2, capability ``ARM_IK_CAPABILITY``, not a motion: always allowed) solves TCP targets on the
+  worker's SO-101 model into joint rows (Cartesian policies), never moves.
+- ``pick_from_basket`` / ``place_on_counter`` (0.2.4, worker capability ``BASKET_UNLOAD_CAPABILITY``): the checkout
+  unload by the arm. ``pick_from_basket`` lowers the lift, reaches back into the robot's basket with the SO-101 and
+  attaches one basket unit (``instance_id``, else the first unit of ``sku``; ``no_instance`` when absent), then lifts
+  it out (``RobotState.holding``). ``place_on_counter`` carries the held unit to ``position`` (store frame, the unit's
+  base center on the counter top, within reach: else ``grasp_failed``) and releases it there: the unit stays in the
+  scene with ``ItemInstance.on_counter=True`` (``in_basket=False``) until the handoff's ``unload_basket`` (staff bag
+  everything on the counter) or a robot reset. Older workers answer ``internal`` (unknown command); the robot arm
+  never sends them to a worker whose hello lacks the capability.
 - ``set_slot_stock`` makes a slot hold exactly ``qty`` units (lots in planogram order): units are spawned / removed
   deterministically (``instance_id(slot_id, n)``, removing the highest n = back rows first) so it matches catalog
   restocks and write-offs (``RobotService.sync_stock``).
@@ -80,11 +95,12 @@ is a pan-tilt head aimed at the slot for scans). Camera ids and mounts: contract
 import copy
 import hashlib
 import json
+import math
 from collections.abc import Awaitable, Callable
 from enum import StrEnum
 from typing import Annotated, Any, Literal, Protocol, runtime_checkable
 
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError, field_validator
 
 from contracts.cameras import CameraInfo, CameraMount
 from contracts.catalog import Lot, Product
@@ -109,6 +125,7 @@ from contracts.common import (
     utcnow,
 )
 from contracts.planogram import Planogram, RobotSpec, StoreCameraSpec
+from contracts.skill_server import SO101_JOINT_NAMES
 
 SimErrorCode = Literal[
     "unknown_slot",
@@ -130,7 +147,13 @@ that robot) · not_ready (no scene) · disconnected (Isaac lost: raised once, th
 from its last state; retryable) · unknown_robot (robot / camera id missing or not hosted) · battery_low (refuses motion
 below BATTERY_MOTION_MIN_PCT: send it to its dock) · internal (incl. a command the worker could not parse)."""
 
-SIM_DEFAULT_TIMEOUTS_S: dict[str, float] = {"reset": 120.0, "navigate": 90.0}
+SIM_DEFAULT_TIMEOUTS_S: dict[str, float] = {
+    "reset": 120.0,
+    "navigate": 90.0,
+    "arm_joints": 30.0,
+    "pick_from_basket": 30.0,
+    "place_on_counter": 30.0,
+}
 """Per-command default for ``SimLink.send(timeout_s=None)``; any other command: ``SIM_DEFAULT_TIMEOUT_S``."""
 SIM_DEFAULT_TIMEOUT_S = 15.0
 
@@ -176,6 +199,9 @@ class ItemInstance(WireModel):
     lot_id: LotId | None = Field(None, description="Planogram Lot this unit belongs to.")
     in_basket: bool = False
     bbox: BBox | None = Field(None, description="Pixel box in the frame this instance rides with (None otherwise).")
+    on_counter: bool = Field(
+        False, description="0.2.4: unloaded onto the checkout counter by the arm (out of the basket, not on a shelf)."
+    )
 
 
 # ---- shared ground truth: the robot fake (2D) and the Isaac scene MUST agree on these, because the gateway falls back
@@ -302,6 +328,27 @@ class PlaceInBasketCmd(_Cmd):
     instance_id: InstanceId | None = Field(None, description="None = whatever the gripper holds.")
 
 
+BASKET_UNLOAD_CAPABILITY = "basket_unload"
+"""``SimHello.capabilities`` entry of a worker that implements ``PickFromBasketCmd`` + ``PlaceOnCounterCmd`` (0.2.4)."""
+
+
+class PickFromBasketCmd(_Cmd):
+    """Motion (0.2.4, capability ``basket_unload``): the arm reaches into the robot's basket and lifts one unit out."""
+
+    type: Literal["pick_from_basket"] = "pick_from_basket"
+    instance_id: InstanceId | None = Field(None, description="The unit; None = the first basket unit of ``sku``.")
+    sku: Sku | None = None
+
+
+class PlaceOnCounterCmd(_Cmd):
+    """Motion (0.2.4, capability ``basket_unload``): put the held unit on the checkout counter at ``position``."""
+
+    type: Literal["place_on_counter"] = "place_on_counter"
+    position: Point3 = Field(description="Base center of the unit on the counter top (store frame).")
+    yaw: float = 0.0
+    spot: int | None = Field(None, description="planogram.CounterSpot.index (logs / overlays).")
+
+
 class CaptureCmd(_Cmd):
     """Capture one frame: ``camera_id`` (any camera, incl. store ceiling cameras) wins over robot_id + camera."""
 
@@ -378,6 +425,118 @@ class SetSlotStockCmd(_Cmd):
     lots: list[Lot] = Field(default_factory=list)
 
 
+# ---- joint-level SO-101 control for learned policies (contracts 0.2.2; worker capability 'arm_joints') -------------
+ARM_JOINTS_MAX_STEPS = 50
+"""Most joint-target rows one ``ArmJointsCmd`` carries (one action chunk; SmolVLA = 50, Perceptron = 20 / 30)."""
+ARM_JOINTS_HZ = 30.0
+"""Default rate the worker applies the rows at (LeRobot SO-100/101 datasets: 30 fps)."""
+ARM_JOINTS_CAPABILITY = "arm_joints"
+"""``SimHello.capabilities`` entry of a worker that implements ``ArmJointsCmd`` (older workers answer 'internal')."""
+PolicyCameraName = Literal["side", "wrist"]
+POLICY_CAMERAS: tuple[PolicyCameraName, ...] = ("side", "wrist")
+"""The two policy cameras (LeRobot ``observation.images.side`` / ``observation.images.wrist``, 640x480 RGB). They are
+NOT hosted cameras (no camera id, never streamed): the worker renders them only for ``ArmJointsCmd`` results."""
+
+
+class ArmJointsCmd(_Cmd):
+    """Motion command (0.2.2): drive the rover's SO-101 JOINT BY JOINT, for learned policies (T1 / T2).
+
+    The robot arm runs the policy loop (observation -> action chunk) and sends one command per chunk; the worker only
+    executes joints and renders the policy cameras, so it stays policy-agnostic and no policy secrets live on it:
+
+        ArmJointsCmd(targets=[], lift_height_m=h)         -> enter joint mode at h, first observation
+        ArmJointsCmd(targets=chunk[:k])  (k <= 50 rows)    -> rows applied at ``hz``, observation after the last row
+        ArmJointsCmd(targets=[], end=True, capture=[])     -> leave joint mode (arm back to the scripted stow pose)
+
+    Joint mode starts from the arm's current scripted pose (state = those joint angles) and the lift then stays at
+    ``lift_height_m`` (pretrained SO-101 policies drive the 6 arm joints only, never the lift or the base). Each row is
+    6 USD joint DEGREES in ``SO101_JOINT_NAMES`` order (clamped to the joint limits). Grasping is a physics
+    substitute, the honest "sticky grasp": when the gripper closes past its threshold with a unit within ~3 cm of the
+    jaw center, the worker attaches that unit (``ArmJointState.events`` 'sticky_grasp:<id>', ``RobotState.holding``);
+    opening releases it into the basket when the jaws are over it, else back onto its shelf spot / the floor. Any
+    other motion command (navigate / scan / pick / place / unload / reset) leaves joint mode first; ``stop`` cancels
+    the rows still pending (the arm holds its pose). Result: ``CommandResult.arm`` + ``policy_frames`` (RAW frames:
+    the backend blurs before a frame leaves it) + ``state``; ``instance_id`` = the attached unit, if any."""
+
+    type: Literal["arm_joints"] = "arm_joints"
+    targets: list[list[float]] = Field(
+        default_factory=list,
+        max_length=ARM_JOINTS_MAX_STEPS,
+        description="Joint targets, one row of 6 USD degrees per step (SO101_JOINT_NAMES order). [] = observe only.",
+    )
+    hz: float = Field(ARM_JOINTS_HZ, gt=0, le=240, description="Rows per second (kinematic: no dynamics).")
+    lift_height_m: float | None = Field(
+        None, description="Move the lift here first (SO-101 shoulder height, LIFT_MIN_M..LIFT_MAX_M); None = keep."
+    )
+    capture: list[PolicyCameraName] = Field(
+        default_factory=lambda: list(POLICY_CAMERAS), description="Policy cameras rendered after the last row."
+    )
+    capture_each_step: bool = Field(False, description="Render ``capture`` after EVERY row (dataset recording).")
+    capture_every: int = Field(
+        0,
+        ge=0,
+        le=ARM_JOINTS_MAX_STEPS,
+        description="Also render ``capture`` after every n-th row while the rows play (the live picture feed while "
+        "the arm moves: 10 at 30 Hz = 3 frames/s); 0 = only after the last row. The last frame is always the "
+        "observation after the last row.",
+    )
+    end: bool = Field(False, description="After the rows: leave joint mode (the scripted rig takes the arm back).")
+    exec_id: str | None = Field(None, description="VLA exec id (logs only).")
+
+    @field_validator("targets")
+    @classmethod
+    def _six_finite(cls, rows: list[list[float]]) -> list[list[float]]:
+        for i, row in enumerate(rows):
+            if len(row) != len(SO101_JOINT_NAMES):
+                raise ValueError(f"targets[{i}] has {len(row)} values, expected {len(SO101_JOINT_NAMES)}")
+            if not all(math.isfinite(v) for v in row):
+                raise ValueError(f"targets[{i}] has a non-finite value")
+        return rows
+
+
+ARM_IK_CAPABILITY = "arm_ik"
+"""``SimHello.capabilities`` entry of a worker that implements ``ArmIkCmd`` (0.2.2)."""
+ARM_IK_MAX_TARGETS = 8
+IK_TOLERANCE_M = 0.015
+"""``IkSolution.ok``: the solved TCP is within this of the target."""
+
+
+class IkTarget(Model):
+    """One TCP target for ``ArmIkCmd``: the jaw center at ``point`` (STORE frame)."""
+
+    point: Point3
+    level: bool = Field(True, description="Keep the gripper level (side grasp, as the scripted rig and the demos).")
+    gripper_deg: float | None = Field(None, description="Gripper joint of the solution (None = the seed's).")
+    wrist_roll_deg: float | None = Field(None, description="Wrist roll of the solution (None = the seed's).")
+
+
+class IkSolution(Model):
+    q_deg: list[float] = Field(description="6 USD joint degrees (SO101_JOINT_NAMES order), clamped to the limits.")
+    error_m: float = Field(ge=0, description="Solved TCP to target distance.")
+    ok: bool = Field(description="error_m <= IK_TOLERANCE_M (else the closest reachable pose).")
+    tcp: Point3 | None = Field(None, description="Solved TCP, store frame.")
+
+
+class ArmIkCmd(_Cmd):
+    """NON-motion (0.2.2, capability ``ARM_IK_CAPABILITY``): inverse kinematics on the worker's SO-101 model (the
+    rover USD's joint frames), so policies that act in Cartesian space (e.g. a VLM pointing at pixels) turn targets
+    into the joint rows of an ``ArmJointsCmd``. Solves only, never moves. Targets are solved in order, each seeded
+    with the previous solution (``seed_deg`` / the current joints first, then a few fixed seeds); the lift is
+    ``lift_height_m`` (None = the current lift). Result: ``CommandResult.ik`` (one ``IkSolution`` per target)."""
+
+    type: Literal["arm_ik"] = "arm_ik"
+    targets: list[IkTarget] = Field(min_length=1, max_length=ARM_IK_MAX_TARGETS)
+    lift_height_m: float | None = None
+    seed_deg: list[float] | None = Field(None, description="6 USD degrees; None = the arm's current joints.")
+
+    @field_validator("seed_deg")
+    @classmethod
+    def _seed_six(cls, v: list[float] | None) -> list[float] | None:
+        if v is not None and (len(v) != len(SO101_JOINT_NAMES) or not all(math.isfinite(x) for x in v)):
+            raise ValueError(f"seed_deg needs {len(SO101_JOINT_NAMES)} finite values")
+        return v
+
+
 SimCommand = Annotated[
     NavigateCmd
     | ScanCmd
@@ -389,17 +548,70 @@ SimCommand = Annotated[
     | ResetCmd
     | StopCmd
     | SetStreamsCmd
-    | SetSlotStockCmd,
+    | SetSlotStockCmd
+    | ArmJointsCmd
+    | ArmIkCmd
+    | PickFromBasketCmd
+    | PlaceOnCounterCmd,
     Field(discriminator="type"),
 ]
 
-MOTION_COMMANDS: frozenset[str] = frozenset({"navigate", "scan", "pick", "place_in_basket", "unload_basket", "reset"})
+MOTION_COMMANDS: frozenset[str] = frozenset(
+    {
+        "navigate",
+        "scan",
+        "pick",
+        "place_in_basket",
+        "unload_basket",
+        "reset",
+        "arm_joints",
+        "pick_from_basket",
+        "place_on_counter",
+    }
+)
 """Command types that are mutually exclusive PER ROBOT (a second one while busy -> error_code='busy')."""
 
 
 # --------------------------------------------------------------------------------------------------------------------
 # Messages (sim -> gateway) + handshake
 # --------------------------------------------------------------------------------------------------------------------
+class PolicyFrame(Model):
+    """One policy-camera frame of an ``ArmJointsCmd`` result (RAW, like every sim frame: blur before it leaves the
+    backend). Not a hosted camera: no camera_id, no ground truth."""
+
+    camera: PolicyCameraName
+    step: int = Field(ge=0, description="Rows of this command applied before the render (0 = before the first).")
+    jpeg_b64: str = Field(description="Base64 JPEG bytes (no data: prefix).")
+    w: int = Field(ge=1)
+    h: int = Field(ge=1)
+    blurred: bool = False
+    camera_pose: CameraMount | None = Field(None, description="Pose + intrinsics used (frame='world' = store frame).")
+    roll: float = Field(
+        0.0,
+        description="Camera roll about its viewing axis (rad, > 0 turns the image's right edge up); with camera_pose "
+        "the exact pinhole for casting a pixel ray (the wrist camera rolls with the wrist).",
+    )
+    ts: Timestamp = Field(default_factory=utcnow)
+
+
+class ArmJointState(Model):
+    """Joint-level arm state after an ``ArmJointsCmd`` (0.2.2)."""
+
+    joint_names: list[str] = Field(default_factory=lambda: list(SO101_JOINT_NAMES))
+    q_deg: list[float] = Field(description="Current joint angles, USD degrees, SO101_JOINT_NAMES order.")
+    joint_mode: bool = Field(description="False after end=True (the scripted rig owns the arm again).")
+    lift_height_m: float
+    tcp: Point3 | None = Field(None, description="Jaw center in the STORE frame.")
+    gripper_closed: bool = False
+    attached: InstanceId | None = Field(None, description="Unit held by the sticky grasp (= RobotState.holding).")
+    steps_applied: int = Field(0, ge=0, description="Rows of this command applied (< len(targets) when stopped).")
+    events: list[str] = Field(
+        default_factory=list,
+        description="This command's grasp events: 'sticky_grasp:<id>' (physics substitute: the closing jaws attached "
+        "the unit), 'release_basket:<id>', 'put_back:<id>', 'drop:<id>', 'close_empty' (closed on air).",
+    )
+
+
 class CommandResult(WireModel):
     type: Literal["result"] = "result"
     cmd_id: CmdId
@@ -414,6 +626,11 @@ class CommandResult(WireModel):
         default_factory=list, description="list_instances / pick / unload_basket / set_slot_stock results."
     )
     instance_id: InstanceId | None = Field(None, description="pick/place: the instance handled.")
+    arm: ArmJointState | None = Field(None, description="arm_joints results (0.2.2): joint state + grasp events.")
+    policy_frames: list[PolicyFrame] = Field(
+        default_factory=list, description="arm_joints results (0.2.2): the requested policy-camera frames, in order."
+    )
+    ik: list[IkSolution] = Field(default_factory=list, description="arm_ik results (0.2.2): one per target.")
 
 
 class SimStoreInfo(WireModel):
@@ -507,6 +724,10 @@ GatewayToSim = Annotated[
     | StopCmd
     | SetStreamsCmd
     | SetSlotStockCmd
+    | ArmJointsCmd
+    | ArmIkCmd
+    | PickFromBasketCmd
+    | PlaceOnCounterCmd
     | SimWelcome,
     Field(discriminator="type"),
 ]

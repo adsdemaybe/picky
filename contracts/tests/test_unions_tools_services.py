@@ -83,6 +83,23 @@ EXPECTED_EVENT_TYPES = {
     "stock.alert",
     "agent.message",
     "error",
+    # planner -> VLA -> verifier loop (0.2.1)
+    "plan.created",
+    "plan.revised",
+    "step.started",
+    "vla.status",
+    "target.grounded",
+    "step.verified",
+    "step.failed",
+    "step.completed",
+    "vla.tier_changed",
+    "plan.completed",
+    "demo.fault",
+    "camera.overlay",
+    # judges' demo (0.2.4)
+    "checkout.unload",
+    "item.verification",
+    "payment.agent_step",
 }
 
 

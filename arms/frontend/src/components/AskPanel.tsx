@@ -1,12 +1,15 @@
 "use client";
 // Ask Picky: a chat you can open from anywhere (sheet) or full-page (/ask), plus the cards that render tool results.
-import { ArrowUp, Sparkles } from "lucide-react";
+import { ArrowUp, Mic, Square, Sparkles } from "lucide-react";
 import { motion } from "motion/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { useVoiceInput } from "@/lib/useVoiceInput";
+import { useTripGuide } from "@/lib/trip-guide";
+import { TripGuide } from "./TripGuide";
 import { useAsk, type Msg } from "@/lib/assistant/store";
 import type { Card } from "@/lib/assistant/tools";
 import { productBySku } from "@/lib/data";
@@ -18,6 +21,7 @@ import { Meter, ProductTile, VerdictChip } from "./picky";
 import { OffersTable, Sparkline } from "./PriceBits";
 
 export const SUGGESTIONS = [
+  "Let’s do a weekly restock",
   "Is coffee a good price right now?",
   "Where did my money go this month?",
   "How can I save on groceries?",
@@ -49,11 +53,14 @@ export function AskSheet() {
 export function Conversation({ wide }: { wide?: boolean }) {
   const { messages, busy, ask } = useAsk();
   const [text, setText] = useState("");
+  const phase = useTripGuide((state) => state.phase);
+  const voice = useVoiceInput(setText, (transcript) => { void ask(transcript); setText(""); });
+  const recording = voice.status !== "idle";
   const end = useRef<HTMLDivElement>(null);
   useEffect(() => {
     // scrollIntoView returns a Promise in recent Chrome; never return it from the effect
     void end.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages.length, busy]);
+  }, [messages.length, busy, phase]);
   return (
     <>
       <div className="flex-1 overflow-y-auto px-5 py-5">
@@ -100,12 +107,14 @@ export function Conversation({ wide }: { wide?: boolean }) {
             ))}
           </div>
         )}
+        <TripGuide />
         <div ref={end} />
       </div>
       <form
         className="border-t border-border p-3"
         onSubmit={(e) => {
           e.preventDefault();
+          if (recording) return;
           ask(text);
           setText("");
         }}
@@ -118,10 +127,12 @@ export function Conversation({ wide }: { wide?: boolean }) {
             className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-muted-foreground"
             aria-label="Message Picky"
           />
-          <Button type="submit" size="icon" className="bg-sky hover:bg-sky/90" disabled={busy || !text.trim()} aria-label="Send">
+          {voice.supported && <Button type="button" variant="ghost" size="icon" disabled={busy || voice.status === "stopping"} aria-label={recording ? "Stop voice message" : "Speak to Picky"} onClick={() => recording ? voice.stop() : voice.start("")}>{recording ? <Square className="size-4 text-tomato" /> : <Mic className="size-4" />}</Button>}
+          <Button type="submit" size="icon" className="bg-sky hover:bg-sky/90" disabled={busy || recording || !text.trim()} aria-label="Send">
             <ArrowUp className="size-5" />
           </Button>
         </div>
+        {voice.error && <p role="alert" className="mt-2 px-2 text-[12px] text-tomato">{voice.error}</p>}
       </form>
     </>
   );

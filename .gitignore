@@ -16,6 +16,10 @@ build/
 *.pem
 *.p12
 *.key
+# Team key vault (utils.secrets): only the age-encrypted bundle + public recipients are committed
+secrets/*
+!secrets/*.age
+!secrets/recipients.txt
 
 # Node
 node_modules/
@@ -31,6 +35,11 @@ out/
 generated/
 outputs/
 recordings/
+runs/steer_policy.json
+# SO-101 run videos are 7-14 MB each: keep them out of git (the originals are on arm/robot @ 0dbc9fd, PR #6)
+runs/**/*.mp4
+pitch/
+last_*.jpg
 
 # OS / editors
 .DS_Store
@@ -41,3 +50,20 @@ recordings/
 # Playwright e2e screenshots / traces (tests/e2e)
 tests/e2e/artifacts/
 test-results/
+
+# purchase-history SQLite (PICKY_PURCHASES_DB)
+var/
+
+# supermarket teleop scene: generated robot build
+arms/sim/supermarket/assets/build/
+
+# SO-101 rig: fetched URDF/meshes and per-rig calibration output
+arms/robot/so101/assets/
+arms/robot/so101/homography.json
+arms/robot/so101/last_detection.jpg
+arms/robot/so101/last_scene.jpg
+last_scene.jpg
+last_detection.jpg
+snap.jpg
+last_lift.jpg
+last_release.jpg

@@ -55,12 +55,12 @@ export const FIXTURES = Object.fromEntries(tmobileStore.fixtures.map((f) => [f.f
 export function fixtureName(id: string) {
   const short: Record<string, string> = {
     "ACC-WALL": "the accessory wall",
-    "TABLE-A": "the Apple table",
-    "TABLE-B": "the Google and Motorola table",
+    "TABLE-A": "the Apple and value phones table",
+    "TABLE-B": "the Samsung and Google table",
     "TABLE-C": "the Samsung table",
     "AUDIO-WALL": "the audio wall",
     "HOME-INET": "the Home Internet pedestal",
-    "WEAR-CASE": "the wearables case",
+    "WEAR-CASE": "the wearables, tablets and home internet endcap",
     COUNTER: "the counter",
     "BACK-STOCK": "the back room",
   };
@@ -117,8 +117,10 @@ type Device = { sku: string; name: string; owned: boolean };
 const PHONE_KEYS: { key: RegExp; sku: string }[] = (() => {
   const out: { key: string; sku: string }[] = [];
   for (const p of tmobileProducts.filter((x) => x.category === "phone")) {
-    const base = nice(p.name).toLowerCase();
-    const vars = new Set([base, base.replace(/^galaxy (z )?/, ""), base.replace(/(\D)(\d)/g, "$1 $2"), base.replace(/\+/g, " plus"), base.replace(/^galaxy z /, "galaxy ")]);
+    // "Google Pixel 9 128GB" -> "google pixel 9", "pixel 9"; "Samsung Galaxy Z Flip8" -> "z flip8", "flip 8", ...
+    const full = nice(p.name).toLowerCase();
+    const base = full.replace(/^(google|apple|samsung|motorola|t-mobile)\s+/, "");
+    const vars = new Set([full, base, base.replace(/^galaxy (z )?/, ""), base.replace(/(\D)(\d)/g, "$1 $2"), base.replace(/^galaxy (z )?/, "").replace(/(\D)(\d)/g, "$1 $2"), base.replace(/\+/g, " plus"), base.replace(/^galaxy z /, "galaxy ")]);
     for (const v of vars) out.push({ key: v, sku: p.sku });
   }
   out.push({ key: "pixel 7", sku: mayaDevices.phone.sku });
@@ -308,8 +310,10 @@ export const tools = {
     if (!force && dev && p.compatible_with?.length && !p.compatible_with.includes(dev.sku) && p.category !== "phone")
       return { summary: `NOT ADDED: ${nice(p.name)} doesn't fit the ${dev.name} (it's for the ${p.compatible_with.map(shortName).join(", ")}). Ask before adding anyway.`, focus: sku };
     const acts: AssocAction[] = [{ type: "add", sku, qty }];
-    if (backStock(sku)) acts.push({ type: "fetch", sku });
-    return { summary: `Added ${qty} × ${nice(p.name)} (${money(unitPrice(sku) * qty)}).${backStock(sku) ? " The robot is bringing a boxed one from the back." : ""}`, actions: acts, focus: sku };
+    // the robot brings phones to the shopper: boxed stock from the back room if the store has one, else off the table
+    const fetch = backStock(sku) > 0 || p.category === "phone";
+    if (fetch) acts.push({ type: "fetch", sku });
+    return { summary: `Added ${qty} × ${nice(p.name)} (${money(unitPrice(sku) * qty)}).${fetch ? ` The robot is bringing one over from ${backStock(sku) ? "the back room" : fixtureName(displaySlot(sku)?.fixture_id ?? "")}.` : ""}`, actions: acts, focus: sku };
   },
 
   remove_from_basket(sku: string, ctx: AssocCtx): ToolResult {
@@ -437,15 +441,15 @@ function respondInner(t: string, ctx: AssocCtx): Omit<AssocReply, "source" | "ch
   if (!t || /^(hi|hello|hey|yo|good (morning|afternoon|evening)|howdy)\b/.test(t) && t.split(" ").length < 4)
     return reply(
       ctx.known
-        ? `Hi Maya, good to see you. I can find anything here, walk you to it, check what fits your Pixel 7, and grab boxed phones from the back. What are you looking for today?`
-        : `Hi, I'm Magenta, the robot helper here. I can find anything in the store, walk you over, check what fits your phone, and bring boxed phones out from the back. What are you looking for?`,
+        ? `Hi Maya, good to see you. I can find anything here, walk you to it, check what fits your Pixel 7, and bring your new phone over to you. What are you looking for today?`
+        : `Hi, I'm Magenta, the robot helper here. I can find anything in the store, walk you over, check what fits your phone, and bring your new phone over to you. What are you looking for?`,
     );
 
   if (/\b(thank|thanks|that's all|thats all|bye|goodbye|all set)\b/.test(t))
     return reply(ctx.cart.length ? `Happy to help. When you're ready, say "check out" and I'll ring you up at the counter.` : `Anytime. I'll be right here by the door if you need me.`);
 
   if (/\b(what can you do|how does this work|who are you)\b/.test(t))
-    return reply(`I'm Magenta. I can find you the right phone and plan, tell you honestly whether to upgrade now or wait, check whether your whole household is on the right plan, and keep your basket honest at checkout. In the store I'll also walk you to things and bring sealed phones from the back.`);
+    return reply(`I'm Magenta. I can find you the right phone and plan, tell you honestly whether to upgrade now or wait, check whether your whole household is on the right plan, and keep your basket honest at checkout. In the store I'll also walk you to things and bring your phone over for you.`);
 
   // Next Best Moment, asked directly
   if (/\b(anything i should know|check my account|how'?s my account|am i (ok|okay|good)|my account)\b/.test(t)) {
@@ -499,7 +503,7 @@ function respondInner(t: string, ctx: AssocCtx): Omit<AssocReply, "source" | "ch
 
   // do I need a charger / should I upgrade: the honest answers
   if (/\b(need|should i (get|buy)|do i need)\b.*\bcharger\b/.test(t)) {
-    if (!ctx.known) return reply(`If you already have a USB-C charger that's 20 watts or more, you don't need a new one, it'll charge any recent phone. If not, the GoTo 20W is ${money(unitPrice("CHG-20W"))} on the accessory wall.`, [tools.where_is("CHG-20W")]);
+    if (!ctx.known) return reply(`If you already have a USB-C charger that's 20 watts or more, you don't need a new one, it'll charge any recent phone. If not, the ${nice(P["CHG-20W"]?.name ?? "20W charger")} is ${money(unitPrice("CHG-20W"))} on the accessory wall.`, [tools.where_is("CHG-20W")]);
     const own = mayaDevices.owns.find((o) => o.sku === "CHG-20W")!;
     return reply(`Honestly, skip it. You bought the ${nice(P[own.sku]?.name ?? own.sku)} on ${day(own.bought)}, and it's USB-C PD, so it charges any of these phones. That's ${money(unitPrice("CHG-20W"))} you keep.`);
   }
@@ -593,7 +597,7 @@ function respondInner(t: string, ctx: AssocCtx): Omit<AssocReply, "source" | "ch
     if (x.summary.includes("out of stock")) return reply(`Sorry, we're out of the ${nice(P[sku].name)} today. Want me to find something similar?`, [], sku);
     const adv = suggest({ cart: [...ctx.cart.filter((l) => l.sku !== sku), { sku, qty }], budget_cents: ctx.budget_cents, phase: "in_trip", declined: new Set(ctx.declined ?? []) }).filter((c) => ctx.known || !c.reason_codes.some((r) => r === "ALREADY_OWNED" || r === "INSTALLMENTS_LEFT"))[0];
     return reply(
-      `${pick(["Got it", "Done", "You got it"], sku)}, the ${nice(P[sku].name)} is in your basket, ${money(unitPrice(sku) * qty)}.${backStock(sku) ? " I'll grab a sealed box from the back, one moment." : ""}${adv ? ` ${adv.kind === "skip" || adv.kind === "wait" ? "Quick heads-up:" : "One idea:"} ${adv.reason}` : ""}`,
+      `${pick(["Got it", "Done", "You got it"], sku)}, the ${nice(P[sku].name)} is in your basket, ${money(unitPrice(sku) * qty)}.${backStock(sku) ? " I'll grab a sealed box from the back, one moment." : P[sku].category === "phone" ? ` I'll bring one over from ${fixtureName(displaySlot(sku)?.fixture_id ?? "")}, one moment.` : ""}${adv ? ` ${adv.kind === "skip" || adv.kind === "wait" ? "Quick heads-up:" : "One idea:"} ${adv.reason}` : ""}`,
       [x],
     );
   }

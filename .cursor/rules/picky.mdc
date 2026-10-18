@@ -279,11 +279,16 @@ Not required: every edge case, scale beyond the demo, perfect polish.
 - Config only via `utils.config.settings` (env/.env). Logging only via `utils.log.get_logger(__name__)`. Two tooling
   knobs are process-env only (not in Settings, not read from `.env`): `PICKY_LOG_LEVEL` and `PICKY_ID_SEED`. DB access
   only via `utils.db` (one shared pool).
-  LLM calls go through `utils.llm` (one place for model ids, retries, JSON/tool helpers). Real LLM code is
-  unit-tested with a mocked client (`client=` / `utils.llm.set_client`); the demo must run on fakes with no
-  `ANTHROPIC_API_KEY`. One interim exception: the web app's Ask Picky route (`arms/frontend` `/api/chat`: Claude over
-  deterministic tools, offline fallback, key in `arms/frontend/.env.local`) until the gateway exposes the agent; then
-  it proxies.
+  Secrets via `utils.secrets` / `make secret NAME=...` (OS keychain, team bundle `make secrets-pull`; `docs/secrets.md`);
+  `settings` resolves env > vault > `.env`. Never commit keys or paste them in chat, PRs or issues.
+  LLM calls go through `utils.llm` (one place for provider, model ids, retries, JSON/tool helpers). **The LLM is
+  Gemini** (`PICKY_LLM_PROVIDER=gemini`, default: `google-genai` in the `agent` extra, `GEMINI_API_KEY`; models
+  `gemini-3.8-flash` brain/fast, `gemini-4-argon` smart). Claude is optional (`PICKY_LLM_PROVIDER=anthropic`,
+  `ANTHROPIC_API_KEY`). Callers speak one Anthropic-Messages shape for both providers (the Gemini adapter translates
+  tool calls, ids and thought signatures), so arms never import a provider SDK. Real LLM code is unit-tested with a
+  mocked client (`client=` / `utils.llm.set_client`); the demo must run on fakes with no LLM key. One interim
+  exception: the web app's Ask Picky route (`arms/frontend` `/api/chat`: Claude over deterministic tools, offline
+  fallback, key in `arms/frontend/.env.local`) until the gateway exposes the agent; then it proxies.
 - **Deterministic vs LLM:** money math, mandate checks, approval gating and payments are deterministic code. The LLM
   proposes; code decides. Nothing reaches checkout without the mandate engine and an explicit user approval.
 - Async I/O at service boundaries; no blocking calls inside the gateway event loop (use `asyncio.to_thread`).
@@ -297,8 +302,9 @@ Not required: every edge case, scale beyond the demo, perfect polish.
   needed) and always show their reason + signals ("why am I seeing this"); the raw shopper context stays server-side.
   SKIP/WAIT reasons come from deterministic reason codes; the LLM only phrases them.
 - Picky remembers only what the shopper can see and delete (the web app's Permissions page).
-- Never claim a "privacy mode" or "nothing leaves the store": model calls go to the Claude API. Claim only what is
-  true: faces blurred before any frame is stored, streamed or sent to an LLM; derived signals only to the LLM.
+- Never claim a "privacy mode" or "nothing leaves the store": model calls go to the Gemini API (Claude if
+  `PICKY_LLM_PROVIDER=anthropic`) and the verifier's frames to Perceptron. Claim only what is true: faces blurred
+  before any frame is stored, streamed or sent to an LLM or to Perceptron; derived signals only to the LLM.
 - Test/sandbox payments only, tokenized credentials only; never store card numbers. Synthetic data only: demo users,
   stores, retailers, devices and prices are fictional.
 
@@ -310,13 +316,14 @@ to the fallback when the time-box in §10 is hit. Changing a pick needs a one-li
 | Arm | Pick | Fallback |
 |---|---|---|
 | catalog | `data/` YAML → seed local Postgres (Docker `pgvector/pgvector:pg17`) via SQLAlchemy async + psycopg 3; ~60 hand-written SKUs first, Open Food Facts enrichment later | Supabase via the same `DATABASE_URL`; SQLite + numpy if Docker fails |
-| perception | Cascade: zxing-cpp barcode → open_clip SigLIP 2 (`ViT-B-16-SigLIP2`) match vs our label textures → `claude-haiku-5-5` vision pick-from-candidates. Face blur: OpenCV YuNet (`opencv-python-headless>=4.10,<5`). Runs in the backend, not Isaac's Python | Ground-truth bypass (sim reports prim→SKU); CLIP ViT-B-32; MediaPipe faces |
+| perception | Cascade: zxing-cpp barcode → open_clip SigLIP 2 (`ViT-B-16-SigLIP2`) match vs our label textures → `utils.llm` fast-model vision (`gemini-3.8-flash`) pick-from-candidates; loop verifier vision = Perceptron Mk1.5 (`perceptron` SDK). Face blur: OpenCV YuNet (`opencv-python-headless>=4.10,<5`). Runs in the backend, not Isaac's Python | Ground-truth bypass (sim reports prim→SKU); CLIP ViT-B-32; MediaPipe faces |
 | sim | Isaac Sim 6.x (vhagar runs a preinstalled 6.0 build; pip pick elsewhere `isaacsim[all,extscache]==6.2.0.0`; Python 3.12) headless worker on "vhagar": one process, several store scenes side by side + several rovers, generated from the planogram with `pxr`; cameras → JPEG over WS on demand (`set_streams`); connects **outbound** to the gateway `/ws/sim`, multiplexed by `robot_id` | **2D top-down sim (robot fake, all robots + Pillow camera frames) is the always-available fallback**; recorded Isaac video |
 | robot | Rover (kinematic diff/holonomic base, radius 0.3 m) + prismatic lift + SO-101 arm (URDF from the SO-ARM100 repo); pure-pursuit follower; scripted "magic grasp" + FixedJoint attach → reparent into the basket. Avoid deprecated `wheeled_robots`/`lula` APIs in 6.x | Box rover + kinematic arm pose; physical SO-101 + LeRobot/LeIsaac VLA later |
 | fleet | Pure-Python asyncio manager in the backend: store choice by stock coverage + price, `contracts.fleet.choose_robot` scoring, one background task per running goal, reassignment on failure | Single robot per store, first-free assignment |
 | routing | Planogram → 0.05 m grid (inflated by robot radius) → skimage `MCP_Geometric` distance matrix between aisle approach poses → OR-Tools 9.15 (mandatory = no disjunction, recs = `AddDisjunction` penalty in the same integer cm units) PATH_CHEAPEST_ARC + GLS, 1–2 s limit; re-solve after each yes/no | Greedy insertion on a 2-opt tour; cached demo route |
-| agent | NL + shopper chat: `claude-sonnet-5-5`, structured output into `RequestDraft` / `ShoppingList`, hand-written async tool loop (anthropic SDK via `utils.llm`), ≤8 iterations, prompt caching. Robot brain: one `claude-sonnet-5-5` tool loop per robot over the brain tools, `claude-haiku-5-5` for vision (`look`) | Deterministic scripted brain (the fake, same tool sequence); keyword NL rules |
-| recommender | `BAAI/bge-small-en-v1.5` (384-dim, local) in pgvector; profile vector from likes/purchases; Sonnet rerank + "why"; 3–5 rec stops per trip; Cart Whisperer ≤3 per phase (zero allowed) incl. SKIP/WAIT: deterministic score + reason codes, Sonnet only phrases the why (template fallback) | numpy cosine scan |
+| agent | NL + shopper chat: `gemini-3.8-flash` (`utils.llm` brain model), structured output into `RequestDraft` / `ShoppingList`, hand-written async tool loop (`utils.llm.run_tool_loop`), ≤8 iterations. Robot brain / planner: one `gemini-3.8-flash` tool loop per robot over the brain tools, the fast model for vision (`look`) | Claude via `PICKY_LLM_PROVIDER=anthropic`; deterministic scripted brain (the fake, same tool sequence); keyword NL rules |
+| llm (`utils.llm`, every arm) | Gemini API via `google-genai` 2.31 (`agent` extra), `GEMINI_API_KEY`: `gemini-3.8-flash` brain + fast, `gemini-4-argon` smart, `PICKY_GEMINI_THINKING=low`; JSON-schema structured output + function calling behind one Anthropic-Messages-shaped API | `PICKY_LLM_PROVIDER=anthropic` (Claude Sonnet / Haiku / Opus 5.5, `ANTHROPIC_API_KEY`); no key = every arm's deterministic fallback |
+| recommender | `BAAI/bge-small-en-v1.5` (384-dim, local) in pgvector; profile vector from likes/purchases; LLM rerank (`utils.llm` brain model) + "why"; 3–5 rec stops per trip; Cart Whisperer ≤3 per phase (zero allowed) incl. SKIP/WAIT: deterministic score + reason codes, the LLM only phrases the why (template fallback) | numpy cosine scan |
 | trust | Deterministic AP2-style mandates (intent/cart mandates, signed, reason codes, audit log); approval bound to the cart hash; **Stripe test mode on the critical path** behind a `VisaIntelligentCommerce` adapter (Visa sandbox access is unlikely this weekend) | Mock signed receipt |
 | messaging | Photon 2.0 via `photonhq-api` 0.5.0 (Python), poll + idempotent send on the beta shared iMessage line; demo phones text the number first; YES/NO approvals | spectrum-ts sidecar; Telegram; web chat |
 | frontend | The web app (teammate; shipped on demo data): Next.js 16 + React 19 + Tailwind 4 + shadcn/ui (radix) + Lucide + motion + zustand (own palette, no Recharts); hand-drawn SVG charts and store map (world meters); `@anthropic-ai/sdk` for Ask Picky; live view sources, always labeled: simulated cameras, gateway `/ws/frames`, direct stream (MJPEG / MP4 URL) | Recorded video as a direct-stream MP4; the simulated cameras |

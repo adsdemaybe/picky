@@ -1486,7 +1486,7 @@ header = {
     },
     "asset_root": {
         "env": "PICKY_ASSET_ROOT",
-        "default": "/data/advaiv2/picky-assets/products",
+        "default": "/data/$USER/picky-assets/products",
         "paths": "usd / parts[].usd are relative to the asset root",
     },
     "conventions": (

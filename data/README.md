@@ -11,21 +11,20 @@ uv run python -m utils.data        # validate every file: schema, cross-refs, EA
                                    # slot ids unique across stores, qty/low <= capacity, lot sums, docks, cameras
 ```
 
-Current state: `data OK` with **0 problems and 0 warnings** (contracts v0.2.0), three stores.
+Current state: `data OK` with **0 problems and 0 warnings** (contracts v0.2.0).
 
 | File | Model | What |
 |---|---|---|
-| `products.yaml` | `ProductsFile` | **216 SKUs**. Grocery: 122 in-store + 3 `online_only`, across all 13 grocery categories; made-up brands, realistic 2026 US prices and pack sizes in int cents, category + subcategory, tags + dietary + allergens, `spice_level`, valid EAN-13 barcodes (`200…` prefix), `perishable` / `shelf_life_days`, sim `asset` hints (`shape`, `dims_m`, `label_color`, `mass_kg`). Wireless: **91 real products** for `store_tmobile` (block at the end of the file, see below) |
-| `categories.yaml` | `CategoriesFile` | Taxonomy: the 13 grocery `STANDARD_CATEGORY_IDS` + 9 wireless top-level ids (`phone`, `tablet`, `wearable`, `case`, `screen`, `charger`, `audio`, `home_internet`, `connected`) (display name, icon, color, aliases, sort = store walk order) + 66 grocery and 26 wireless subcategories (one parent each, max depth 2). Where each category sits per store is documented in the file header and derived from the planogram aisles |
+| `products.yaml` | `ProductsFile` | **157 SKUs**: 122 in-store + 3 `online_only` (hand-written) + 32 `GN-*` store_genie SKUs (the generated block at the end of the file), across all 13 top-level categories. Made-up brands, realistic 2026 US prices and pack sizes in int cents, category + subcategory, tags + dietary + allergens, `spice_level`, valid EAN-13 barcodes (`200…` prefix), `perishable` / `shelf_life_days`, sim `asset` hints (`shape`, `dims_m`, `label_color`, `mass_kg`) |
+| `categories.yaml` | `CategoriesFile` | Taxonomy: the 13 `STANDARD_CATEGORY_IDS` (display name, icon, color, aliases, sort = store walk order) + 66 subcategories (one parent each, max depth 2). Where each category sits per store is documented in the file header and derived from the planogram aisles |
 | `planograms/store_ave.yaml` | `Planogram` | Main demo store "Picky Market - The Ave", 14 m x 22 m: **124 slots / 122 SKUs / 1331 units** |
 | `planograms/store_hill.yaml` | `Planogram` | Second store "Picky Express - Capitol Hill", 9 m x 14 m: **64 slots / 64 SKUs / 589 units**, overlapping SKUs at different prices |
-| `planograms/store_tmobile.yaml` | `Planogram` | T-Mobile wireless store "T-Mobile - University Way NE", 10 m x 8 m (T-Mobile track, Cart Whisperer): **124 slots / 91 SKUs / 476 units**, 33 tethered live demo units + boxed back stock |
+| `planograms/store_genie.yaml` | `Planogram` | **GENERATED** (`scripts/genie_to_planogram.py`, never hand-edit): the AgiBot Genie Sim `supermarket_06` scene as "Picky Market - Genie Sim Supermarket", 8.45 m x 6.75 m: **145 slots / 32 SKUs / 678 units** (boards up to 1.15 m: the white SO-101 rover v3 reaches a 1.2 m TCP) on the scene's real shelving (21 shelf / freezer boxes + the checkout counter the sim adds). Store frame = USD frame + (3.25, 2.10) m |
+| `sim/store_genie_prims.yaml` | sim-only | **GENERATED**: unit n of each store_genie slot = a product prim of the scene USD (path + its box in the store frame) for the Isaac worker's external-scene mode (`arms/sim/external.py`) |
+| `sim/genie/` | generator inputs | `supermarket_06.json` = the scene dump (1,091 product prims with asset ids + boxes, fixture boxes, Genie's object descriptions, obstacles from a top-down depth render); `store_genie_skus.yaml` = the hand-written naming table (one fictional SKU per Genie product type: made-up brand, US price in cents, category) |
 | `online_store.yaml` | `OnlineCatalog` | Mock online store with 19 items. Shipping $2.99, free at $25+. Default ETA 24 h; groceries 2 h |
-| `fixtures/users.yaml` | `FixturesFile` | Fictional demo users `maya`, `jordan`, `sam`: profile, IntentMandate, purchase history (Maya also owns `CASE-PX7-BLK` + `CHG-20W` from store_tmobile), feedback |
-| `fixtures/robots.yaml` | `RobotsFile` | The fleet: `rover-ave-1` **Pico** + `rover-ave-2` **Rhea** (store_ave), `rover-hill-1` **Hazel** (store_hill), `rover-tmo-1` **Tess** (store_tmobile), kind `rover_so101`, dock, battery, basket capacity, UI color; ceiling cameras `store_ave.ceiling-1`, `store_ave.ceiling-2`, `store_hill.ceiling-1`, `store_tmobile.ceiling-1`, `store_tmobile.ceiling-2` |
-| `fixtures/wireless.yaml` | none yet (plain YAML) | Cart Whisperer signals for store_tmobile: Maya's Pixel 7 (age, installments left), owned accessories, household lines; synthetic upcoming promos (WAIT); real t-mobile.com line-activation offers and online sale prices. Cross-checked by `arms/catalog/tests/test_tmobile_data.py` |
-| `sim/demo_units.yaml` | none yet (sim hints) | Device size (`demo_m`), stand and tether for every tethered demo unit in store_tmobile; `shown: open` for foldables |
-| `sim/sku_assets.yaml` | sim arm (generated) | SKU -> how one unit renders in Isaac; regenerate with `arms/sim/tools/gen_sku_assets.py` (wireless SKUs are box primitives) |
+| `fixtures/users.yaml` | `FixturesFile` | Fictional demo users `maya`, `jordan`, `sam`: profile, IntentMandate, purchase history, feedback |
+| `fixtures/robots.yaml` | `RobotsFile` | The fleet: `rover-ave-1` **Pico** + `rover-ave-2` **Rhea** (store_ave), `rover-hill-1` **Hazel** (store_hill), `rover-tmo-1` **Magenta** (store_tmobile), `rover-genie-1` **Juniper** (store_genie), kind `rover_so101`, dock, battery, basket capacity, UI color; ceiling cameras `store_ave.ceiling-1`, `store_ave.ceiling-2`, `store_hill.ceiling-1`, `store_tmobile.ceiling-1`, `store_genie.ceiling-1` |
 
 SKU ids are uppercase and hyphenated (`SALSA-CHIPOTLE`). All dates are relative to the demo day, **2026-10-17**.
 
@@ -106,45 +105,6 @@ international | snacks) | a2 | G2 (breakfast | household, personal care & drinks
 & dairy) on the right wall. It carries **no cilantro and no sour cream**, so the online store stays the obvious
 fallback. Hazel docks at (3.0, 1.0); `store_hill.ceiling-1` sits over the entrance.
 
-**store_tmobile** (10 x 8), a T-Mobile wireless store laid out like a real one (sources in the PR):
-
-```
-y=8 ┌ [WEAR-CASE: tethered watches]   staff door  [BACK-STOCK: boxed phones / tablets / watches] ┐
-    │          [HOME-INET pedestal]                staff aisle    [COUNTER (Fast Lane)]          │
-    │A                                                            checkout pose (8.4, 5.05)     A│
-    │C    [TABLE-A]        [TABLE-B]          [TABLE-C]                                         U│
-    │C    Apple            Google/Moto/REVVL  Samsung    (live demo units on both long sides)  D│
-    │                                                                                         I│
-    │ ENTRANCE (1.2, 0.6)  Tess dock (2.4, 1.0)                                                O│
-y=0 └──────────────────────────────────────────────────────────────────────────────────────────┘ x=10
-```
-
-- **Live demo units, boxes in back stock.** Every phone, tablet and watch on the floor is a tethered demo unit
-  (TABLE-A/B/C, WEAR-CASE: qty 1, capacity 1, `low_threshold` 0). Sales come from the boxed units on BACK-STOCK behind
-  the counter. Those slots are listed first in the file: `get_locations()` keeps file order and the orchestrator / brain
-  pick the first stocked location, so the robot fetches a box. Exception: `IPDUO-256` is pre-order only (back stock
-  0), so its only stocked location is the demo unit (contracts have no display-only flag).
-- **ACC-WALL** (slatwall, 5 hook rows at 0.2-1.32 m): device bays iPhone / Pixel / Galaxy with cases and glass on hooks
-  4-2 (newest at eye level), chargers, cables, power banks, car gear and grips on hooks 1-0. **AUDIO-WALL**: boxed
-  audio by brand on 4 shelves + the Belkin 3-in-1. **HOME-INET** pedestal: 5G gateway, hotspots, window antenna.
-  **COUNTER** (`checkout` kind): AirTag + PopGrip on the customer side, SIM kits on the staff side.
-- Fixture kinds (no `display_table` / `slatwall` / `counter` in `FixtureKind`): tables are `produce_bin` (open-top
-  table body, picked from both long sides), the pedestal and the watch case `endcap`, the counter `checkout`.
-- Checked: `python -m utils.data` clean; a 0.05 m grid flood fill (inflated 0.3 m) reaches all 128 poses (124 approach
-  poses + entrance, checkout, robot_home, Tess's dock) from the start; the routing fake's visibility graph has 0
-  unreachable pairs; the 2D fake (`strict_reach=True`) scanned every slot (instances == qty) and picked one unit from
-  every stocked slot. Slot ids `TMO-<fixture>-<face><level>-<index>`.
-- **Products.** Names, brands and full retail prices ("pay in full") are a public t-mobile.com snapshot from
-  2026-10-17 (src URL above each row). Last-gen stock no longer on t-mobile.com (Pixel 9 cases and glass, Pixel 7
-  case, Pixel Watch 3) cites the maker or a reseller. `asset.dims_m` = the retail box; demo device sizes are in
-  `sim/demo_units.yaml`. All 16 SKU ids of the web app's `tmobile.ts` are kept; fictional brands were re-pointed to real
-  products (`CHG-20W` GoTo 20W $14.99, `BUDS-RUN` Beats Flex $69.99, `GLASS-PX9` ZAGG Glass Elite $49.99, ...).
-- **Compatibility** lives in tags until `Product.compatible_with` exists: `fits:<sku>` (lowercased; upper-case it to get
-  the SKU), plus `requires_ios` / `requires_android` on watches and AirTag, `universal` on USB-C chargers and audio.
-  `fits:px7` = Maya's Pixel 7, which is not a catalog SKU.
-- Trademarks belong to their owners; the store uses real names for demo realism only. There is no affiliation or
-  sponsorship and no paid placement. Shopper, device and promo-calendar data stay synthetic.
-
 ## The demo scenario these files encode
 
 **Trip 1. Maya texts: "tacos for 6, under $40, one vegetarian".** The fake agent expands this to: TORT-CORN x2,
@@ -170,17 +130,6 @@ sourcing, same recommender ranking for maya, trip 2 still switches to SALSA-HOT)
 rated 4-5, so trip 1 picks SALSA-MILD. The follow-up "how was the salsa?" → "too mild, loved the hot sauce" is read
 as 2/5 + `too_mild`: SALSA-MILD leaves her favorites and becomes disliked, and `spicy` goes 0.8 → 1.0. **Trip 2
 picks `SALSA-HOT`** ("Habanero Fire", spice 5), and the recs move toward `HOTSAUCE-GHOST`.
-
-**T-Mobile store (Cart Whisperer, `docs/cart-whisperer.md` §11b).** Not exercised by `make demo` yet.
-
-| Hook | Where | Why |
-|---|---|---|
-| **SKIP: already owned** | Maya owns `CHG-20W` (GoTo 20W USB-C, bought 2026-03-14; `users.yaml` purchase + `fixtures/wireless.yaml`) | "Skip the charger: yours works with the Pixel 9" (avoids $14.99) |
-| **SKIP: doesn't fit** | `CASE-PX7-BLK` clearance $9.99 (`fits:px7`) vs `CASE-PX9-CLR` (`fits:px9-128`) | "That case is for a Pixel 7" |
-| **WAIT** | `fixtures/wireless.yaml`: Maya's Pixel 7 has 4 installments left ($66.00); `PX9-128` $599.99 expected Nov 27; `BUDS-RUN` $49.99 from Fri Oct 23 | Early-upgrade and sale-soon cards |
-| **Deals** | `GLASS-PX9` 20% off ($39.99), `CASE-PX7-BLK` clearance $9.99, `WATCH-PX3` clearance $399.99 (all on the primary slot) | Deal / swap cards |
-| **Stock alerts** | `CASE-IP18P-CLR` **out** (launch sell-out), `GLASS-IP18P-XTR6` **low** (2/10), `IPDUO-256` **low** (pre-order: demo unit only) | Staff view; "out here, the ZAGG case fits too" |
-| **Mispricing** | `CHG-20W` shelf tag still $24.99, system $14.99 (`TMO-ACC-WALL-E1-03`) | Merchant dashboard row |
 
 **Fleet.** Pico (95% battery, docked at the store entrance) wins the deterministic assignment score for store_ave
 shop goals over Rhea (81%); Hazel (88%) serves store_hill. Robot names in requests ("Hazel, go charge") map to
@@ -236,7 +185,3 @@ the catalog owner.
   category hints + recommender scores); the International & Mexican aisle shows them through aisle 3's categories.
 - Weighted goods are fixed packs (`unit: pack`, e.g. "1.5 lb"), never sold by weight (qty is an integer everywhere).
 - store_hill has no freezer.
-- store_tmobile: no contracts home yet for compatibility (`fits:` tags), display / demo-unit mode (fixture + slot
-  order), storage / color variants (one SKU per base config), financing and line-activation promos
-  (`fixtures/wireless.yaml`), or a per-trip mandate (Maya's grocery mandate, per item $25, blocks most wireless items).
-  The wireless categories are not in `STANDARD_CATEGORY_IDS`, so the keyword NL rules don't map them.

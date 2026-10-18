@@ -136,6 +136,36 @@ npx pnpm@10.18.3 dev             # http://localhost:3000 : Overview, Purchases, 
   (`claude-opus-5-5`, low effort, server-side refusal fallback) over deterministic tools in `src/lib/assistant/tools.ts`;
   with no key or on any API error it answers offline from the same tools. Stand-in until the agent arm is reachable
   through the gateway.
+- **Guided voice trips (`/voice`, default "Plan a trip" mode):** say "Voice, let's do a weekly restock".
+  Finished speech prepares a proposal automatically (typed commands work too): approve the list → select optional
+  add-ons (none preselected) → review the total and fulfillment → explicitly confirm dispatch. Replies such as "yes",
+  "add the yogurt", "both", "no extras", "back" and "cancel" drive the same state machine as the buttons. Browser
+  speech synthesis reads questions aloud (toggle available); starting the microphone cancels playback. Ask Picky
+  has the same guided flow and a microphone button, with deterministic chat handling that needs no LLM credentials.
+  Final confirmation opens `/trip`. It cannot skip the list/add-on gates, duplicate dispatch, override a hard mandate
+  denial, or silently replace an active trip. Auto-answer is disabled on dispatch; checkout still requires its own
+  approval. This runs through the existing **browser demo**, not the gateway robot. Run `pnpm check:trip-guide` for
+  the full confirmation flow, add-on selection, cancellation, guards and a pickup run that pauses at checkout.
+- **Voice & memory (`/voice`):** browser Web Speech recognition (standard or `webkitSpeechRecognition`), live
+  editable transcript, explicit save in "Remember information" mode, and typing fallback. Saves preferences, shopping requests and free-form notes
+  through `GET/POST/PATCH/DELETE /api/memory`. Edit/delete controls change the stored record; shopping requests open
+  `/order?intent=...`. Ask Picky can recall the latest notes offline, and its LLM tools can read them for context.
+  Only reviewed text is stored; Picky never records audio. The browser's speech provider may process microphone
+  audio remotely (disclosed beside the form). Permission denial, unsupported browsers, no speech and network errors
+  keep the typing path available; recording stops after 60 seconds and on unmount.
+  Persistence is an atomic JSON file at `arms/frontend/.data/shopper-memory.json` when started from this directory
+  (gitignored, local demo server, shared fictional Maya profile). It survives app restarts on the same disk. This is
+  not authenticated multi-user storage and is not synced to the gateway profile/mandate. Saved notes never authorize
+  spending. Deployments need persistent writable storage; stateless/serverless hosts need a database adapter.
+  Run `pnpm check:memory` for validation, concurrent saves, restart persistence, edits/deletes, recall and transcript
+  merging. Actual microphone capture requires a supported browser on HTTPS or localhost.
+- **Grocery trip types:** `/order` offers taco night, weekly restock, breakfast, fresh produce and pantry refill.
+  Each has its own catalog-backed basket and route thumbnail. Food lists are grouped by department with subtotals
+  and aisle locations. The larger route preview compares the list-only path with selected extras and shows numbered
+  picking order; it uses the same `buildTripPlan` as playback. Direct links: `/order?preset=breakfast`,
+  `/order?preset=produce`, `/order?preset=pantry`, `/order?preset=tacos`, `/order?preset=basics`.
+  These remain **frontend demo scenarios**, not gateway-backed trips. Run `pnpm check:grocery` to verify distinct
+  paths, shelf avoidance, online-item exclusion, preview/playback agreement and all five demo checkouts.
 - **Stores:** grocery (`store_ave`, generated from `data/`) and a demo T-Mobile store (`src/data/stores/tmobile.ts`,
   frontend-only fixture until the catalog arm adds a planogram for it).
 - **Not wired yet:** merchant dashboard, staff/fleet views, trip chat (`agent.message`), voice.
@@ -156,6 +186,38 @@ version, sim vs 2D fake, real arms), **Demo data**, or **Reconnecting** while a 
   `/trip?trip=<id>` (reload, shared link) follows that trip again.
 - **Cameras:** big view = `GET /api/cameras/<robot>.front/stream.mjpg` (one MJPEG per page), thumbnails and the
   wrist/basket insets = `snapshot.jpg` polling. The gateway blurs every frame it serves.
+- **Judges' demo (Home → `/watch`):** Home's **Running low** card reads `GET /api/users/maya/suggestions` (image from
+  `GET /api/products/{sku}/image.jpg`, "You bought this 12 days ago", price; falls back to the same rows computed from
+  the demo history when the endpoint or gateway is missing, or with `NEXT_PUBLIC_SUGGESTIONS_MOCK=1`). Tap to pick, then
+  **Order these (N) — $X** posts `{user_id, store_id, items:[{sku, qty, note}], text}` to `POST /api/requests` (exact
+  SKUs; a pre-0.2.3 gateway that rejects `items` gets the same order as text) and opens `/watch?trip=<id>`, the
+  projector view (1080p and 1440×900): big panel = `<robot>.director/stream.mjpg?fps=10` (Isaac chase camera), second
+  panel = `<robot>.front.perceived/stream.mjpg` (Perceptron Mk1.5 boxes; "ground-truth boxes" unless the real cameras
+  arm is on) with a `<robot>.wrist.perceived` snapshot inset, plus plan, approvals (checkout tap), basket and budget,
+  route map, thinking log. Each camera walks a ladder (MJPEG → snapshots → ceiling / raw front camera → the in-browser
+  replay), re-probes the better sources every 15 s, and its badge names the source (`CameraInfo.source`: Isaac Sim or
+  2D sim). With no gateway the same button runs the replay of that order on `/watch`. `/trip` ⇄ `/watch` links both ways.
+  Suggestion cards also show the "why" (an `AI:` prefix when `ranked_by="llm"`), the signal chips, and the 0.2.3 kinds
+  (substitute "Instead of …", complement "Goes with …", deal text).
+- **Checkout handoff (basket → counter):** at checkout the projector and trip pages show **Unloading at the counter**
+  (Basket | Gripper | Counter, tiles fly across, "Unloading 2/7" on the plan's last stop, `SO-101 arm · <tier>` badge).
+  Gateway (0.2.4): `checkout.unload` drives it unit by unit (`started` = basket → gripper, `placed` / `verified` =
+  counter, `done` = basket empty) and its `text` is the card's line ("Unloading 3/9: Mild Chunky Salsa → counter ✓");
+  the loop's `grasp` (`source: basket`) / `place` (`destination: counter`) steps open the card, and a `handoff` step
+  alone (worker without `basket_unload`) moves the whole basket; units also leave the basket with
+  `robot.state.basket_skus`. A multi-option "Want any of these before checkout?" card has a **No thanks** answer. Replay: the arm carries each unit out of the basket onto the counter in the simulated
+  front and wrist cameras before the payment agent runs.
+- **Photo review cards:** produce review (`pick_choice`; `multi` + `payload.qty` = choose N units, `payload.photos` /
+  `thumbnail_b64` = photos) and per-item purchase checks (`verify_item` approvals and `item.verification` events:
+  photo, ✓ / ✗ answered as `choice` `correct` / `wrong`, countdown to the gateway's own auto-accept). Without gateway
+  checks, each pick gets a client-side check with a wrist-camera frame (`NEXT_PUBLIC_JUDGES_MOCK=0` turns that off).
+- **Visa payment agent:** checkout is a timeline (mandate check → token → your approval with a passkey-style button →
+  authorized → receipt), labelled "Sandbox / simulated". `payment.agent_step` events (`contracts.trust.PaymentAgentStep`
+  names: `cart_mandate`, `token_issued`, `passkey_requested|verified`, `authorized`, `captured`, `receipt_signed`, …)
+  drive the rows and their narration; without them the rows are derived from the trip (mandate decision, checkout
+  card, receipt).
+- **Purchase history:** Spending reads `GET /api/users/maya/purchases` (badge "From the purchase-history database",
+  unit photos from `photo_urls`), else the demo history (`NEXT_PUBLIC_PURCHASES_MOCK=1` forces it).
 - **Also live:** Permissions (mandate + learned prefs GET/PUT), Spending ratings → `POST /api/users/maya/feedback`,
   the trip's receipt in Spending/Home. Find, price history, advice and Ask stay on demo data (no endpoints yet).
 - Types: `pnpm gen-types` (see "Type generation").

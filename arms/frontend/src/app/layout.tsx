@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Bricolage_Grotesque, Plus_Jakarta_Sans } from "next/font/google";
+import { TripGuideNavigation } from "@/components/TripGuide";
 import { AskSheet } from "@/components/AskPanel";
 import { MotionProvider } from "@/components/motion";
 import { BottomTabs, TopBar } from "@/components/Shell";
@@ -27,6 +28,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <main className="mx-auto max-w-[1240px] px-4 pt-6 pb-28 md:px-8 md:pt-8 md:pb-16">{children}</main>
             <BottomTabs />
             <AskSheet />
+            <TripGuideNavigation />
             <Toaster />
           </TooltipProvider>
         </MotionProvider>

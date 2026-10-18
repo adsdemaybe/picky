@@ -16,11 +16,12 @@ dependencies = [
   "websockets>=13",
   "anthropic>=0.60",
   "pillow>=10.4",  # synthetic camera frames (robot fake) + JPEG snapshots/MJPEG (cameras API)
+  "keyring>=25.0",  # utils.secrets: OS keychain (macOS Keychain / Secret Service); file fallback when unusable
 ]
 
 [project.optional-dependencies]
 # Heavy, arm-specific deps: `uv sync --extra <arm>` (or `--all-extras`). Add yours here in your arm PR.
-catalog = ["psycopg[binary]>=3.2", "sqlalchemy>=2.0", "pgvector>=0.3", "duckdb>=1.0"]
+catalog = ["psycopg[binary]>=3.2", "sqlalchemy[asyncio]>=2.0", "pgvector>=0.3", "duckdb>=1.0"]  # asyncio = greenlet (SQLAlchemy 2.1 no longer pulls it in)
 perception = [
   "opencv-python-headless>=4.10,<5",
   "pillow>=10.4",
@@ -28,14 +29,20 @@ perception = [
   "open-clip-torch>=2.31",
   "torch",
   "timm>=1.0.15",
+  # Perceptron Mk1.5 = THE verifier vision provider (arms/perception/vision/perceptron.py; lazy import). 0.4.0 pins
+  # Pillow<12, so the lock resolves Pillow 11.x for everyone (no Pillow 12+ API is used anywhere).
+  "perceptron>=0.4,<0.5",
 ]
 # Isaac itself (isaacsim[all,extscache]==6.2.0.0, torch cu128) is installed by hand on the GPU host; see arms/sim/README.md.
 sim = ["opencv-python-headless>=4.10,<5", "pillow>=10.4"]
 routing = ["ortools>=9.10", "scipy>=1.13", "scikit-image>=0.24"]
-agent = ["deepgram-sdk>=7.13"]
+# agent: google-genai = the default LLM provider for utils.llm (Gemini); deepgram = voice.
+agent = ["deepgram-sdk>=7.13", "google-genai>=2.31,<3"]
 recommender = ["sentence-transformers>=6.1", "pgvector>=0.5.1"]
 trust = ["stripe>=10.0"]
 messaging = ["photonhq-api==0.5.0"]
+# utils.secrets team bundle (age encryption of secrets/team.age); `make secrets-pull/-push` pull it in for you.
+secrets = ["pyrage>=1.4"]
 
 [dependency-groups]
 dev = ["ruff>=0.6", "pytest>=8.3", "pytest-asyncio>=0.24"]

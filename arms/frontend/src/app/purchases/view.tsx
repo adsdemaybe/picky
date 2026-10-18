@@ -10,12 +10,14 @@ import { gw } from "@/lib/gateway/client";
 import { toastLearned } from "@/lib/gateway/tripSource";
 import { isLive } from "@/lib/gateway/useGateway";
 import { fmt } from "@/lib/money";
-import { usePurchases } from "@/lib/usePurchases";
+import { usePurchaseHistory } from "@/lib/usePurchases";
 import { cn } from "@/lib/utils";
 
 export default function SpendingPage() {
-  const { purchases, trips } = usePurchases();
-  const [open, setOpen] = useState<string | null>(trips[0]?.trip_id ?? null);
+  const { purchases, trips, source } = usePurchaseHistory();
+  const [openId, setOpen] = useState<string | null | undefined>(undefined);
+  // newest trip open by default (also once the gateway's history replaces the demo rows)
+  const open = openId === undefined ? (trips[0]?.trip_id ?? null) : openId;
   const [filter, setFilter] = useState("all");
   const [ratings, setRatings] = useState<Record<string, number>>({});
   const rows = useMemo(() => weeklyByCategory(purchases, 12), [purchases]);
@@ -44,7 +46,7 @@ export default function SpendingPage() {
       </Panel>
 
       <div className="grid gap-8 lg:grid-cols-12">
-        <section className="lg:col-span-8">
+        <section className="scroll-mt-24 lg:col-span-8" id="history">
           <SectionTitle
             action={
               <ToggleGroup type="single" value={filter} onValueChange={(v) => v && setFilter(v)} className="rounded-full bg-muted p-1" aria-label="Filter trips">
@@ -60,7 +62,12 @@ export default function SpendingPage() {
               </ToggleGroup>
             }
           >
-            Trips
+            <span className="flex flex-wrap items-center gap-2">
+              Purchase history
+              <Badge variant={source === "gateway" ? "leaf" : "muted"} className="font-sans text-[12px]">
+                {source === "gateway" ? "From the purchase-history database" : "Demo history"}
+              </Badge>
+            </span>
           </SectionTitle>
           <div className="flex flex-col gap-2">
             {shown.map((t) => {
@@ -103,6 +110,7 @@ export default function SpendingPage() {
                               <span className="text-muted-foreground">{l.qty} × </span>
                               {p.name}
                             </span>
+                            {!!l.photo_urls?.length && <UnitPhotos urls={l.photo_urls} name={p.name} />}
                             {off > 0 && <Badge variant="lime">{off}% off</Badge>}
                             <Money cents={l.unit_price_cents} className="w-16 text-right text-[14px]" />
                             <RateInput
@@ -155,6 +163,28 @@ export default function SpendingPage() {
         </section>
       </div>
     </div>
+  );
+}
+
+/** The robot's photos of the exact units bought (its purchase-check pictures), newest trips only. */
+function UnitPhotos({ urls, name }: { urls: string[]; name: string }) {
+  const [bad, setBad] = useState<Set<string>>(new Set());
+  const ok = urls.filter((u) => !bad.has(u)).slice(0, 3);
+  if (!ok.length) return null;
+  return (
+    <span className="flex -space-x-1.5" title="The robot's photos of the exact units you got">
+      {ok.map((u, i) => (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          key={u}
+          src={u}
+          alt={`${name}, photo ${i + 1} from the robot`}
+          onError={() => setBad((b) => new Set(b).add(u))}
+          className="size-8 rounded-md object-cover ring-2 ring-card"
+          loading="lazy"
+        />
+      ))}
+    </span>
   );
 }
 

@@ -10,6 +10,12 @@
 Both keep a per-robot ring of recent BrainSteps (``recent_steps``), publish every step as ``brain.step`` and handle
 ``handle_message`` (add / skip / status / what do you see) by keyword; the Claude brain additionally queues messages
 for the running LLM goal.
+
+Plan mode (contracts 0.2.1, ``loop.resolve_exec_mode`` == 'plan': PICKY_EXEC_MODE=plan, or unset with the VLA +
+verifier wired): shop / fetch goals with items run through ``services.runner.run_goal`` (planner -> VLA -> verifier,
+``arms/agent/loop.py``); the brain then finishes the goal with ``fleet.update_goal(bridge.goal_update_from_outcome)``.
+A RobotError from the runner propagates (the fleet reassigns); a runner / planner crash falls back to this v0.2
+executor from the fleet's current goal state. 'direct' (and every other goal kind) is the exact v0.2 path.
 """
 
 from __future__ import annotations
@@ -22,8 +28,11 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
-from arms.agent.brain_exec import ACTIVE_ITEM_STATUSES, BrainExecutor
+from arms.agent.brain_exec import ACTIVE_ITEM_STATUSES, BrainExecutor, apply_update_locally
 from arms.agent.brain_script import ScriptedRunner
+from arms.agent.loop import PlanLoop, resolve_exec_mode
+from arms.agent.planner import LlmPlanner
+from contracts.bridge import MIRROR_MODEL, goal_update_from_outcome
 from contracts.common import RobotId, Timestamp, UserId, utcnow
 from contracts.events import goal_envelope, make_event
 from contracts.fleet import (
@@ -35,6 +44,7 @@ from contracts.fleet import (
     Goal,
     GoalStatus,
 )
+from contracts.plan import CLOSED_STEP_STATUSES
 from contracts.services import Services
 from contracts.sim import RobotError
 from contracts.tools import BrainToolError, brain_tool_definitions
@@ -50,6 +60,8 @@ MAX_ITERS = 25
 CHECKPOINT_EVERY = 6
 """Every N turns the loop adds a progress checkpoint + front-camera summary to the conversation."""
 SCRIPTED = "scripted"
+PLAN_MODE_GOAL_KINDS = ("shop", "fetch")
+"""Goal kinds the loop runner executes in plan mode; shelf_scan / return_to_dock stay on the v0.2 executor."""
 
 _ADD_RE = re.compile(
     r"^\s*(?:(?:can you |could you |please )?(?:also |and )?(?:add|grab|get|pick up|buy)|i also need|also)\s+"
@@ -116,6 +128,8 @@ class BrainRuntime:
     steps: deque[BrainStep] = field(default_factory=lambda: deque(maxlen=STEP_RING))
     inbox: list[str] = field(default_factory=list)
     executor: BrainExecutor | None = None
+    plan_mode: bool = False
+    """True while ``services.runner`` runs this robot's goal (plan mode)."""
     updated_at: Timestamp = field(default_factory=utcnow)
 
 
@@ -197,6 +211,14 @@ class _BrainBase:
 
     # -- RobotBrainService ---------------------------------------------------------------------------------------
     async def run_goal(self, robot_id: RobotId, goal: Goal) -> Goal:
+        if self._wants_plan_mode(goal):
+            finished, goal = await self._run_plan_mode(robot_id, goal)
+            if finished:
+                return goal
+            # the planner / runner crashed: the v0.2 executor finishes from the fleet's current goal state
+        return await self._run_direct(robot_id, goal)
+
+    async def _run_direct(self, robot_id: RobotId, goal: Goal) -> Goal:
         rt = self._runtime(robot_id)
         rt.goal, rt.iterations, rt.inbox = goal, 0, []
         rt.state, rt.mode, rt.model = "thinking", SCRIPTED, SCRIPTED
@@ -232,6 +254,138 @@ class _BrainBase:
 
     async def _run(self, rt: BrainRuntime, ex: BrainExecutor) -> None:
         await ScriptedRunner(ex).run()
+
+    # -- plan mode (0.2.1: planner -> VLA -> verifier) -------------------------------------------------------------
+    def _wants_plan_mode(self, goal: Goal) -> bool:
+        if goal.kind not in PLAN_MODE_GOAL_KINDS or not goal.items:
+            return False
+        try:
+            mode = resolve_exec_mode(self._services)
+        except Exception as e:  # a broken setting never blocks a goal: v0.2 path
+            log.warning("exec mode check failed (%s); direct", e)
+            return False
+        if mode == "tools":
+            log.info("PICKY_EXEC_MODE=tools is not wired into the brain executor yet; running direct")
+        return mode == "plan"
+
+    def _record_mirror(self, step: BrainStep) -> None:
+        """Runner hook: keep the mirrored ``brain.step`` (already published) in the robot's ring and status."""
+        rt = self._runtime(step.robot_id)
+        rt.steps.append(step)
+        rt.last_step = step
+        rt.current_tool = step.tool
+        rt.updated_at = step.ts
+        if rt.plan_mode and rt.state != "error":
+            rt.state = "waiting_user" if step.tool == "ask_user" and step.ok else "acting"
+
+    async def _run_plan_mode(self, robot_id: RobotId, goal: Goal) -> tuple[bool, Goal]:
+        """Run the goal through the loop runner and finish it: (True, the fleet's final Goal), or (False, the goal to
+        continue on the v0.2 executor) when the planner / runner crashed. RobotError and cancellation propagate."""
+        rt = self._runtime(robot_id)
+        services = self._services
+        runner = services.require("runner")
+        if isinstance(runner, PlanLoop):
+            runner.on_brain_step = self._record_mirror
+        rt.goal, rt.iterations, rt.inbox, rt.executor = goal, 0, [], None
+        rt.state, rt.mode, rt.model, rt.plan_mode = "thinking", SCRIPTED, MIRROR_MODEL, True
+        await self._emit(robot_id, "thought", self._planning_text(goal), goal=goal)
+        rt.state = "acting"
+        try:
+            outcome = await runner.run_goal(robot_id, goal)
+        except asyncio.CancelledError:
+            await self._withdraw_goal(goal.goal_id, "goal cancelled")
+            rt.plan_mode = False
+            rt.state, rt.goal, rt.current_tool = "idle", None, None
+            raise
+        except RobotError as e:  # escalate: hand the goal back to the fleet without failing it
+            rt.state = "error"
+            text = f"Robot failure: {e.code}. Handing the goal back to the fleet."
+            await self._emit(robot_id, "error", text, goal=goal)
+            await self._withdraw_goal(goal.goal_id, f"robot failure: {e.code}")
+            rt.plan_mode, rt.goal, rt.current_tool = False, None, None
+            raise
+        except Exception as e:  # a planner / runner bug never kills the fleet task: finish on the v0.2 executor
+            log.exception("plan mode crashed for %s on %s; v0.2 executor takes over", robot_id, goal.goal_id)
+            rt.plan_mode = False
+            await self._emit(robot_id, "error", f"Plan mode failed ({type(e).__name__}: {e}); continuing.", goal=goal)
+            await self._publish_error(goal, robot_id, f"plan mode failed, v0.2 executor takes over: {e}")
+            return False, await self._fresh_goal(goal)
+        update = goal_update_from_outcome(outcome)
+        final = await self._finish_plan_goal(goal, outcome, update)
+        rt.plan_mode = False
+        rt.state = "idle" if rt.state != "error" else rt.state
+        rt.current_tool = None
+        rt.goal = final if not final.terminal else None
+        await self._emit(robot_id, "message", outcome.summary, goal=final)
+        return True, final
+
+    def _planning_text(self, goal: Goal) -> str:
+        """Published BEFORE the planner call (an LLM draft takes 10-20 s), so the robot view is never silent."""
+        stops = len({i.stop_id or i.item_id for i in goal.items})
+        what = f"{stops} stop{'' if stops == 1 else 's'} for '{goal.title}'"
+        who = _llm_planner_label(getattr(self._services, "planner", None))
+        head = f"{who} is planning {what}" if who else f"Planning {what}"
+        return f"{head} as verified steps (plan -> VLA -> verifier)…"
+
+    async def _finish_plan_goal(self, goal: Goal, outcome: Any, update: Any) -> Goal:
+        fleet = self._services.fleet
+        if fleet is None:  # tests / standalone: apply the runner's item state + the terminal update locally
+            local = goal.model_copy(update={"items": [i.model_copy(deep=True) for i in outcome.plan.items]})
+            return apply_update_locally(local, update)
+        try:
+            return await fleet.update_goal(goal.goal_id, update)
+        except (KeyError, ValueError) as e:  # e.g. the goal was cancelled meanwhile: report the fleet's view
+            log.warning("finishing %s failed: %s", goal.goal_id, e)
+            with contextlib.suppress(Exception):
+                return await fleet.get_goal(goal.goal_id)
+            return goal
+
+    async def _fresh_goal(self, goal: Goal) -> Goal:
+        fleet = self._services.fleet
+        if fleet is not None:
+            with contextlib.suppress(Exception):
+                return await fleet.get_goal(goal.goal_id)
+        return goal
+
+    async def _withdraw_goal(self, goal_id: str, reason: str) -> None:
+        approvals = self._services.approvals
+        if approvals is None:
+            return
+        with contextlib.suppress(Exception):
+            for a in approvals.pending(goal_id=goal_id):
+                with contextlib.suppress(Exception):
+                    await approvals.cancel(a.approval_id, reason)
+
+    async def _plan_status_text(self, goal: Goal) -> str | None:
+        runner = self._services.runner
+        if runner is None:
+            return None
+        try:
+            plan = await runner.current_plan(goal.goal_id)
+            if plan is None:
+                return f"Planning '{goal.title}'."
+            state = await runner.run_state(plan.plan_id)
+        except Exception:  # noqa: BLE001 - status text is best effort
+            return None
+        done = sum(1 for s in plan.steps if s.status in CLOSED_STEP_STATUSES)
+        current = next((s for s in plan.steps if s.step_id == state.current_step_id), None)
+        items = [i for i in plan.items if not i.optional or i.status == "in_basket"]
+        got = sum(1 for i in items if i.status == "in_basket")
+        line = (
+            f"Working on '{goal.title}' (verified plan): step {done}/{len(plan.steps)}, "
+            f"{got}/{len(items)} items in the basket"
+        )
+        return f"{line}. Now: {current.title}." if current is not None else f"{line}."
+
+    async def _publish_error(self, goal: Goal, robot_id: RobotId, message: str) -> None:
+        events = self._services.events
+        if events is None:
+            return
+        with contextlib.suppress(Exception):
+            env = goal_envelope(goal, robot_id)
+            await events.publish(
+                make_event("error", **env, source="agent", arm="agent", message=message, code="internal")
+            )
 
     async def _withdraw(self, ex: BrainExecutor, reason: str) -> None:
         approvals = self._services.approvals
@@ -282,12 +436,14 @@ class _BrainBase:
     async def handle_message(self, robot_id: RobotId, text: str, user_id: UserId | None = None) -> BrainReply:
         rt = self._runtime(robot_id)
         goal = rt.executor.goal if rt.executor is not None and rt.goal is not None else None
+        if goal is None and rt.plan_mode:
+            goal = rt.goal
         start = rt.step_no
         store_id = goal.store_id if goal else await self._store_of(robot_id)
         await self._emit(robot_id, "message", text, goal=goal, role="user", store_id=store_id)
         reply = await self._reply(rt, goal, text.strip(), store_id)
         await self._emit(robot_id, "message", reply, goal=goal, store_id=store_id)
-        steps = [s for s in rt.steps if s.step_no > start]
+        steps = [s for s in rt.steps if s.step_no > start and not _is_mirror(s)]
         return BrainReply(robot_id=robot_id, goal_id=goal.goal_id if goal else None, text=reply, steps=steps)
 
     async def _store_of(self, robot_id: RobotId) -> str | None:
@@ -305,6 +461,11 @@ class _BrainBase:
         ex = rt.executor if goal is not None else None
         add = _ADD_RE.match(text)
         skip = _SKIP_RE.match(text)
+        if rt.plan_mode and goal is not None and (add or skip):
+            return (
+                f"I'm in the middle of a verified step plan for '{goal.title}', so I can't change the list right now. "
+                "Change it in the shopper app and I'll pick it up on the next goal."
+            )
         if ex is not None and goal is not None and goal.kind in ("shop", "fetch") and (add or skip):
             if self._queue_for_llm(rt, text):
                 return "Got it, I'll take care of that."
@@ -362,6 +523,10 @@ class _BrainBase:
         return obs.answer
 
     async def _status_text(self, rt: BrainRuntime, goal: Goal | None) -> str:
+        if goal is not None and rt.plan_mode:
+            text = await self._plan_status_text(goal)
+            if text:
+                return text
         if goal is not None:
             items = goal.items
             done = sum(1 for i in items if i.status not in ACTIVE_ITEM_STATUSES)
@@ -383,6 +548,11 @@ class _BrainBase:
                 where = "charging on my dock" if st.charging else at
                 return f"I'm free: {where}{batt}. Send me a goal!"
         return "I'm free right now. Send me a goal!"
+
+
+def _is_mirror(step: BrainStep) -> bool:
+    """A plan-mode step mirrored by the loop runner (``bridge.mirror_brain_step``), not one this brain emitted."""
+    return step.kind == "status" and step.model == MIRROR_MODEL
 
 
 def _match_item(goal: Goal, text: str) -> Any:
@@ -570,3 +740,20 @@ def _compact(result: Any) -> Any:
                 data["decision"] = {k: dec[k] for k in ("verdict", "reasons", "messages") if k in dec}
         return data
     return result
+
+
+def _llm_planner_label(planner: Any) -> str | None:
+    """'Gemini' / 'Claude' when an LLM drafts the plan; None for the scripted planner (or an LLM without a key)."""
+    if not isinstance(planner, LlmPlanner):
+        return None
+    try:
+        if not planner.llm_ready():
+            return None
+        model = (planner.model_name() or "").lower()
+    except Exception:  # noqa: BLE001 - a display label never blocks a goal
+        return None
+    if model.startswith("gemini"):
+        return "Gemini"
+    if model.startswith("claude"):
+        return "Claude"
+    return "The LLM planner"

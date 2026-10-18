@@ -213,14 +213,20 @@ Needs [uv](https://docs.astral.sh/uv/) (Python 3.12) and `make`. Docker only for
 gh repo clone adsdemaybe/picky && cd picky
 make setup               # uv sync --locked (base deps + dev tools)
 cp .env.example .env     # every key is optional; blank = fakes
+make secret NAME=ANTHROPIC_API_KEY   # optional: API keys live in your OS keychain (docs/secrets.md)
 make check               # lint, format check, rules check, tests (what CI runs)
-make demo                # headless trip 1 → follow-up → trip 2, all arms fake; ends with "DEMO OK"
+make demo                # headless trip 1 → follow-up → trip 2, all arms fake; ends with "DEMO OK" + "LOOP OK"
 make dev                 # gateway on http://localhost:8000
 make web                 # the web app on :3000 (needs pnpm on PATH; or the npx commands in "The web app")
 ```
 
-Then open **http://localhost:8000/debug** (a built-in test page: fleet, cameras, stock alerts, a request box and the
-trip view; `/` redirects there) and **http://localhost:8000/docs** (interactive API docs). `make help` lists every
+`make demo` runs the shop goals through the planner → VLA → verifier loop (contracts 0.2.1) and injects one bad grasp
+(`drop_on_first_grasp`): the summary shows the verifier catching it and the retry succeeding.
+`make demo ARGS="--exec-mode direct"` is the v0.2 brain path (`PICKY_EXEC_MODE=direct` is the kill switch).
+
+Then open **http://localhost:8000/debug** (a built-in test page: fleet, the step plan + VLA progress, the verifier's
+verdicts with evidence, cameras, stock alerts, a request box and the trip view; `/` redirects there; `PICKY_DEV=1 make
+dev` adds the presenter's fault controls) and **http://localhost:8000/docs** (interactive API docs). `make help` lists every
 target.
 
 **Browser test (optional).** `uv sync --group e2e && uv run --group e2e playwright install chromium`, then
@@ -235,10 +241,18 @@ PICKY_REAL_ARMS=routing,trust make demo         # a real arm that can't start fa
 make db-up && make seed                         # local Postgres + pgvector, seeded from data/ (catalog extra)
 ```
 
-Keys go in `.env` (see [`.env.example`](.env.example)): `ANTHROPIC_API_KEY` switches the agent and robot brains to
-Claude (blank = deterministic fakes); also `STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`. The web
-app reads its own `arms/frontend/.env.local`.
+Keys go in the team key vault: `make secret NAME=...` stores one in your OS keychain, `make secrets` lists them
+(masked), `make secrets-pull` fetches the team's age-encrypted bundle ([`docs/secrets.md`](docs/secrets.md)); `.env`
+(see [`.env.example`](.env.example)) still works as the lowest-priority fallback. `GEMINI_API_KEY` switches the agent and robot brains to
+Gemini (needs `uv sync --extra agent`; `PICKY_LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` for Claude; blank =
+deterministic fakes); `PERCEPTRON_API_KEY` switches the loop verifier's vision to Perceptron Mk1.5 with
+`PICKY_REAL_ARMS=perception` (needs `uv sync --extra perception`; blank = the ground-truth fake verifier); also
+`STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`. `PICKY_REAL_ARMS=evidence` (no key) gives the
+verifier panel real camera thumbnails instead of the fakes' flat frames. The web app reads its own
+`arms/frontend/.env.local`.
 `make setup` removes extras, so re-run `uv sync --extra <arm>` after it.
+
+**Perceptron VLA (learned grasp tier).** `PICKY_VLA_T1=perceptron` makes the Isaac rover's grasps a policy that runs joint by joint, with Perceptron Mk1.5 as the stand-in. `perceptron_vla` uses Perceptron's robotics VLA, trained on our sim dataset, and needs the team key `PERCEPTRON_ROBOTICS_API_KEY` from Perceptron staff. The runbook (key, one-command pipeline, in-sim test) is [`docs/vla-loop/perceptron-vla.md`](docs/vla-loop/perceptron-vla.md); the dataset is described in [`docs/vla-loop/dataset.md`](docs/vla-loop/dataset.md), and the vhagar test stack and its measured runs are in [`arms/sim/DEPLOY.md`](arms/sim/DEPLOY.md) §8–9.
 
 ## API at a glance (for the web app)
 
@@ -279,6 +293,41 @@ Web-app hand-offs (details in [`docs/frontend-backend-map.md`](docs/frontend-bac
 - Planned (v0.3) for the online screens: offers across retailers, price history + verdicts, purchases / spending /
   running low, Cart Whisperer suggestions.
 
+## Judges' demo
+
+The live demo (contracts 0.2.3 + 0.2.4): the web app shows suggestion cards from Maya's purchase history ("You bought
+this 12 days ago — you usually buy it every 10 days"), the presenter clicks a few and orders them, and the Isaac sim
+is livestreamed on the page doing it, next to the robot's own camera with Perceptron Mk1.5 boxes.
+
+1. **Suggestions** — `GET /api/users/maya/suggestions?store_id=store_ave`: replenish / substitute / complement / deal
+   cards from the purchase-history database (SQLite `PICKY_PURCHASES_DB`, seeded with months of history for maya,
+   sam and jordan relative to "now"), only items in stock at the store; Gemini re-ranks and rewrites the reasons from
+   the cards' signals only (`ranked_by`), templates when it is unavailable. Thumbnails: `/api/products/{sku}/image.jpg`.
+2. **Order** — `POST /api/requests {"user_id":"maya","items":[{"sku":"SALSA-MILD","qty":1}],"store_id":"store_ave"}`:
+   one shop goal for exactly those SKUs, auto-executing, plan mode (planner → VLA → verifier).
+3. **Pictures to the human** — after every shelf grasp the wrist photo goes to the app as a verification card
+   (`item.verification`, `GET /api/verifications`, `POST /api/verifications/{id}` correct / wrong; wrong = put back +
+   re-pick; silence = "auto-accepted" after `PICKY_VERIFY_AUTO_ACCEPT_S`). Produce gets a review card with a photo of
+   each candidate unit ("Which avocados? #1 ripe…"); no answer → the robot's best guess, labelled.
+4. **Checkout unload by the arm** — at the counter the plan holds, per unit: find it in the basket (basket camera /
+   Perceptron point) → grasp from the basket → place on the next counter spot (left → right) → verify it is on the
+   counter (photo card). The Isaac worker animates the SO-101 reaching into the basket and the unit riding the gripper
+   to the counter (`pick_from_basket` / `place_on_counter`, capability `basket_unload`). The app's plan list and live
+   page show `checkout.unload` lines ("Unloading 3/9: Mild Chunky Salsa → counter ✓").
+5. **Visa payment agent** — only once the basket is verified empty: cart mandate → intent mandate checked in code →
+   passkey approval → mock Visa Intelligent Commerce agentic token (no PAN) → authorize + capture (Stripe test mode
+   when `STRIPE_SECRET_KEY` is set) → signed receipt → audit ledger, as `payment.agent_step` events
+   (`GET /api/trips/{id}/payment`). Labelled "Sandbox / simulated — no real money".
+6. **History** — the paid lines (with the verification photos) are appended to the purchase database
+   (`GET /api/users/maya/purchases`) and the cards change on the next visit.
+
+Livestream: `<img src="/api/cameras/rover-ave-1.director/stream.mjpg">` (chase view) and
+`<img src="/api/cameras/rover-ave-1.front.perceived/stream.mjpg">` (on-board camera + Perceptron boxes, "ground
+truth" boxes when Perceptron is unavailable or out of quota). `make demo` runs the whole flow on fakes (the summary
+prints the checkout unload and the payment timeline). Env: `PICKY_UNLOAD_BY_ARM`, `PICKY_VERIFY_ITEMS`,
+`PICKY_VERIFY_AUTO_ACCEPT_S`, `PICKY_VERIFY_MAX_REJECTIONS`, `PICKY_PRODUCE_REVIEW_TIMEOUT_S`, `PICKY_PURCHASES_DB`,
+`PICKY_SUGGESTIONS_LLM`, `PICKY_PAYMENT_AGENT`, `PICKY_PAYMENT_AGENT_LLM` (see `.env.example`).
+
 ## Sim
 
 - **2D fake (always available).** The robot arm's built-in top-down sim drives every robot in every store and draws
@@ -297,8 +346,9 @@ contracts/   locked interfaces: pydantic models, service Protocols, events, LLM 
 utils/       shared helpers: config, logging, db, LLM client, money, geometry, ids, event bus, data loaders
 arms/<arm>/  one folder per feature arm: README.md, __init__.py (create / create_fake), service.py, fake.py, tests/
 data/        source of truth: products, planograms per store, online store, categories, fixtures (users, robots)
-docs/        research.md, architecture.md, demo-script.md, cart-whisperer.md, frontend-backend-map.md, pitch/ (slides,
-             Devpost text); team-plan.md (team master plan) is on arm/frontend until #12 merges
+docs/        research.md, architecture.md, demo-script.md, cart-whisperer.md, frontend-backend-map.md, secrets.md,
+             pitch/ (slides, Devpost text); team-plan.md (team master plan) is on arm/frontend until #12 merges
+secrets/     team key vault bundle: team.age (age-encrypted keys) + recipients.txt (public keys); docs/secrets.md
 scripts/     repo tooling (sync_agent_rules.py)
 ```
 
@@ -346,8 +396,8 @@ Honest snapshot. Each arm's README has the detailed checklist.
 - Synthetic data only: fictional stores, retailers, prices, devices and users.
 - No login in the demo; the app opens as a fictional user (Maya; the account menu says "Demo account (fictional
   data)"). The browser never queries the DB, only the gateway.
-- We don't claim a privacy mode: model calls go to the Claude API, and faces are blurred before any frame leaves the
-  pipeline.
+- We don't claim a privacy mode: model calls go to the Gemini API (Claude if configured), and faces are blurred before any
+  frame leaves the pipeline.
 
 ## Contributing
 

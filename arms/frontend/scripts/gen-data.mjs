@@ -20,14 +20,26 @@ const write = (name, obj) => writeFileSync(join(out, name), JSON.stringify(obj, 
 
 // ---- products ----
 const { products } = load("data/products.yaml");
+// Wireless products are `category: wireless` + a subcategory in data/products.yaml, and what fits what lives in
+// data/wireless.yaml `compatibility` ('*' = any phone). The web app's T-Mobile code reads a category per kind of item
+// (phone, case, screen, charger, ...) and `compatible_with`, so map them here.
+const COMPAT = load("data/wireless.yaml").compatibility ?? {};
+const WIRELESS_CAT = { phones: "phone", cases: "case", screen_protectors: "screen", chargers: "charger", audio: "audio", wearables: "wearable", tablets: "tablet", home_internet: "home_internet", trackers: "connected", sim: "connected" };
+const wirelessSub = (p) => {
+  if (p.subcategory === "phones") return p.brand === "Apple" ? "ios" : "android";
+  if (p.subcategory !== "chargers") return p.subcategory;
+  if (p.sku.startsWith("CBL-")) return "cable";
+  if (p.sku.startsWith("PB-")) return "power_bank";
+  return /wireless|magsafe|snap|watch/i.test(`${p.name} ${p.sku}`) ? "wireless_charger" : "wall_charger";
+};
 write(
   "products.json",
   products.map((p) => ({
     sku: p.sku,
     name: p.name,
     brand: p.brand ?? null,
-    category: p.category,
-    subcategory: p.subcategory ?? null,
+    category: p.category === "wireless" ? (WIRELESS_CAT[p.subcategory] ?? "connected") : p.category,
+    subcategory: p.category === "wireless" ? wirelessSub(p) : (p.subcategory ?? null),
     tags: p.tags ?? [],
     dietary: p.dietary ?? [],
     price_cents: p.price_cents,
@@ -38,8 +50,8 @@ write(
     shape: p.asset?.shape ?? "box",
     dims_m: p.asset?.dims_m ?? [0.15, 0.08, 0.2],
     description: p.description ?? null,
-    // accessories carry `fits:<sku>` tags (lowercase); the app compares against upper-case SKUs
-    compatible_with: (p.tags ?? []).filter((t) => t.startsWith("fits:")).map((t) => t.slice(5).toUpperCase()),
+    // fit: data/wireless.yaml compatibility ('*' = universal = no list), else legacy `fits:<sku>` tags
+    compatible_with: COMPAT[p.sku] ? COMPAT[p.sku].filter((x) => x !== "*") : (p.tags ?? []).filter((t) => t.startsWith("fits:")).map((t) => t.slice(5).toUpperCase()),
     requires: (p.tags ?? []).includes("requires_ios") ? "ios" : (p.tags ?? []).includes("requires_android") ? "android" : null,
   })),
 );

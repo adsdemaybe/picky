@@ -20,7 +20,7 @@ import { usePhrasing } from "../phrasing";
 
 const PRESETS = [
   { label: "New Pixel 9 setup", text: "case and screen protector for my new Pixel 9, under $100" },
-  { label: "Running earbuds", text: "earbuds for running, under $100" },
+  { label: "Running earbuds", text: "earbuds for running, under $200" },
   { label: "Upgrade to Galaxy S26", text: "I want the Galaxy S26, under $1100" },
   { label: "Just a charger", text: "a USB-C wall charger, under $30" },
 ];
@@ -272,7 +272,7 @@ export default function TmoShop() {
               action={
                 <div className="relative">
                   <Search className="pointer-events-none absolute top-2 left-2.5 size-4 text-muted-foreground" aria-hidden />
-                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search 91 products" className="h-8 w-48 rounded-full bg-muted pr-3 pl-8 text-[13px] outline-none" />
+                  <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${tmobileProducts.length} products`} className="h-8 w-48 rounded-full bg-muted pr-3 pl-8 text-[13px] outline-none" />
                 </div>
               }
             >

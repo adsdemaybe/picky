@@ -33,6 +33,10 @@ Isaac notes (6.0, verified on vhagar):
   ``<rover>/Model/LeKiwi`` as a visual puppet (``arms.sim.rover_puppet``): joints deactivated, rigid bodies and
   colliders removed, base pose = the rover root, lift = an offset on the SO-101 links, arm = IK so the jaws meet the
   held unit. Cameras keep the geometry.py rig. Any failure -> the primitive rover.
+- Joint mode (contracts 0.2.2 ``ArmJointsCmd``, learned policies): the puppet's chain is exposed as an
+  ``ArmKinematics`` (``arm_kinematics``) and ``set_robot_joints`` poses the SO-101 links straight from 6 joint degrees
+  (FK through the USD joint frames). The two policy cameras ('<robot>.policy_side' / '.policy_wrist', 640x480) are
+  ordinary lazily created render products with a 0.01 m near clip.
 """
 
 import argparse
@@ -48,6 +52,7 @@ from typing import Any
 from urllib.parse import quote, urlsplit, urlunsplit
 
 from arms.sim import rover_puppet as puppet
+from arms.sim.arm_joints import POLICY_CAMERA_PREFIX, POLICY_NEAR_CLIP_M
 from arms.sim.assets import (
     ASSET_ROOT_ENV,
     ASSETS_SWITCH_ENV,
@@ -62,8 +67,9 @@ from arms.sim.assets import (
     label_meshes,
     rover_usd_from_env,
 )
+from arms.sim.director import Director
 from arms.sim.geometry import ARM_FULL_EXT_M, ARM_STOW_EXT_M, NEAR_CLIP_M, CameraPose
-from arms.sim.labels import label_png
+from arms.sim.labels import label_png, package_kind, package_png, sign_png
 from arms.sim.scene_spec import (
     LIFT_REF_M,
     PrimSpec,
@@ -74,6 +80,7 @@ from arms.sim.scene_spec import (
     camera_prim_path,
     usd_name,
 )
+from arms.sim.visuals import asset_usd, load_visuals
 from arms.sim.worker import NullBackend, SimBackend, WorkerCore
 from contracts.common import ARM_MOUNT_X_M, Point3, Pose2D
 from contracts.sim import CameraFrame, SimLog, command_error_result, parse_gateway_to_sim
@@ -96,6 +103,17 @@ RT_WARMUP_STEPS = 2
 IDLE_UPDATE_S = 0.25
 """Idle ``app.update()`` period (4 Hz) when no frame was rendered this tick (frames come from synchronous steps)."""
 CEILING_EMISSIVE = 0.6
+AMBIENT_ENV = "PICKY_SIM_AMBIENT"
+AMBIENT_DEFAULT = 0.1
+"""RTX ambient term (``/rtx/sceneDb/ambientLightIntensity``): the stores are closed boxes lit by ceiling RectLights
+only, so real-time RTX leaves the shelf interiors (under each board) dark grey; a small uniform ambient lifts them.
+``PICKY_SIM_AMBIENT=0`` = Isaac's default (none)."""
+WRIST_NEAR_CLIP_PUPPET_M = 0.01
+"""Near clip of a USD-puppet rover's wrist camera: the SO-101 jaw tips sit ~5 cm ahead of / 3 cm below the eye, and
+NEAR_CLIP_M (0.05) sliced them into two black cross-sections in every wrist frame. The primitive rig keeps NEAR_CLIP_M
+(its wrist-camera housing prim must stay clipped)."""
+EXTERNAL_LIGHT_SCALE_ENV = "PICKY_EXTERNAL_LIGHT_SCALE"
+"""Multiplier on the lights of an external scene USD (``arms.sim.external``; the Genie Sim market is bright)."""
 DEFAULT_LABEL_DIR = "/tmp/picky-sim-labels"
 TAG_SIZE_M = (0.08, 0.06)
 """Shelf-edge price tag in front of SKUs whose model carries no label (loose produce)."""
@@ -322,6 +340,7 @@ class IsaacBackend:
         UsdGeom.Xform.Define(self.stage, "/World/Stores")
         dome = UsdLux.DomeLight.Define(self.stage, "/World/Lights/Dome")
         dome.CreateIntensityAttr(600.0)
+        self._set_ambient()
         self.label_dir = Path(label_dir)
         self.label_dir.mkdir(parents=True, exist_ok=True)
         self.so101_urdf = so101_urdf
@@ -335,11 +354,31 @@ class IsaacBackend:
         self._robots: dict[str, dict[str, Any]] = {}
         self._cams: dict[str, _IsaacCamera] = {}
         self._materials: dict[str, Any] = {}
+        self._model_bounds: dict[str, tuple[Any, Any] | None] = {}
         self._specs: dict[str, SceneSpec] = {}
+        self._ext: dict[tuple[str, str], dict[str, Any]] = {}
+        """External-scene units (arms.sim.external): (store, instance) -> {path, yaw, op}."""
+        self._ext_base: dict[str, tuple[Any, Any, Any, float]] = {}
+        """External prim path -> (store-local matrix at build, inverse parent store-local matrix, box center, yaw)."""
         self._scene_dirty = True
         self._last_update = 0.0
         self._stats_n = 0
         self._stats_s = 0.0
+
+    @staticmethod
+    def _set_ambient() -> None:
+        try:
+            ambient = float(os.environ.get(AMBIENT_ENV, AMBIENT_DEFAULT))
+        except ValueError:
+            ambient = AMBIENT_DEFAULT
+        try:
+            import carb.settings  # type: ignore[import-not-found]
+
+            settings = carb.settings.get_settings()
+            settings.set("/rtx/sceneDb/ambientLightIntensity", ambient)
+            settings.set("/rtx/sceneDb/ambientLightColor", [1.0, 0.98, 0.95])
+        except Exception as exc:  # noqa: BLE001 - cosmetic
+            log.warning("cannot set the RTX ambient light (%s)", exc)
 
     # -- materials -----------------------------------------------------------------------------------------------------
     def _color_material(self, hex_color: str, emissive: float = 0.0) -> Any:
@@ -376,12 +415,26 @@ class IsaacBackend:
         px: tuple[int, int] | None = None,
     ) -> Any:
         """Our label PNG (labels.label_png, the artwork perception matches) as a UsdPreviewSurface, per SKU + price."""
-        from pxr import Sdf, UsdShade  # type: ignore[import-not-found]
 
         key = f"label_{usd_name(sku)}_{price_cents or 0}"
         if key in self._materials:
             return self._materials[key]
         product = spec.products.get(sku)
+        kind = package_kind(product.subcategory, product.tags) if product else None
+        if product and kind:  # retail package front, pixels in the box face's aspect
+            w, _, h = product.asset.dims_m
+            png = package_png(
+                text or sku,
+                kind=kind,
+                brand=product.brand,
+                size=product.size,
+                price_cents=price_cents,
+                barcode=barcode,
+                color=color,
+                px=(320, round(320 * h / w)),
+            )
+            self._materials[key] = self._texture_material(key, png) if png else self._color_material(color)
+            return self._materials[key]
         png = label_png(
             text or sku,
             brand=product.brand if product else None,
@@ -394,6 +447,13 @@ class IsaacBackend:
         if png is None:
             self._materials[key] = self._color_material(color)
             return self._materials[key]
+        self._materials[key] = self._texture_material(key, png)
+        return self._materials[key]
+
+    def _texture_material(self, key: str, png: bytes, emissive: float = 0.0) -> Any:
+        """UsdPreviewSurface with ``png`` as diffuse (and, when ``emissive`` > 0, emissive) texture."""
+        from pxr import Gf, Sdf, UsdShade  # type: ignore[import-not-found]
+
         file = self.label_dir / f"{key}.png"
         file.write_bytes(png)
         path = f"/World/Looks/{key}"
@@ -410,8 +470,10 @@ class IsaacBackend:
         tex.CreateInput("st", Sdf.ValueTypeNames.Float2).ConnectToSource(reader.ConnectableAPI(), "result")
         tex.CreateOutput("rgb", Sdf.ValueTypeNames.Float3)
         sh.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(tex.ConnectableAPI(), "rgb")
+        if emissive:
+            tex.CreateInput("scale", Sdf.ValueTypeNames.Float4).Set(Gf.Vec4f(emissive, emissive, emissive, 1.0))
+            sh.CreateInput("emissiveColor", Sdf.ValueTypeNames.Color3f).ConnectToSource(tex.ConnectableAPI(), "rgb")
         mat.CreateSurfaceOutput().ConnectToSource(sh.ConnectableAPI(), "surface")
-        self._materials[key] = mat
         return mat
 
     @staticmethod
@@ -449,6 +511,8 @@ class IsaacBackend:
             light.CreateIntensityAttr(9000.0)
             UsdGeom.XformCommonAPI(light).SetTranslate(Gf.Vec3d(*spec.center))  # RectLight emits along -Z (down)
             return light
+        if spec.role in ("sign", "decor") and (spec.role == "sign" or spec.asset):
+            return self._define_dressing(spec, path)
         g = self._geom(path, spec.shape)
         xf = UsdGeom.XformCommonAPI(g)
         xf.SetTranslate(Gf.Vec3d(*spec.center))
@@ -465,7 +529,12 @@ class IsaacBackend:
 
     def _define_unit(self, spec: SceneSpec | None, prim: PrimSpec) -> str:
         """Product unit: the SKU's per-item model when it resolves (``prim.render``), else today's primitive."""
-        ua = self.assets.resolve(prim.sku) if prim.render != "primitive" else None
+        if prim.render == "external":
+            path = self._external_unit(spec, prim)
+            if path is not None:
+                return path
+            prim = prim.model_copy(update={"render": "primitive", "external_path": None})
+        ua = self.assets.resolve(prim.sku) if prim.render not in ("primitive", "external") else None
         if ua is not None and spec is not None:
             try:
                 return self._define_model_unit(spec, prim, ua)
@@ -623,13 +692,17 @@ class IsaacBackend:
         xf = UsdGeom.XformCommonAPI(root)
         xf.SetTranslate(Gf.Vec3d(*prim.center))
         xf.SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(prim.yaw)))
+        if prim.asset and self._model_unit(spec, prim):
+            return self._finish_unit(root, prim)
         body = self._geom(f"{prim.path}/body", prim.shape)
         UsdGeom.XformCommonAPI(body).SetScale(Gf.Vec3f(*prim.size))
         body.CreateDisplayColorAttr([Gf.Vec3f(*_rgb(prim.color))])
         self._bind(body.GetPrim(), self._color_material(prim.color))
         if prim.shape != "sphere" and spec is not None:
             w, d, h = prim.size
-            hw, hh, y = w * 0.46, h * 0.42, -d / 2 - 0.0015
+            product = spec.products.get(prim.sku or "")
+            packaged = product is not None and package_kind(product.subcategory, product.tags) is not None
+            hw, hh, y = (w * 0.5, h * 0.5, -d / 2 - 0.0008) if packaged else (w * 0.46, h * 0.42, -d / 2 - 0.0015)
             mesh = UsdGeom.Mesh.Define(self.stage, f"{prim.path}/label")
             mesh.CreatePointsAttr(
                 [Gf.Vec3f(-hw, y, -hh), Gf.Vec3f(hw, y, -hh), Gf.Vec3f(hw, y, hh), Gf.Vec3f(-hw, y, hh)]
@@ -644,9 +717,151 @@ class IsaacBackend:
             )
             st.Set([Gf.Vec2f(0, 0), Gf.Vec2f(1, 0), Gf.Vec2f(1, 1), Gf.Vec2f(0, 1)])
             self._bind(mesh.GetPrim(), self._label_material(spec, prim))
+        return self._finish_unit(root, prim)
+
+    def _finish_unit(self, root: Any, prim: PrimSpec) -> str:
         self._tag_attrs(prim, root.GetPrim())
         self._inst_paths[(prim.store_id or "", prim.instance_id or "")] = prim.path
         return prim.path
+
+    # -- visual models (arms/sim/visuals.yaml) -----------------------------------------------------------------------
+    def _quad(self, path: str, w: float, h: float, center: Vec3, mat: Any, yaw: float = 0.0, normal_y: float = -1.0):
+        """Textured w x h quad facing ``normal_y`` (-1 = local -y) at ``center`` (parent frame)."""
+        from pxr import Gf, Sdf, UsdGeom  # type: ignore[import-not-found]
+
+        hw, hh = w / 2, h / 2
+        mesh = UsdGeom.Mesh.Define(self.stage, path)
+        pts = [Gf.Vec3f(-hw, 0, -hh), Gf.Vec3f(hw, 0, -hh), Gf.Vec3f(hw, 0, hh), Gf.Vec3f(-hw, 0, hh)]
+        mesh.CreatePointsAttr(pts)
+        mesh.CreateFaceVertexCountsAttr([4])
+        mesh.CreateFaceVertexIndicesAttr([0, 1, 2, 3])
+        mesh.CreateNormalsAttr([Gf.Vec3f(0, normal_y, 0)] * 4)
+        mesh.SetNormalsInterpolation(UsdGeom.Tokens.vertex)
+        mesh.CreateDoubleSidedAttr(True)
+        st = UsdGeom.PrimvarsAPI(mesh).CreatePrimvar("st", Sdf.ValueTypeNames.TexCoord2fArray, UsdGeom.Tokens.vertex)
+        st.Set([Gf.Vec2f(0, 0), Gf.Vec2f(1, 0), Gf.Vec2f(1, 1), Gf.Vec2f(0, 1)])
+        xf = UsdGeom.XformCommonAPI(mesh)
+        xf.SetTranslate(Gf.Vec3d(*center))
+        if yaw:
+            xf.SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(yaw)))
+        self._bind(mesh.GetPrim(), mat)
+        return mesh
+
+    def _bounds(self, asset: str) -> tuple[Any, Any] | None:
+        """(min, max) of the converted model in its own frame, or None when it was not fetched (logged once)."""
+        if asset not in self._model_bounds:
+            from pxr import Usd, UsdGeom  # type: ignore[import-not-found]
+
+            usd = asset_usd(asset)
+            bounds = None
+            if usd.exists():
+                stage = Usd.Stage.Open(str(usd))
+                rng = (
+                    UsdGeom.BBoxCache(Usd.TimeCode.Default(), ["default", "render"])
+                    .ComputeWorldBound(stage.GetPseudoRoot())
+                    .ComputeAlignedRange()
+                )
+                if not rng.IsEmpty():
+                    bounds = (rng.GetMin(), rng.GetMax())
+            else:
+                log.warning("visual model %s missing at %s (python -m arms.sim.fetch_visuals); box", asset, usd)
+            self._model_bounds[asset] = bounds
+        return self._model_bounds[asset]
+
+    def _add_model(
+        self, path: str, asset: str, size: Vec3, *, bottom_z: float, tilt_deg: float = 0.0, fit: str = "box"
+    ) -> bool:
+        """Reference ``asset`` at ``path`` (an Xform in the parent's frame), stood up, turned to face local -y,
+        uniformly scaled to fit ``size`` (w, d, h; ``fit='height'`` matches h only), its bottom at ``bottom_z``."""
+        from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
+
+        bounds = self._bounds(asset)
+        src = load_visuals().assets.get(asset)
+        if bounds is None or src is None:
+            return False
+        lo, hi = bounds
+        c = (lo + hi) / 2
+        ex, ey, ez = (hi - lo)[0], (hi - lo)[1], (hi - lo)[2]
+        if src.up == "y":  # +90 deg about x: model +y -> +z, model +z -> -y
+            ex, ey, ez = ex, ez, ey
+        w, d, h = size
+        scale = h / ez if fit == "height" else min(w / ex, d / ey, h / ez)
+        xform = UsdGeom.Xform.Define(self.stage, path)
+        xformable = UsdGeom.Xformable(xform)
+        xformable.ClearXformOpOrder()
+        xformable.AddTranslateOp(opSuffix="place").Set(Gf.Vec3d(0.0, 0.0, bottom_z + ez * scale / 2))
+        xformable.AddRotateZOp(opSuffix="front").Set(src.yaw_deg)
+        xformable.AddRotateXOp(opSuffix="tilt").Set(-tilt_deg)
+        xformable.AddScaleOp().Set(Gf.Vec3f(scale, scale, scale))
+        if src.up == "y":
+            xformable.AddRotateXOp(opSuffix="up").Set(90.0)
+        xformable.AddTranslateOp(opSuffix="center").Set(Gf.Vec3d(-c[0], -c[1], -c[2]))
+        # Reference into a child: the model file's root carries its own transform (the converter's axis/unit fix),
+        # which the bounds above include and which local xform ops on the referencing prim would override.
+        geo = UsdGeom.Xform.Define(self.stage, f"{path}/geo")
+        geo.GetPrim().GetReferences().AddReference(str(asset_usd(asset)))
+        return True
+
+    def _model_unit(self, spec: SceneSpec | None, prim: PrimSpec) -> bool:
+        """Product unit drawn as its 3D model (+ display puck for phones) with a small price card in front."""
+        from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
+
+        w, d, h = prim.size
+        bottom = -h / 2
+        model_size = prim.model_dims or prim.size
+        if prim.display == "stand":
+            puck = UsdGeom.Cylinder.Define(self.stage, f"{prim.path}/stand")
+            puck.CreateRadiusAttr(0.045)
+            puck.CreateHeightAttr(0.018)
+            puck.CreateAxisAttr(UsdGeom.Tokens.z)
+            UsdGeom.XformCommonAPI(puck).SetTranslate(Gf.Vec3d(0.0, 0.01, bottom + 0.009))
+            self._bind(puck.GetPrim(), self._color_material("#f4f4f4"))
+            bottom += 0.018
+        if not self._add_model(
+            f"{prim.path}/model", prim.asset or "", model_size, bottom_z=bottom, tilt_deg=prim.tilt_deg
+        ):
+            if prim.display == "stand":
+                self.stage.RemovePrim(f"{prim.path}/stand")
+            return False
+        if spec is not None and prim.price_card:  # one price card per slot (front unit): name, price, barcode
+            cw = max(0.06, min(0.09, w * 1.2))
+            self._quad(
+                f"{prim.path}/label",
+                cw,
+                cw * 0.75,
+                # stands on the shelf / table beside the unit, in its front plane (inside the fixture edge)
+                (-(max(w / 2, 0.045) + cw / 2 + 0.01), -d / 2 + 0.005, -h / 2 + cw * 0.375),
+                self._label_material(spec, prim),
+            )
+        return True
+
+    def _define_dressing(self, spec: PrimSpec, path: str) -> Any:
+        """Decor model or sign (visuals.yaml): an Xform at ``spec.center`` turned by ``spec.yaw``."""
+        from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
+
+        root = UsdGeom.Xform.Define(self.stage, path)
+        xf = UsdGeom.XformCommonAPI(root)
+        xf.SetTranslate(Gf.Vec3d(*spec.center))
+        xf.SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(spec.yaw)))
+        w, d, h = spec.size
+        if spec.role == "sign":
+            board = self._geom(f"{path}/board", "box")
+            UsdGeom.XformCommonAPI(board).SetScale(Gf.Vec3f(w, d, h))
+            self._bind(board.GetPrim(), self._color_material(spec.color))
+            png = sign_png(
+                spec.label_text or "", color=spec.color, text_color=spec.text_color or "#ffffff", aspect=w / h
+            )
+            if png:
+                key = f"sign_{usd_name(spec.label_text or 'blank')}_{spec.color.lstrip('#')}_{int(w / h * 10)}"
+                if key not in self._materials:
+                    self._materials[key] = self._texture_material(key, png, emissive=0.6)
+                self._quad(f"{path}/face", w * 0.98, h * 0.94, (0.0, -d / 2 - 0.002, 0.0), self._materials[key])
+            return root
+        if not self._add_model(f"{path}/model", spec.asset or "", (w, d, h), bottom_z=-h / 2, fit="height"):
+            box = self._geom(f"{path}/box", "box")
+            UsdGeom.XformCommonAPI(box).SetScale(Gf.Vec3f(w, d, h))
+            self._bind(box.GetPrim(), self._color_material(spec.color))
+        return root
 
     # -- SimBackend ----------------------------------------------------------------------------------------------------
     def build_store(self, spec: SceneSpec, offset: Vec3) -> None:
@@ -661,9 +876,15 @@ class IsaacBackend:
             del self._inst_paths[key]
         for key in [k for k in self._units if k[0] == spec.store_id]:
             del self._units[key]
+        for key in [k for k in self._ext if k[0] == spec.store_id]:
+            del self._ext[key]
+        for path in [p for p in self._ext_base if p.startswith(root + "/")]:
+            del self._ext_base[path]
         xform = UsdGeom.Xform.Define(self.stage, root)
         UsdGeom.XformCommonAPI(xform).SetTranslate(Gf.Vec3d(*offset))
         self._store_roots[spec.store_id] = root
+        if spec.external_usd:
+            self._build_external(spec)
         # (no Sdf.ChangeBlock: the Usd/UsdShade APIs used here read the stage while authoring)
         self._specs[spec.store_id] = spec
         for p in spec.prims:
@@ -683,12 +904,116 @@ class IsaacBackend:
                     log.warning("tag for %s failed: %s", layout.slot_id, exc)
         if modeled:
             log.info("store %s: %d units on per-item models, %d shelf tags", spec.store_id, modeled, tags)
+        external = sum(1 for k in self._ext if k[0] == spec.store_id)
+        if spec.external_usd:
+            log.info("store %s: %d units are product prims of %s", spec.store_id, external, spec.external_usd)
         for _ in range(5):
             self._update()
         self._changed()
         log.info(
             "store %s built at %s: %d prims, %d units", spec.store_id, offset, len(spec.prims), len(spec.instances)
         )
+
+    # -- external scenes (arms.sim.external): the store's own USD draws shelves + products ---------------------------
+    def _build_external(self, spec: SceneSpec) -> None:
+        """Reference the store's USD under ``spec.external_root`` (translated USD -> store frame), freeze its rigid
+        bodies (posed kinematically like every unit) and hide the mapped prims that have no unit."""
+        from pxr import Gf, Sdf, Usd, UsdGeom, UsdLux, UsdPhysics  # type: ignore[import-not-found]
+
+        assert spec.external_root and spec.external_usd
+        scene = UsdGeom.Xform.Define(self.stage, spec.external_root)
+        UsdGeom.XformCommonAPI(scene).SetTranslate(Gf.Vec3d(*spec.external_translate))
+        scene.GetPrim().GetReferences().AddReference(spec.external_usd, Sdf.Path(spec.external_default_prim))
+        self.stage.Load(spec.external_root)
+        try:
+            light_scale = float(os.environ.get(EXTERNAL_LIGHT_SCALE_ENV, "1.0"))
+        except ValueError:
+            light_scale = 1.0
+        bodies = lights = 0
+        physics_scenes = []
+        for p in Usd.PrimRange(scene.GetPrim()):
+            if p.HasAPI(UsdPhysics.RigidBodyAPI):
+                UsdPhysics.RigidBodyAPI(p).CreateRigidBodyEnabledAttr(False)
+                bodies += 1
+            if p.IsA(UsdPhysics.Scene):
+                physics_scenes.append(p)
+            if light_scale != 1.0 and (p.HasAPI(UsdLux.LightAPI) or p.GetTypeName().endswith("Light")):
+                a = p.GetAttribute("inputs:intensity")
+                if a and a.Get() is not None:
+                    a.Set(float(a.Get()) * light_scale)
+                    lights += 1
+        for p in physics_scenes:  # after the traversal: deactivating changes the stage under the iterator
+            p.SetActive(False)  # one physics scene per stage; nothing here is simulated anyway
+        for rel in spec.external_hidden:
+            self._set_visible(f"{spec.external_root}/{rel}", False)
+        log.info(
+            "store %s: referenced %s (%d rigid bodies frozen, %d lights x%.2f, %d spare prims hidden)",
+            spec.store_id,
+            spec.external_usd,
+            bodies,
+            lights,
+            light_scale,
+            len(spec.external_hidden),
+        )
+
+    def _set_visible(self, path: str, visible: bool) -> None:
+        from pxr import UsdGeom  # type: ignore[import-not-found]
+
+        prim = self.stage.GetPrimAtPath(path)
+        if prim and prim.IsValid():
+            im = UsdGeom.Imageable(prim)
+            im.MakeVisible() if visible else im.MakeInvisible()
+
+    def _store_matrix(self, prim: Any, root_inv: Any) -> Any:
+        from pxr import Usd, UsdGeom  # type: ignore[import-not-found]
+
+        return UsdGeom.Xformable(prim).ComputeLocalToWorldTransform(Usd.TimeCode.Default()) * root_inv
+
+    def _external_unit(self, spec: SceneSpec | None, prim: PrimSpec) -> str | None:
+        """Bind a unit to its USD product prim (no new geometry). None when the prim is missing (primitive then)."""
+        from pxr import Gf, Usd, UsdGeom  # type: ignore[import-not-found]
+
+        if spec is None or not spec.external_root or not prim.external_path:
+            return None
+        path = f"{spec.external_root}/{prim.external_path}"
+        p = self.stage.GetPrimAtPath(path)
+        if not p or not p.IsValid() or not p.IsA(UsdGeom.Xformable):
+            log.warning("unit %s: external prim %s not found; drawing the primitive", prim.instance_id, path)
+            return None
+        if path not in self._ext_base:  # the prim's pose as authored by the scene (cached: a restock reuses it)
+            root = self.stage.GetPrimAtPath(spec.root_path)
+            root_inv = UsdGeom.Xformable(root).ComputeLocalToWorldTransform(Usd.TimeCode.Default()).GetInverse()
+            w0 = self._store_matrix(p, root_inv)
+            wp = self._store_matrix(p.GetParent(), root_inv)
+            self._ext_base[path] = (w0, wp.GetInverse(), Gf.Vec3d(*prim.center), prim.yaw)
+        self._set_visible(path, True)
+        key = (prim.store_id or "", prim.instance_id or "")
+        self._ext[key] = {"path": path, "yaw": prim.yaw, "op": None}
+        self._inst_paths[key] = path
+        base_center = self._ext_base[path][2]
+        if any(abs(a - b) > 1e-4 for a, b in zip(base_center, prim.center, strict=True)):
+            self._pose_external(key[0], key[1], Point3(x=prim.center[0], y=prim.center[1], z=prim.center[2]), prim.yaw)
+        return path
+
+    def _pose_external(self, store_id: str, instance_id: str, position: Point3, yaw: float | None) -> None:
+        """Move an external prim so its box center is at ``position`` (store frame), turned by ``yaw`` - its
+        build-time yaw about +z: local = W0 . T(-c0) . Rz(dyaw) . T(p) . Wparent^-1 (Gf row vectors)."""
+        from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
+
+        e = self._ext[(store_id, instance_id)]
+        w0, wp_inv, c0, yaw0 = self._ext_base[e["path"]]
+        if yaw is not None:
+            e["yaw"] = yaw
+        rot = Gf.Matrix4d().SetRotate(Gf.Rotation(Gf.Vec3d(0, 0, 1), math.degrees(e["yaw"] - yaw0)))
+        m = (
+            w0
+            * Gf.Matrix4d().SetTranslate(-c0)
+            * rot
+            * Gf.Matrix4d().SetTranslate(Gf.Vec3d(position.x, position.y, position.z))
+        )
+        if e["op"] is None:
+            e["op"] = UsdGeom.Xformable(self.stage.GetPrimAtPath(e["path"])).MakeMatrixXform()
+        e["op"].Set(m * wp_inv)
 
     def set_store_offset(self, store_id: str, offset: Vec3) -> None:
         from pxr import Gf, UsdGeom  # type: ignore[import-not-found]
@@ -736,16 +1061,17 @@ class IsaacBackend:
         from pxr import Gf, Usd, UsdGeom, UsdPhysics  # type: ignore[import-not-found]
 
         model_path = f"{rover.root_path}/{puppet.MODEL_PRIM_NAME}"
+        rm = puppet.rover_model_for(rover.model_usd)
         try:
             model = UsdGeom.Xform.Define(self.stage, model_path)
-            model.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, puppet.FLOOR_OFFSET_M))
-            model.AddRotateZOp().Set(math.degrees(puppet.HEADING_OFFSET_RAD))
-            ref = self.stage.DefinePrim(rover.model_path or f"{model_path}/{puppet.MODEL_REF_NAME}", "Xform")
+            model.AddTranslateOp().Set(Gf.Vec3d(0.0, 0.0, rm.floor_offset_m))
+            model.AddRotateZOp().Set(math.degrees(rm.heading_offset_rad))
+            ref = self.stage.DefinePrim(rover.model_path or f"{model_path}/{rm.ref_name}", "Xform")
             ref.GetReferences().AddReference(rover.model_usd or "")
             names = [c.GetName() for c in ref.GetChildren()]
-            if not puppet.names_ok(names):
+            if not puppet.names_ok(names, rm):
                 raise RuntimeError(f"{rover.model_usd} has no SO-101 links (children: {names[:8]})")
-            geo = self._puppet_geometry(rover.model_usd or "", ref)
+            geo = self._puppet_geometry(rover.model_usd or "", ref, rm)
             if geo is None:
                 raise RuntimeError("arm chain unavailable")
             # never simulated: no articulation, no joints, no rigid bodies, no colliders
@@ -762,13 +1088,13 @@ class IsaacBackend:
                 jp = self.stage.GetPrimAtPath(path)
                 if jp:
                     jp.SetActive(False)
-            for rel in (*puppet.HIDE_OVERLAY_PRIMS, *puppet.VIRTUAL_LINKS):
+            for rel in (*rm.hide_prims, *rm.virtual_links):
                 hp = self.stage.GetPrimAtPath(f"{ref.GetPath()}/{rel}")
                 if hp:
                     hp.SetActive(False)
             ops: dict[str, Any] = {}
-            for name in puppet.ARM_LINKS:
-                xf = UsdGeom.Xformable(self.stage.GetPrimAtPath(f"{ref.GetPath()}/{name}"))
+            for name, usd_name in rm.link_map.items():
+                xf = UsdGeom.Xformable(self.stage.GetPrimAtPath(f"{ref.GetPath()}/{usd_name}"))
                 xf.ClearXformOpOrder()
                 ops[name] = xf.AddTransformOp(opSuffix="puppet")
                 ops[name].Set(Gf.Matrix4d(*gf_rows(geo["chain"].rest[name])))
@@ -779,33 +1105,39 @@ class IsaacBackend:
                 self.stage.RemovePrim(model_path)
             return None
 
-    def _puppet_geometry(self, model_usd: str, ref: Any) -> dict[str, Any] | None:
+    def _puppet_geometry(
+        self, model_usd: str, ref: Any, rm: puppet.RoverModel = puppet.LEKIWI
+    ) -> dict[str, Any] | None:
         """Arm chain + reach table of one rover USD (read from the first rover that references it; shared)."""
         if model_usd in self._puppet_geo:
             return self._puppet_geo[model_usd]
         t0 = time.monotonic()
         try:
-            geo = self._build_puppet_geometry(ref)
+            geo = self._build_puppet_geometry(ref, rm)
         except Exception as exc:  # noqa: BLE001
             log.warning("rover USD %s: cannot build the SO-101 chain (%s)", model_usd, exc)
             geo = None
         self._puppet_geo[model_usd] = geo
         if geo is not None:
             log.info(
-                "rover USD %s: SO-101 puppet ready in %.1fs (reach table max error %.0f mm; z_ref %.3f m)",
+                "rover USD %s (%s): SO-101 puppet ready in %.1fs (reach table max error %.0f mm; z_ref %.3f m)",
                 model_usd,
+                rm.key,
                 time.monotonic() - t0,
                 geo["table"].max_error_m * 1000,
                 geo["z_ref"],
             )
         return geo
 
-    def _build_puppet_geometry(self, ref: Any) -> dict[str, Any]:
+    def _build_puppet_geometry(self, ref: Any, rm: puppet.RoverModel = puppet.LEKIWI) -> dict[str, Any]:
         from pxr import Gf, Usd, UsdGeom, UsdPhysics  # type: ignore[import-not-found]
 
         base_path = str(ref.GetPath())
+        usd_name = rm.link_map
         rest = {
-            n: from_gf(UsdGeom.Xformable(self.stage.GetPrimAtPath(f"{base_path}/{n}")).GetLocalTransformation())
+            n: from_gf(
+                UsdGeom.Xformable(self.stage.GetPrimAtPath(f"{base_path}/{usd_name[n]}")).GetLocalTransformation()
+            )
             for n in puppet.ARM_LINKS
         }
         found: dict[str, Any] = {}
@@ -829,8 +1161,8 @@ class IsaacBackend:
             hi = p.GetAttribute("physics:upperLimit")
             return puppet.ArmJoint(
                 name=name,
-                parent=j.GetBody0Rel().GetTargets()[0].name,
-                child=j.GetBody1Rel().GetTargets()[0].name,
+                parent=rm.canonical(j.GetBody0Rel().GetTargets()[0].name),
+                child=rm.canonical(j.GetBody1Rel().GetTargets()[0].name),
                 frame1=puppet.quat_pose(q.GetReal(), im[0], im[1], im[2], pos=(pos[0], pos[1], pos[2])),
                 axis=str(ax.Get() if ax and ax.Get() else "X"),
                 lower_deg=float(lo.Get()) if lo and lo.Get() is not None else -180.0,
@@ -844,14 +1176,17 @@ class IsaacBackend:
             root_joint=joint(puppet.PAN_JOINT),
         )
         # TCP between the jaw tips (gripper closed), from the visual meshes in each link's frame
-        M = puppet.model_matrix(from_gf(UsdGeom.Xformable(ref).GetLocalTransformation()))
+        M = puppet.model_matrix(from_gf(UsdGeom.Xformable(ref).GetLocalTransformation()), rm)
+        if rm.align_pan:  # robot v3: the SO-101 faces sideways at pan 0 -> turn its rest pose to face forward
+            chain = puppet.align_rest_pan(chain, puppet.forward_pan(chain, M))
+            rest = chain.rest
         fwd = puppet.rotate(puppet.inverse(M), (1.0, 0.0, 0.0))
         closed = {"gripper": math.radians(puppet.GRIPPER_CLOSED_DEG)}
         poses = chain.fk(closed)
         xc = UsdGeom.XformCache()
 
         def tip(link: str) -> puppet.Vec3:
-            lp = self.stage.GetPrimAtPath(f"{base_path}/{link}")
+            lp = self.stage.GetPrimAtPath(f"{base_path}/{usd_name[link]}")
             inv = xc.GetLocalToWorldTransform(lp).GetInverse()
             pts: list[puppet.Vec3] = []
             for mp in Usd.PrimRange(lp, Usd.TraverseInstanceProxies()):
@@ -878,8 +1213,10 @@ class IsaacBackend:
         tcp_model = puppet.tcp_from_tips(tip("gripper"), tip("jaw"), puppet.position(poses["wrist"]))
         chain.tcp = puppet.apply(puppet.inverse(poses["gripper"]), tcp_model)
         fixed = {"wrist_roll": math.radians(puppet.WRIST_ROLL_DEG), **closed}
-        z_ref = puppet.apply(M, chain.tcp_point(chain.fk(fixed)))[2]
+        z_ref = rm.z_ref_m if rm.z_ref_m is not None else puppet.apply(M, chain.tcp_point(chain.fk(fixed)))[2]
         dx = ARM_MOUNT_X_M + puppet.ARM_PAN_FORWARD_M - puppet.apply(M, puppet.position(rest["shoulder"]))[0]
+        if rm.fixed_lift:  # robot v3: the SO-101 stays on its riser; the IK reaches the rig's gripper point from there
+            dx = 0.0
         m_inv = puppet.inverse(M)
 
         def target(ext: float, drop: float) -> puppet.Vec3:
@@ -889,18 +1226,29 @@ class IsaacBackend:
             chain,
             target,
             (ARM_STOW_EXT_M, ARM_FULL_EXT_M + puppet.TCP_LEAD_M),
-            drops=PUPPET_DROPS_M,
+            drops=rm.drops_m or PUPPET_DROPS_M,
             base=puppet.robot_delta_in_model(M, (dx, 0.0, 0.0)),
             seed=fixed,
         )
-        return {"chain": chain, "table": table, "M": M, "z_ref": z_ref, "dx": dx}
+        kin = puppet.ArmKinematics(
+            chain=chain, model=M, dx=dx, z_ref=z_ref, travel_m=rm.lift_travel_m, table=table, lift_mode="offset"
+        )
+        return {
+            "chain": chain,
+            "table": table,
+            "M": M,
+            "z_ref": z_ref,
+            "dx": dx,
+            "kin": kin,
+            "travel": rm.lift_travel_m,
+        }
 
     def _pose_puppet(self, rig: dict[str, Any], lift_height_m: float, arm_ext_m: float, closed: bool) -> float:
         """Pose the SO-101 links for this lift + extension; returns the carriage travel (for the Lift group)."""
         from pxr import Gf  # type: ignore[import-not-found]
 
         geo = rig["geo"]
-        dz = puppet.lift_offset(lift_height_m, geo["z_ref"])
+        dz = puppet.lift_offset(lift_height_m, geo["z_ref"], geo.get("travel", puppet.LIFT_TRAVEL_M))
         drop = max(0.0, geo["z_ref"] - lift_height_m)
         key = (round(arm_ext_m, 4), round(drop, 4), round(dz, 4), closed)
         if key == rig["key"]:
@@ -966,6 +1314,35 @@ class IsaacBackend:
         if info is not None:
             info["closed"] = closed
 
+    # -- joint mode (contracts 0.2.2 ArmJointsCmd) ---------------------------------------------------------------------
+    def arm_kinematics(self, robot_id: str) -> puppet.ArmKinematics | None:
+        """The rover USD's SO-101 (None for a primitive rover: the core then uses the synthetic arm)."""
+        rig = (self._robots.get(robot_id) or {}).get("puppet")
+        return rig["geo"].get("kin") if rig is not None else None
+
+    def set_robot_joints(self, robot_id: str, pose: Pose2D, lift_height_m: float, q_deg: list[float]) -> bool:
+        """Pose the puppet's SO-101 links from 6 joint degrees (FK through the USD joint frames); False when this
+        rover has no puppet (the core then poses the primitive rig)."""
+        from pxr import Gf  # type: ignore[import-not-found]
+
+        info = self._robots.get(robot_id)
+        rig = info.get("puppet") if info is not None else None
+        if info is None or rig is None or rig["geo"].get("kin") is None:
+            return False
+        kin: puppet.ArmKinematics = rig["geo"]["kin"]
+        info["xf"].SetTranslate(Gf.Vec3d(pose.x, pose.y, 0.0))
+        info["xf"].SetRotate(Gf.Vec3f(0.0, 0.0, math.degrees(pose.theta)))
+        dz = kin.travel(lift_height_m)
+        key = ("joints", tuple(round(v, 3) for v in q_deg), round(dz, 4))
+        if key != rig["key"]:
+            rig["key"] = key
+            poses = kin.link_poses(lift_height_m, puppet.q_rad(q_deg))
+            for name, op in rig["ops"].items():
+                op.Set(Gf.Matrix4d(*gf_rows(poses[name])))
+        info["lift"].Set(Gf.Vec3d(0.0, 0.0, dz))
+        self._changed()
+        return True
+
     def add_instance(self, prim: PrimSpec) -> None:
         spec = self._specs.get(prim.store_id or "")
         self._define_unit(spec, prim)
@@ -974,6 +1351,13 @@ class IsaacBackend:
     def remove_instance(self, store_id: str, instance_id: str) -> None:
         path = self._inst_paths.pop((store_id, instance_id), None)
         self._units.pop((store_id, instance_id), None)
+        if self._ext.pop((store_id, instance_id), None) is not None:
+            # a prim of the external USD cannot be removed (it lives in a referenced layer): hide it; a restock of
+            # the same unit shows it again (add_instance)
+            if path:
+                self._set_visible(path, False)
+            self._changed()
+            return
         if path and self.stage.GetPrimAtPath(path):
             self.stage.RemovePrim(path)
         self._changed()
@@ -983,6 +1367,10 @@ class IsaacBackend:
 
         path = self._inst_paths.get((store_id, instance_id))
         if not path:
+            return
+        if (store_id, instance_id) in self._ext:
+            self._pose_external(store_id, instance_id, position, yaw)
+            self._changed()
             return
         unit = self._units.get((store_id, instance_id))
         if unit is not None:  # model unit: origin at the bottom center + per-SKU yaw offset
@@ -1045,7 +1433,12 @@ class IsaacBackend:
         c.CreateFocalLengthAttr(h_ap / (2 * math.tan(cam.hfov / 2)))
         # near clip = the sketch / bbox math's NEAR_CLIP_M; it also hides the camera's own housing prim (the front
         # camera eye sits inside front_cam_head, the wrist eye 1-2 cm in front of so101_wrist_cam)
-        c.CreateClippingRangeAttr(Gf.Vec2f(NEAR_CLIP_M, 200.0))
+        robot_id, _, kind = camera_id.rpartition(".")
+        puppet_wrist = kind == "wrist" and (self._robots.get(robot_id) or {}).get("puppet") is not None
+        near = WRIST_NEAR_CLIP_PUPPET_M if puppet_wrist else NEAR_CLIP_M
+        if kind.startswith(POLICY_CAMERA_PREFIX):
+            near = POLICY_NEAR_CLIP_M
+        c.CreateClippingRangeAttr(Gf.Vec2f(near, 200.0))
         op = UsdGeom.Xformable(c).AddTransformOp()
         rows = cam.usd_matrix_rows()
         op.Set(Gf.Matrix4d(*[v for row in rows for v in row]))
@@ -1155,6 +1548,7 @@ def run(
     core: WorkerCore,
     is_running: Any = lambda: True,
     max_seconds: float | None = None,
+    director: Director | None = None,
 ) -> None:
     """Drain commands, step actions, render due camera streams. Returns when ``is_running()`` is False."""
     period = 1.0 / LOOP_HZ
@@ -1181,6 +1575,7 @@ def run(
                     core.on_disconnected(str(item))
         core.tick(dt)
         rendered = False
+        director_jobs = director.prepare(backend, core) if director is not None and director.due() else []
         if link is not None and link.connected.is_set():
             due = core.stream_due()
             if prepare is not None and len(due) > 1:
@@ -1200,6 +1595,15 @@ def run(
                 rendered = True
                 if frame is not None:
                     link.offer_frame(frame)
+                    if director is not None:
+                        director.tee(frame)
+        if director is not None and director_jobs:
+
+            def live(camera_id: str, _store: str, cam: Any, jpeg: bytes, w: int, h: int) -> None:
+                if link is not None and link.connected.is_set() and camera_id in core.streams:
+                    link.offer_frame(core.director_frame(camera_id, cam, jpeg, w, h))
+
+            rendered = director.capture(backend, director_jobs, on_frame=live) or rendered
         if step is not None and not rendered:
             step()
         spent = time.monotonic() - now
@@ -1219,6 +1623,21 @@ def _quiet_kit_logging() -> None:
             handler.setLevel(log_level())
     for name in ("websockets", "asyncio", "AutoNode"):
         logging.getLogger(name).setLevel(logging.WARNING)
+
+
+def visual_config(args: argparse.Namespace) -> tuple[SkuAssets, str | None]:
+    """(per-item models, rover USD) from the CLI flags (their defaults come from the env). Unset / missing files /
+    ``--no-assets`` / ``PICKY_SIM_ASSETS=off`` -> primitives; the rover USD only for the Isaac backend (the Pillow
+    sketch draws RoverSpec primitives only)."""
+    assets = SkuAssets.from_env(
+        {
+            ASSET_ROOT_ENV: args.asset_root,
+            SKU_ASSETS_ENV: args.sku_assets,
+            ASSETS_SWITCH_ENV: "off" if args.no_assets else os.environ.get(ASSETS_SWITCH_ENV, ""),
+        }
+    )
+    rover_usd = rover_usd_from_env({ROVER_USD_ENV: args.rover_usd}) if args.backend == "isaac" else None
+    return assets, rover_usd
 
 
 def make_backend(kind: str, args: argparse.Namespace, assets: SkuAssets | None = None) -> tuple[Any, SimBackend]:
@@ -1260,15 +1679,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--max-seconds", type=float, default=None, help="exit after this long (smoke tests)")
     args = ap.parse_args(argv)
 
-    assets = SkuAssets.from_env(
-        {
-            ASSET_ROOT_ENV: args.asset_root,
-            SKU_ASSETS_ENV: args.sku_assets,
-            ASSETS_SWITCH_ENV: "off" if args.no_assets else os.environ.get(ASSETS_SWITCH_ENV, ""),
-        }
-    )
-    # the rover USD needs the Isaac backend (the Pillow sketch draws RoverSpec primitives only)
-    rover_usd = rover_usd_from_env({ROVER_USD_ENV: args.rover_usd}) if args.backend == "isaac" else None
+    assets, rover_usd = visual_config(args)
     log.info("%s; rover: %s", assets.describe, rover_usd or "primitive")
     try:
         sim_app, backend = make_backend(args.backend, args, assets)
@@ -1277,13 +1688,22 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     link: GatewayLink | None = None
+    director = Director.from_env()  # "<robot>.director" chase cameras + optional disk frames: PICKY_SIM_DIRECTOR
+
+    def emit(msg: Any) -> None:
+        if director is not None:
+            director.tee(msg)
+        if link is not None:
+            link.send(msg)
+
     core = WorkerCore(
         backend,
-        emit=lambda msg: link.send(msg) if link else None,
+        emit=emit,
         default_store=settings.picky_default_store,
         assets=assets,
         rover_usd=rover_usd,
     )
+    core.director = director
     if args.store:
         store_ids = [args.store]
     elif args.stores:
@@ -1311,6 +1731,7 @@ def main(argv: list[str] | None = None) -> int:
             core,
             is_running=(sim_app.is_running if sim_app else lambda: True),
             max_seconds=args.max_seconds,
+            director=director,
         )
     except KeyboardInterrupt:
         pass

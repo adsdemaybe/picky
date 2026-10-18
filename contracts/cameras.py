@@ -6,6 +6,12 @@ camera; every store has ceiling cameras. Camera ids are fixed strings:
 
 - robot cameras:   ``"<robot_id>.front"``, ``"<robot_id>.wrist"``, ``"<robot_id>.basket"``  (``robot_camera_id``)
 - store cameras:   ``"<store_id>.ceiling-<n>"`` (n from 1)                                      (``store_camera_id``)
+- 0.2.3 livestream cameras (listed by ``CameraService.list_cameras`` when enabled):
+  - ``"<robot_id>.director"`` (kind ``director``): third-person chase view of the rover (arm + basket + the shelf it
+    faces), rendered by the Isaac worker (``PICKY_SIM_DIRECTOR``) or the 2D fake (``director_camera_id``);
+  - ``"<robot_id>.front.perceived"`` / ``"<robot_id>.wrist.perceived"`` (kind ``perceived``): that onboard camera's
+    live frames with detection boxes drawn on them (Perceptron Mk1.5, ground truth as fallback), produced by
+    ``CameraService`` itself; ``CameraInfo.derived_from`` names the source camera (``perceived_camera_id``).
 
 Privacy (CLAUDE.md §8): frames from the sim / robot fake are RAW; ``CameraService`` blurs faces
 (``perception.blur_faces``) BEFORE a frame is served (snapshot / MJPEG / WS), stored, or sent to an LLM, so every
@@ -36,9 +42,14 @@ from contracts.common import (
     utcnow,
 )
 
-CameraKind = Literal["front", "wrist", "basket", "ceiling"]
+CameraKind = Literal["front", "wrist", "basket", "ceiling", "director", "perceived"]
+"""``director`` / ``perceived`` (0.2.3) are livestream views: the chase camera and an annotated onboard stream."""
 RobotCameraKind = Literal["front", "wrist", "basket"]
 ROBOT_CAMERA_KINDS: tuple[RobotCameraKind, ...] = ("front", "wrist", "basket")
+DIRECTOR_KIND: Literal["director"] = "director"
+PERCEIVED_SUFFIX: Literal["perceived"] = "perceived"
+PERCEIVED_SOURCE_KINDS: tuple[RobotCameraKind, ...] = ("front", "wrist")
+"""Onboard cameras that have a ``.perceived`` (annotated) stream."""
 CameraSource = Literal["isaac", "fake", "none"]
 """Who renders a camera right now: the Isaac worker, the 2D robot fake (Pillow), or nobody (offline)."""
 ObservationMethod = Literal["vlm", "ground_truth", "cv", "fake"]
@@ -93,8 +104,34 @@ def store_camera_id(store_id: StoreId, n: int = 1) -> CameraId:
     return f"{store_id}.ceiling-{n}"
 
 
+def director_camera_id(robot_id: RobotId) -> CameraId:
+    """'rover-ave-1' -> 'rover-ave-1.director' (0.2.3: the third-person chase camera of that rover)."""
+    return f"{robot_id}.{DIRECTOR_KIND}"
+
+
+def perceived_camera_id(robot_id: RobotId, kind: str = "front") -> CameraId:
+    """'rover-ave-1', 'front' -> 'rover-ave-1.front.perceived' (0.2.3: that onboard camera with detection boxes)."""
+    kind = "front" if kind == "head" else kind
+    if kind not in PERCEIVED_SOURCE_KINDS:
+        raise ValueError(f"no perceived stream for camera kind {kind!r}")
+    return f"{robot_id}.{kind}.{PERCEIVED_SUFFIX}"
+
+
+def perceived_source(camera_id: CameraId) -> CameraId | None:
+    """'rover-ave-1.front.perceived' -> 'rover-ave-1.front'; None for any other camera id."""
+    base, sep, name = camera_id.rpartition(".")
+    if not sep or name != PERCEIVED_SUFFIX:
+        return None
+    owner, sep2, kind = base.rpartition(".")
+    if not sep2 or not owner or kind not in PERCEIVED_SOURCE_KINDS:
+        return None
+    return base
+
+
 def parse_camera_id(camera_id: CameraId) -> tuple[str, CameraKind]:
-    """'rover-ave-1.wrist' -> ('rover-ave-1', 'wrist'); 'store_ave.ceiling-2' -> ('store_ave', 'ceiling').
+    """'rover-ave-1.wrist' -> ('rover-ave-1', 'wrist'); 'store_ave.ceiling-2' -> ('store_ave', 'ceiling');
+    'rover-ave-1.director' -> ('rover-ave-1', 'director'); 'rover-ave-1.front.perceived' -> ('rover-ave-1',
+    'perceived') (the source camera: ``perceived_source``).
 
     The owner is a robot_id for robot cameras and a store_id for ceiling cameras. Raises ValueError otherwise.
     """
@@ -105,6 +142,12 @@ def parse_camera_id(camera_id: CameraId) -> tuple[str, CameraKind]:
         return owner, name  # type: ignore[return-value]
     if name == "ceiling" or name.startswith("ceiling-"):
         return owner, "ceiling"
+    if name == DIRECTOR_KIND:
+        return owner, DIRECTOR_KIND
+    if name == PERCEIVED_SUFFIX:
+        source = perceived_source(camera_id)
+        if source is not None:
+            return source.rpartition(".")[0], PERCEIVED_SUFFIX
     raise ValueError(f"bad camera id {camera_id!r}: unknown camera {name!r}")
 
 
@@ -125,6 +168,9 @@ class CameraInfo(WireModel):
     online: bool = True
     fps: float | None = Field(None, description="Measured live frame rate, if streaming.")
     last_frame_at: Timestamp | None = None
+    derived_from: CameraId | None = Field(
+        None, description="0.2.3, kind 'perceived': the onboard camera whose live frames it annotates."
+    )
 
     @computed_field  # type: ignore[prop-decorator]
     @property

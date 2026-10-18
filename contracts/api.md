@@ -1,4 +1,4 @@
-# Gateway API (contracts v0.2.0)
+# Gateway API (contracts v0.2.1)
 
 Served by `arms/gateway` (FastAPI, one process) on `GATEWAY_HOST:GATEWAY_PORT` (default `0.0.0.0:8000`) for **the web
 app** (one app: shopper, store-staff and fleet views; there is no iPad/native app). The gateway is the only caller of
@@ -9,6 +9,10 @@ cents; all JSON uses the models' field names as-is, and derived values (`Cart.to
 `Route.extra_distance_m`, `Trip.budget_cents`, `RequestPlan.est_total_cents`, ...) are included as read-only computed
 fields. Errors: `{"detail": str}`; `KeyError` → 404, rule violation (`ValueError`, e.g. restock over capacity,
 invalid goal transition) → 409, invalid body / enum → 422.
+
+**0.2.1** adds the planner → VLA → verifier loop (plan / tools mode; `PICKY_EXEC_MODE=direct`, the kill switch, is
+the exact v0.2 behaviour): REST routes, events and the "who writes what" table in
+[the loop section](#planner--vla--verifier-loop-new-in-021) at the end. Nothing above changes.
 
 Fixed ids: robots `rover-ave-1` (Pico), `rover-ave-2` (Rhea) in `store_ave`; `rover-hill-1` (Hazel) in
 `store_hill` (data/fixtures/robots.yaml). Cameras `<robot_id>.front|wrist|basket` and `<store_id>.ceiling-<n>`
@@ -141,8 +145,10 @@ Fixed ids: robots `rover-ave-1` (Pico), `rover-ave-2` (Rhea) in `store_ave`; `ro
 One producer per type (`events.EVENT_PRODUCERS`): **gateway** (trip flow, `robot.state`, live frames), **fleet**
 (`request.*`, `goal.*`, `fleet.robot_updated`), **agent** (`agent.message`; the robot brain: `brain.step` + the
 in-store execution events `robot.arrived`, `scan.result`, `pick.choices`, `item.picked`, `basket.verified`),
-**catalog** (`stock.*`), **any** (`error`). Envelopes: shop-goal events `events.goal_envelope(goal)` (trip_id =
-goal.trip_id), trip events `events.trip_envelope(trip)`, request events `request_id` + `user_id`.
+**catalog** (`stock.*`), **any** (`error`); 0.2.1 loop events: **agent** (the LoopRunner: `plan.*`, `step.*`,
+`vla.*`, `target.grounded`, `camera.overlay`) and **robot** (`demo.fault`, the FaultInjector). Envelopes: shop-goal
+events `events.goal_envelope(goal)` (trip_id = goal.trip_id), loop events `events.plan_envelope(plan)` (same keys),
+trip events `events.trip_envelope(trip)`, request events `request_id` + `user_id`.
 
 | Event | Producer | When |
 |---|---|---|
@@ -221,3 +227,170 @@ battery < 20% only docks; a robot with a queued / pre-assigned goal is not idle)
 | Categories | `GET /api/categories[?store_id]`, `GET /api/categories/{id}/products` | – |
 | StockTable / Alerts / Restock / History | `GET /api/stores/{id}/stock?status=&category=&q=`, `/stock/alerts`, `POST /stock/restock`, `POST /stock/adjust`, `GET /stock/history` | `/ws?store_id=`: `stock.updated`, `stock.alert` |
 | Merchant dashboard | `GET /api/merchant/{store_id}/dashboard` | `stock.*`, `scan.result` |
+
+
+## Planner → VLA → verifier loop (new in 0.2.1)
+
+Additive. Every route is served by `arms/gateway` and backed by an OPTIONAL `Services` field (`runner`, `planner`,
+`vla`, `verifier`, `evidence`, `truth`, `faults`; factories in `services.LOOP_SERVICE_FACTORIES`). Same error rules
+(`KeyError` → 404, `ValueError` → 409, bad body → 422); money is integer cents; frames are never inlined: payloads
+carry `evidence.FrameRef` (`url` = `/api/evidence/{frame_id}.jpg`, always face-blurred, retained ≥ 10 min). Design,
+sequence diagram and per-arm plan: `docs/vla-loop/` (`api.md`, `IMPLEMENTING.md`); what changed: `CHANGES-0.2.1.md`.
+
+**Kill switch.** `PICKY_EXEC_MODE` blank (the default) = `plan` when the VLA and the verifier are wired (the gateway
+wires every loop service from 0.2.1 on), else `direct`; `PICKY_EXEC_MODE=direct` is the kill switch.
+`services.exec_mode(services, mode)` returns `plan` / `tools` only when that mode is configured AND planner, runner,
+vla and verifier are all wired. `GET /health` reports it as `details.exec_mode`.
+
+| mode | who drives | what changes |
+|---|---|---|
+| `direct` | v0.2 brain tools call `RobotService` | nothing (no loop events) |
+| `plan` | `RobotBrainService.run_goal` → `LoopRunner.run_goal` (planner → StepPlan → loop), then the brain finishes the goal with `bridge.goal_update_from_outcome` | full loop events; effects committed by the runner after verification |
+| `tools` | v0.2 LLM tool loop; motion tools → `LoopRunner.run_tool_step` | one live plan per goal; v0.2 side effects applied by the executor after a VERIFIED outcome (`docs/vla-loop/tools.md`) |
+
+**Providers.** Planner LLM = Gemini via `utils.llm` (default `gemini-3.8-flash`; `PICKY_LLM_PROVIDER=anthropic`
+optional); verifier vision = **Perceptron** (`perceptron-mk1.5`, fallback `perceptron-mk1`) behind
+`services.VisionProvider`, which rejects unblurred frames. No key → scripted planner / fake verifier (ground truth).
+
+**Version.** 0.2.1 is a patch bump: the deployed Isaac worker (0.2.0) still passes the `/ws/sim` major.minor check.
+`vla.RunSkillCmd` / `SkillProgress` / `PolicyServerStatus` (T1 on vhagar) are inert until 0.3.0 + a worker rebuild.
+
+### REST
+
+P0 = needed for the demo. P1 = nice to have. Dev routes exist only with `PICKY_DEV=1`.
+
+| Pri | Method | Path | Request | Response | Owner |
+|---|---|---|---|---|---|
+| P0 | GET | `/api/goals/{goal_id}/plan` | – | `plan.StepPlan` (latest revision; tools mode: the live plan; 404 = direct mode / no plan yet) | runner (`current_plan`) |
+| P0 | GET | `/api/plans/{plan_id}` | – | `plan.StepPlan` (any revision, incl. superseded) | runner (`get_plan`) |
+| P0 | GET | `/api/plans/{plan_id}/run` | – | `policy.PlanRunState` (current step, attempts, breakers, effect ledger, `provisional_open`, local cart) | runner (`run_state`) |
+| P0 | POST | `/api/plans/{plan_id}/cancel` | `{reason?}` | `policy.PlanRunState` (status `cancelled`; the running exec is cancelled, robot stopped, pending question withdrawn, `holding_instance_id` = a unit left in the gripper) | goal plans: `fleet.cancel_goal(plan.goal_id)` (the fleet owns goal status + the brain task); goal-less dev plans: runner (`cancel`) |
+| P0 | GET | `/api/evidence/{frame_id}.jpg` | query `w?` | `image/jpeg` (blurred, retained ≥ 10 min; 404 expired) | evidence (`get_frame`; bytes only, never the ground-truth `instances`) |
+| P1 | GET | `/api/plans/{plan_id}/attempts` | query `step_id?` | `list[policy.StepAttempt]` (pre / VLA terminal / post / failure / decision / effects / fault_ids) | runner (`attempts`) |
+| P1 | GET | `/api/fleet/robots/{robot_id}/vla` | – | `list[vla.VlaCapabilities]` (robot VLA status: every tier with `available` + `reason`) | vla (`capabilities`) |
+| P1 | GET | `/api/vla/execs/{exec_id}` | – | `vla.ExecRecord` (request + every status) | vla (`get_exec`) |
+| P1 | POST | `/api/vla/execs/{exec_id}/cancel` | `{reason?}` | `vla.VlaStatus` (terminal; idempotent) | vla (`cancel`) |
+| P1 | GET | `/api/verifier` | – | `verify.VerifierCapabilities` (mode, methods, provider, healthy) | verifier (`capabilities`) |
+| P1 | PUT | `/api/verifier/mode` | `{mode: decide\|shadow\|gt_only}` | `verify.VerifierCapabilities` | verifier (`set_mode`) |
+| P1 | GET | `/api/verifier/providers` | – | `list[verify.ProviderInfo]` ("Vision by Perceptron Mk1.5 · 42 calls · p50 610 ms · 97% agree with sim") | verifier |
+| P1 | POST | `/api/verify` | `verify.VerifyNowRequest` `{robot_id, preset: gripper\|basket\|shelf \| condition, sku?, slot_id?, counts?}` | `verify.Verdict` (the "check the basket" judge button) | verifier |
+| P1 | GET | `/api/evidence/{frame_id}/annotations` | – | `evidence.FrameAnnotations` (boxes / points / texts drawn on that frame) | gateway (from verdicts + groundings) |
+| dev | GET | `/api/dev/faults` | – | `{scenario, rules: list[faults.FaultRule], firings: list[faults.FaultFiring]}` | faults |
+| dev | POST | `/api/dev/faults` | `faults.FaultRule` | `faults.FaultRule` | faults (`inject`) |
+| dev | POST | `/api/dev/faults/scenario` | `{name}` (a `faults.DEMO_SCENARIOS` key) or a full `faults.FaultScenario` | `faults.FaultScenario` | faults (`load_scenario`) |
+| dev | DELETE | `/api/dev/faults` | – | `204` | faults (`clear_faults`) |
+| dev | POST | `/api/dev/plans` | `plan.PlanRequest` `{robot_id, text \| goal, store_id (required with text), budget_cents?}` (422 without a store) | `plan.StepPlan` (planned and started on that robot, bypassing the fleet; for testing T0 / faults) | planner + runner |
+
+Demo scenarios (`PICKY_FAULTS=<name>` at boot or `POST /api/dev/faults/scenario`): `drop_on_first_grasp` (THE demo
+moment), `slow_vla`, `verifier_down`, `flaky_t1`, `isaac_drop`, `wrong_salsa` (2D fake only), `foggy_basket`.
+
+### WebSockets
+
+No new socket. The loop events go on the sequenced `/ws` bus with `events.plan_envelope(plan)` (the `goal_envelope`
+keys), so `/ws?trip_id=|request_id=|robot_id=|store_id=|user_id=` filters and the replay ring work unchanged.
+`camera.overlay` is live-only (`events.LIVE_ONLY_EVENT_TYPES`): `/ws/cameras/{camera_id}`, `/ws/cameras` and
+`/ws/frames`, never sequenced or replayed. `vla.status` is throttled to ≤ 2 Hz per exec on `/ws`
+(`events.THROTTLED_EVENT_TYPES`); phase changes (accepted / succeeded / failed / cancelled) always go out.
+
+### Events (`contracts/events.py`, `events.LOOP_EVENT_TYPES`)
+
+Producer: the runner (agent arm) for every type except `demo.fault` (the fault injector, robot arm). The VLA service
+and the verifier publish nothing. In plan mode the v0.2 events still fire from the same runs: `robot.arrived`,
+`scan.result`, `pick.choices` (produce top-3 with the `approval_id` of the choice card), `item.picked`,
+`basket.verified`, `goal.updated` (fleet), `cart.updated` and the route stop statuses (the runner calls
+`trips.set_stop_status` navigating → arrived → done / skipped / declined / failed per `bridge.ITEM_TO_STOP_STATUS`).
+The runner also mirrors one `brain.step(kind="status")` per step transition (`bridge.mirror_brain_step`), so the
+v0.2 ThinkingLog keeps working.
+
+| Pri | type | payload | when / UI |
+|---|---|---|---|
+| P0 | `plan.created` | `plan: StepPlan` (~1 KB per step) | plan ready → the step list, grouped by `group_id` |
+| P0 | `step.started` | `plan_id, step: PlanStep, attempt, exec_id?, tier?, inserted_by?` | row spinner + tier chip; tools mode: appends the row |
+| P0 | `vla.status` | `plan_id, step_id, status: VlaStatus` | progress bar + stage ("reaching", chunk 12) |
+| P0 | `step.verified` | `plan_id, step_id, attempt, phase: pre\|post\|verify\|reverify, verdict: Verdict, caught_vla_false_success` | green / red / amber check, reason, evidence overlay on `verdict.frames[*].url`, `decided_by` + `provider.attribution` badge, `degraded` = amber |
+| P0 | `step.failed` | `plan_id, step_id, failure: StepFailure, decision: RecoveryDecision, attempts_left` | the moment card: `decision.reason` = "Verifier caught it: gripper is empty (expected TORT-CORN); re-finding the item and retrying (attempt 2/3)" |
+| P0 | `step.completed` | `plan_id, step_id, status, attempts, effects: list[EffectRecord], note` | row done; effects ("1 × salsa added"); `provisional` = amber |
+| P0 | `plan.completed` | `plan_id, status: completed\|failed\|cancelled, summary, stats: LoopMetrics` | "Done in 2:41 · 83 steps · 1 verifier catch · 1 retry" |
+| P0 | `plan.revised` | `plan, previous_plan_id, reason, failure?` | replace the list from the first open step (out of stock → approved substitute) |
+| P1 | `target.grounded` | `plan_id, step_id, grounding: GroundedTarget` | box + grasp point on the evidence frame |
+| P1 | `vla.tier_changed` | `from_tier, to_tier, reason, breaker` | banner "switched to the scripted grasp" (right after the `step.failed` that caused it) |
+| P1 | `demo.fault` | `firing: FaultFiring, scenario` | presenter / staff view only |
+| P1 | `camera.overlay` | `camera_id, frame: FrameRef, evidence, label, ttl_ms, step_id` | live-only overlay on a camera tile (the gateway forwards it; the runner does not emit it yet) |
+
+### Who writes what (single writer per record)
+
+| Record | Writer | When | Never |
+|---|---|---|---|
+| Plan, step status, attempts, effect ledger | runner (agent) | every transition | VLA, verifier |
+| Robot motion | VLA service (robot) via `RobotService` | inside one exec | runner, verifier |
+| Verdicts, groundings | verifier (perception) | returned as data | no events, no writes |
+| Stock (`catalog.record_pick` / `apply_scan`) | runner, once per effect key, after a VERIFIED place / scan | `policy.COMMIT_ON_VERIFIED` | on a grasp, on a VLA claim, on a recovery place |
+| Goal items + progress (`fleet.update_goal(items=…)`) | runner | after each verified place / item close | goal status |
+| Goal status (completed / failed) | brain (`bridge.goal_update_from_outcome`) | after `LoopRunner.run_goal` returns | runner |
+| Goal cancel | fleet (`cancel_goal`) | stop / cancel requests | runner, gateway directly |
+| Cart lines (`trips.add_line`) | runner, once per item (`qty = picked`; partial on close; online for the rest) | last unit verified / item closed | per unit |
+| Route stop status (`trips.set_stop_status`) | runner | navigating / arrived / item terminal | – |
+| Questions (`trips.ask` / `approvals.request`) | runner; withdrawn with `approvals.cancel` on cancel | ask steps, recoveries | VLA, verifier |
+| Checkout (`start_checkout`) | gateway trip flow, only when `PlanRunState.provisional_open` is false | after the goal ends | runner |
+
+Tools mode keeps the v0.2 executor as the writer of stock / cart / goal items (after a verified `ToolStepOutcome`).
+A unit in the gripper is never bought (nothing commits on a grasp): a grasp pre-check that finds the target SKU adopts
+it (`adopt_held`), any other SKU is put back first (`return_held`; T0 has no place-back → rule `cannot_return` asks,
+then escalates). A place accepted on an uncertain basket check commits with `provisional=true` (cart line status
+`picked`), and the plan's basket audit (`VerifyStep purpose="audit"`) runs before the checkout handoff.
+
+### Web app screens → endpoints + events (loop additions)
+
+| Screen / component | REST | Live |
+|---|---|---|
+| PlanPanel (steps grouped per item, attempt chips) | `GET /api/goals/{id}/plan`, `GET /api/plans/{id}/run` | `plan.created`, `plan.revised`, `step.started`, `step.completed` |
+| VLA progress bar + tier chip | `GET /api/fleet/robots/{id}/vla` | `vla.status`, `vla.tier_changed` |
+| Moment card ("Verifier caught it") | `GET /api/plans/{id}/attempts?step_id=` | `step.failed` with `failure.caught_by_verifier`, `step.verified` with `caught_vla_false_success` |
+| Evidence viewer | `GET /api/evidence/{frame_id}.jpg`, `/annotations` | `step.verified.verdict.evidence`, `target.grounded`, `camera.overlay` |
+| Verifier badge / mode switch | `GET /api/verifier`, `PUT /api/verifier/mode`, `GET /api/verifier/providers` | `verdict.decided_by`, `verdict.provider.attribution`, `verdict.degraded` |
+| Judge button "check the basket" | `POST /api/verify` (preset `basket`) | – |
+| Presenter panel | `GET/POST/DELETE /api/dev/faults`, `POST /api/dev/faults/scenario` | `demo.fault` |
+
+## Judges' demo (contracts 0.2.3 + 0.2.4)
+
+The judges' flow: suggestion cards from the purchase-history database → "order these" → the robot shops (photo
+check of every unit, produce review with photos) → at the counter the arm unloads the basket unit by unit → the Visa
+payment agent pays (sandbox) → the purchase rows land in the database. The Isaac view is livestreamed as MJPEG.
+
+### REST
+
+| Method | Path | Body / query | Returns | Notes |
+|---|---|---|---|---|
+| GET | `/api/users/{user_id}/suggestions` | `?store_id=&limit=8&all=false` | `profile.ReplenishSuggestion[]` | kinds `replenish` ("You bought this 12 days ago — you usually buy it every 10 days"), `substitute` (due item out of stock here), `complement` (bought together), `deal` (on deal here + bought / liked); only in-stock items at the store; `score`, `signals`, `ranked_by` (`rules` / `llm`: the LLM only re-ranks and rewrites `reason` from `signals`) |
+| GET | `/api/users/{user_id}/purchases` | `?limit=200` | `profile.PurchaseRecord[]` newest first | the purchase-history database (`source` seed / checkout, `photo_urls` = the robot's verification photos) |
+| GET | `/api/products/{sku}/image.jpg` | `?w=320` | JPEG | product thumbnail (render / photo, else the sim prop's label card) |
+| POST | `/api/requests` | `{"user_id","items":[{"sku","qty"}],"store_id"}` | `fleet.RequestPlan` | structured order (0.2.3): one shop goal for exactly those SKUs, auto-executing trip, plan mode, checkout approval still required |
+| GET | `/api/verifications` | `?trip_id=&user_id=&status=pending` | `trust.ItemVerification[]` | photo cards, newest first |
+| POST | `/api/verifications/{id}` | `{"decision":"correct"\|"wrong"}` | `trust.ItemVerification` | `wrong` = put back + re-pick; 404 unknown, 409 already closed; no answer within `PICKY_VERIFY_AUTO_ACCEPT_S` → `auto_accepted` |
+| GET | `/api/trips/{trip_id}/payment` | – | `trust.PaymentAgentStep[]` | the Visa payment agent timeline (always `simulated`) |
+| GET | `/api/cameras/{camera_id}/stream.mjpg` | `?fps=&w=` | MJPEG | `<robot>.director` (chase view, 10 fps default), `<robot>.front.perceived` / `<robot>.wrist.perceived` (Perceptron Mk1.5 boxes, "ground truth" fallback) |
+
+Produce review = the existing `approval.requested` (kind `pick_choice`) + `pick.choices`: options carry a cropped,
+blurred photo per unit (`thumbnail_b64`) and ripeness labels; no answer within `PICKY_PRODUCE_REVIEW_TIMEOUT_S` → the
+robot takes the #1 freshness pick (labelled "best guess" in its brain step).
+
+### Events (`/ws`)
+
+| Type | Producer | Payload |
+|---|---|---|
+| `checkout.unload` | agent | `plan_id, step_id, n, total, sku, name, status (started / placed / verified / skipped / done), counter_spot, photo_url, text` ("Unloading 3/9: Mild Chunky Salsa → counter ✓") |
+| `item.verification` | agent | `verification: ItemVerification` (created `pending`, then `accepted` / `rejected` / `auto_accepted`); counter photos arrive as `auto_accepted` cards |
+| `payment.agent_step` | gateway | `step: PaymentAgentStep` (`n, name, status, title, detail, narration, narrated_by, provider mock_vic / stripe_test, label "Sandbox / simulated — no real money"`) |
+
+The approval behind a photo card is a normal `approval.requested` of kind `verify_item` (options `correct` / `wrong`,
+`payload.photo_url`); answer it with `POST /api/verifications/{id}` (or `POST /api/approvals/{id}`).
+
+### Checkout unload in the plan (planner → VLA → verifier)
+
+After the basket audit and the drive to the counter the plan holds, PER UNIT, a group `unload:<n>`:
+`ground_target` (camera `basket`, `TargetSpec.slot_id` None: Perceptron points at the unit in the basket, ground
+truth fallback) → `grasp` (`source: "basket"`, T0 on every backend: the learned T1 policies are shelf-trained) →
+`place` (`destination: "counter"`, `counter`: a `planogram.CounterSpot`, laid out left → right) → `verify`
+(`item_on_counter` + gripper empty). Then `handoff` = "Basket empty: hand off for payment" (`BasketContains({}, exact)`),
+and only then the trip's checkout (payment agent) starts. Isaac workers without the `basket_unload` capability skip
+the unload groups (the handoff unloads at once, as in 0.2.3).

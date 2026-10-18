@@ -40,10 +40,8 @@ def test_protocol_conformance_and_lazy_construction(tmp_path):
     if importlib.util.find_spec("sqlalchemy") is None:  # preflight: registry falls back to the fake
         with pytest.raises(RuntimeError, match="extra catalog"):
             create(Services())
-    else:  # demo paths still raise NotImplementedError: create() refuses so the registry boots the fake (§6)
-        with pytest.raises(RuntimeError, match="incomplete"):
-            create(Services())
-        assert isinstance(create(Services(), allow_incomplete=True), CatalogService)
+    else:  # every method is implemented: create() builds the Postgres service (no DB needed until the first call)
+        assert isinstance(create(Services()), PostgresCatalogService)
     # construction never touches the disk: a missing data dir only fails at call time
     FakeCatalogService(data_root=tmp_path / "nope")
 

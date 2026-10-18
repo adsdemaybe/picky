@@ -62,7 +62,8 @@ export PICKY_SIM_STORES=store_ave,store_hill  # optional; default = every planog
 export PICKY_SIM_WORKER_ID=isaac-vhagar
 export PICKY_SIM_LABEL_DIR=/data/$USER/picky/labels
 # export PICKY_SO101_URDF=/data/$USER/SO-ARM100/Simulation/SO101/so101_new_calib.urdf   # optional, experimental
-# Optional visuals (arms/sim/ASSETS.md); unset = primitive boxes / primitive rovers, exactly as before
+# Optional visuals: build them first (arms/sim/ASSETS.md). Unset = primitive boxes / rovers as before; a path that
+# does not exist yet only logs a warning and draws the primitives
 export PICKY_ASSET_ROOT=/data/$USER/picky-assets/products                          # per-item grocery models
 export PICKY_ROVER_USD=/data/$USER/picky-assets/robots/picky-rover/picky_rover.usda  # LeKiwi + SO-101 + lift
 # export PICKY_SIM_ASSETS=off        # rollback switch: primitives for every SKU even with PICKY_ASSET_ROOT set
@@ -124,11 +125,15 @@ store store_ave: 1218 units on per-item models, 10 shelf tags     # SimLog: "117
 rover USD ...: SO-101 puppet ready in 6.1s (reach table max error ... mm; z_ref 0.319 m)
 ```
 
-These were measured on vhagar on 2026-10-17 (RTX 5090, standalone render check of store_ave):
+Measured on vhagar on 2026-10-17 with the live worker (RTX 5090, both stores, 3 rovers, models + rover USD on;
+taco request + staff shelf scan through the gateway on :8100):
 
-- The store build takes ~16 s, against ~10 s with primitives.
-- The rover reach table is computed once per USD in ~6 s, and every rover shares it.
-- A new render product is ready in 0.3-0.6 s, and each frame of a changed scene takes ~0.3-0.7 s at 1024x768.
+- Launch to `sim link up`: ~46 s warm (store_ave ~20 s, the reach table 5.3 s once for all rovers, store_hill ~8 s).
+  The first launch after a deploy took ~99 s: its first frames load every model texture (~56 s for store_ave).
+- A new render product is ready in 0.55-0.7 s. The worker's `isaac render` average is ~80 ms per frame (12 render
+  products, 4-6 active), and gateway snapshots took a median of 0.24 s (p90 0.65 s) while ~4 cameras were polled.
+- GPU memory: ~3.8 GB after the build, ~5.9 GB with all 12 cameras used.
+- `PICKY_SIM_AMBIENT` (default 0.1) sets the RTX ambient fill for the shelf interiors; 0.6 already washes the store out.
 - A unit, SKU or rover whose files are missing falls back to the primitive with a warning; nothing else changes.
 - Rollback: `PICKY_SIM_ASSETS=off` and / or `unset PICKY_ROVER_USD`, then restart the worker.
 
@@ -167,3 +172,101 @@ curl -s -X POST localhost:8100/api/requests -H 'content-type: application/json' 
 | `ModuleNotFoundError: pydantic_settings` / `No module named 'utils.log'` | step 2 into the deps dir; run from the repo root with `-m` |
 | `cannot inherit from both a TypedDict type and a non-TypedDict base class` | `utils.config` imported after `SimulationApp` (custom scripts): import it first |
 | Isaac crashes on import of our deps | a deps-dir package shadows an Isaac one. Remove it (usually pydantic / typing-extensions / websockets) |
+
+## 8. T1 grasps with the Perceptron Mk1.5 policy (contracts 0.2.2, feat/perceptron-vla)
+
+A worker from this branch advertises `arm_joints` + `arm_ik`. With `PICKY_VLA_T1=perceptron` on the gateway (and
+`PERCEPTRON_API_KEY`), every `grasp` step resolves to T1: the robot arm (backend) runs the loop, one `ArmJointsCmd` per
+action chunk; Perceptron Mk1.5 sees the side + wrist policy cameras and calls a tool (`reach_point` on an image ->
+ray to the planogram's shelf face -> `ArmIkCmd` on the worker -> joint rows at 30 Hz; `set_gripper close` -> the
+sticky grasp attaches the unit). Pictures while moving: side + wrist every 8 rows (~4 pairs/s) stream live to the
+robot's front / wrist view; the front camera takes 2 pictures/s (blurred, retained evidence) while any VLA step
+drives. A separate test stack on vhagar keeps the live demo (:8100) untouched:
+
+```bash
+# /data/$USER/picky/sim-pvla.env = sim.env with repo -> repo-pvla, :8100 -> :8101, PICKY_SIM_WORKER_ID=isaac-pvla,
+# PICKY_SIM_STORES=store_ave, PICKY_SIM_LABEL_DIR=.../labels-pvla
+tmux new -d -s picky-pvla-gw  /data/$USER/picky/run_pvla_gw.sh    # PICKY_REAL_ARMS=robot,evidence,cameras PICKY_DEV=1
+                                                                  # PICKY_VLA_T1=perceptron GATEWAY_PORT=8101 + secrets
+tmux new -d -s picky-pvla-sim /data/$USER/picky/run_pvla_sim.sh   # source sim-pvla.env; $PY -m arms.sim.app
+curl -s localhost:8101/api/fleet/robots/rover-ave-1/vla          # t1_pretrained available, "perceptron-mk1.5 (tool policy)"
+curl -s -X POST localhost:8101/api/dev/plans -H 'content-type: application/json' \
+  -d '{"robot_id":"rover-ave-1","store_id":"store_ave","text":"pick up a jar of salsa"}'
+grep -E 'Mk1.5 step|sticky grasp|T1 rover' /data/$USER/picky/logs/pvla-gw.log
+```
+
+Measured on vhagar (2026-10-18, RTX 5090, store_ave, rover-ave-1 = LeKiwi + SO-101 rover USD, fake catalog / planner
+/ verifier, real robot + evidence): 4 of 4 dev plans (salsa x2, olive oil, diced tomatoes) completed end to end
+(navigate -> align -> scan -> ground -> **T1 grasp** -> T0 place -> verify -> checkout -> handoff). Each grasp took 2
+Mk1.5 calls (`reach_point(side, x, y)` then `set_gripper(close)`; 0.37-0.90 s per call), IK error 0.0 cm, the sticky
+grasp attached a unit of the target slot 0.0 cm from the jaw center, ~4-5 s from joint mode to attached, 3.4-4.0
+side + wrist pairs/s while the arm moved (all 22 policy pictures of a grasp reached `/ws/frames`). Navigation: 2.0
+front pictures/s while driving (26-33 per drive); the Perceptron look-out answered on every approach / arrival (the
+products are seen from above there, so it mostly says "not visible": advisory only). Extra worker GPU: ~3.3 GB.
+
+## 9. The whole loop on the test stack: real catalog database + director video (2026-10-18)
+
+Same separate stack as §8, now with every loop service real: `PICKY_REAL_ARMS=robot,evidence,cameras,verifier,agent,catalog`
+(Gemini planner + request interpreter, Perceptron Mk1.5 verifier, Mk1.5 T1 grasps, and the catalog on a real Postgres).
+Everything runs on vhagar's own tmux socket, so the default socket (live demo) is never touched:
+
+```bash
+tmux -L picky-pvla ls        # picky-pvla-db (Postgres :5433), picky-pvla-gw (:8101), picky-pvla-sim (worker)
+```
+
+- **Catalog database, no Docker:** `/data/$USER/picky-pg` holds a pip `pgserver` venv (Postgres 16 + pgvector
+  binaries) and `run_db.sh` (`postgres -D pgdata -p 5433`, localhost only). Seed it from the planogram after every
+  rsync: `cd repo-pvla && DATABASE_URL=postgresql+psycopg://picky@localhost:5433/picky uv run --frozen --no-sync python -m arms.catalog.seed --schema --apply`.
+  Every slot location the robot drives to (aisle, fixture, level, item xyz, approach pose) and every stock count comes
+  from the `slots` / `inventory` / `lots` tables per call; the gateway log prints `catalog db: <SKU> @ store_ave -> slot ...`
+  for each lookup.
+- **Deps:** the gateway venv needs `uv sync --frozen --extra catalog --extra perception --extra agent` (psycopg +
+  greenlet, the perceptron SDK, google-genai) and must start with `uv run --frozen --no-sync` (a plain `uv run` re-syncs
+  to base deps and drops them).
+- **Request:** `POST /api/requests {"text": "tacos for 6, under $40, one vegetarian", "user_id": "maya", "store_id": "store_ave"}`.
+  Without `store_id` the fleet picks store_hill (cheaper, on the 2D fake), not the Isaac store.
+- **Director video:** `PICKY_SIM_DIRECTOR=rover-ave-1` (+ `_DIR`, `_FPS`, `_VIEW`) in `sim-pvla.env` turns on the chase
+  camera and the frame tee (`arms/sim/director.py`). Record a run with
+  `uv run --frozen --no-sync python arms/sim/tools/director/record.py --store store_ave --text "..." --out RUN`
+  (events, approvals answered like the web app, store planogram) and composite it with the SmolVLA venv's PyAV:
+  `$V arms/sim/tools/director/render.py RUN --director $PICKY_SIM_DIRECTOR_DIR/rover-ave-1 --out run.mp4 --speed 4 --gif run.gif`.
+- **Shared GPU:** when other jobs load vhagar (a SmolVLA fine-tune at ~90 % GPU and load ~28 on 16 cores during this
+  test) the worker's replicator steps go from ~15-30 ms to 150-560 ms. Keep live streams off (`record.py` does not ask
+  for `/ws/frames` unless `--live-frames`): every streamed camera is one more render product in every step.
+
+Measured (2026-10-18 02:00-02:30, taco request, Gemini plans, Mk1.5 T1 + verifier, catalog on Postgres; the GPU shared
+with a SmolVLA fine-tune): T1 Mk1.5 grasps 10 of 11 ok in run 3 (one `policy_timeout` after 9 chunks -> T0 scripted
+grasp, ok); 0.6-1.2 s per Mk1.5 call; 1.3-1.8 side + wrist pairs/s while the arm moved; navigation 30-90 s per leg
+(one 90 s `navigate_to` deadline hit, retried). What broke and is fixed on this branch: the basket audit failed on
+occlusion (top-down camera sees 2 of 11 units) and a passing re-verify did not close the provisional lines (checkout
+stayed `basket_audit_pending`); Perceptron called a held cheese bag / meat tray "gripper empty" and overrode the sim's
+grasp state (redo loops, one item skipped); a silent evidence capture tripped the stall detector; Mk1.5 re-closed the
+gripper where it had just missed.
+
+Open at 03:40 PT:
+- **Run 5** (02:36, with most of the fixes above) had picked 4 items when vhagar went offline at about 02:47. Its
+  outcome is unknown.
+- Commit 095f604 (Mk1.5 re-aims after a missed close) is pushed but not deployed.
+
+When the host is back:
+1. Read run 5: `python3 /data/$USER/picky/pvla-tools/timeline.py /data/$USER/picky/pvla-runs/run5` and its
+   `summary.json`.
+2. Render it with `render.py`.
+3. Rsync the branch to `repo-pvla`, re-seed the catalog, and restart `picky-pvla-gw` on `-L picky-pvla`.
+4. Run the spread-out list (dish soap, sports drink, coffee, olive oil, rice, muffins, frozen peas, ground turkey:
+   8 fixtures, shelf levels 0–2) and the same request with `PICKY_VLA_T1=smolvla`.
+
+## 10. Judges' demo: checkout unload by the arm (contracts 0.2.4)
+
+The worker now implements `pick_from_basket` / `place_on_counter` and advertises the `basket_unload` capability in its
+hello: at the checkout counter the SO-101 (joint mode, IK on the rover model) lowers the lift to 0.32 m, swings back
+over the basket, attaches one unit (magic grasp, decided by code), lifts it out, then raises the lift and lays the
+unit on the counter spot the plan chose (`planogram.counter_spots`: bays of 3 on the checkout fixture's top,
+left → right). The unit stays in the scene (`on_counter`) until the handoff's `unload_basket` (staff bag it).
+
+- **Redeploy the worker** from this branch (`git pull` on vhagar, restart the tmux session as in section 5). A worker
+  started from an older checkout still connects (0.2.x), but its hello lacks `basket_unload`: the gateway then skips
+  the per-unit unload and the handoff unloads the basket at once (the 0.2.3 behaviour). `GET /api/fleet/robots/{id}/vla`
+  shows `basket_unload: true` on the T0 tier when the connected worker has it.
+- Nothing else to configure; `PICKY_UNLOAD_BY_ARM=false` on the gateway turns the unload sequence off.
+- Smoke test without a GPU: `uv run pytest arms/sim/tests/test_worker_unload.py` (NullBackend).

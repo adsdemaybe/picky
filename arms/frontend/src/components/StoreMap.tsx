@@ -2,10 +2,16 @@
 // Top-down store map in store meters (world frame: x right, y up, origin bottom-left).
 // Geometry lives inside a y-flipped group; text stays outside it so it isn't mirrored.
 import { STORES } from "@/lib/data";
+import type { TripPlan } from "@/lib/trip-plan";
 import { useTrip, type Stop, type StopStatus } from "@/lib/trip";
 
-export function StoreMap({ compact = false, poseOverride }: { compact?: boolean; poseOverride?: { x: number; y: number; theta?: number } }) {
-  const { route, stops, stopStatus, robot: simRobot, baselinePath, activeStop, offRoute, storeId } = useTrip();
+export function StoreMap({ compact = false, poseOverride, preview }: {
+  compact?: boolean;
+  poseOverride?: { x: number; y: number; theta?: number };
+  preview?: TripPlan;
+}) {
+  const trip = useTrip();
+  const { route, stops, stopStatus, robot: simRobot, baselinePath, activeStop, offRoute, storeId } = preview ?? trip;
   const robot = poseOverride ? { ...simRobot, ...poseOverride } : simRobot;
   const store = STORES[storeId];
   const B = store.bounds;
@@ -67,7 +73,7 @@ export function StoreMap({ compact = false, poseOverride }: { compact?: boolean;
       {order.map((id, i) => {
         const s = stops[id];
         if (!s || s.kind === "start") return null;
-        return <StopMark key={id} stop={s} n={s.kind === "end" ? null : i} status={stopStatus[id]} active={activeStop === id} compact={compact} fy={fy} scale={B.w / 14} />;
+        return <StopMark key={id} stop={s} n={s.kind === "end" ? null : i} status={stopStatus[id] ?? "pending"} active={activeStop === id} compact={compact} fy={fy} scale={B.w / 14} />;
       })}
 
       {grocery &&
@@ -142,6 +148,7 @@ function StopMark({
   if (stop.kind === "end") return <rect x={x - 0.3} y={y - 0.3} width={0.6} height={0.6} fill="var(--foreground)" />;
   return (
     <g>
+      <title>{`${n}. ${stop.label}${optional ? " (optional)" : ""}`}</title>
       {optional ? (
         <rect x={x - r} y={y - r} width={2 * r} height={2 * r} transform={`rotate(45 ${x} ${y})`} fill={fill} stroke={stroke} strokeWidth={0.06} />
       ) : (

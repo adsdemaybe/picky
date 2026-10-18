@@ -36,8 +36,8 @@ accounts:
   - {sku: CHG-20W, bought: '2026-03-14', purchase_id: pur_maya_tmo_002, fits: [],
      note: 'Universal USB-C PD, so it charges a Pixel 9 / Pixel 11 too: SKIP a new wall charger.'}
 upcoming_promos:
-- {sku: BUDS-RUN, starts: '2026-10-23', price_cents: 4999, was_cents: 6999, synthetic: true,
-   reason: 'Weekend sale: $20 off Beats Flex starts Fri Oct 23'}
+- {sku: BUDS-RUN, starts: '2026-10-23', price_cents: 13999, was_cents: 17999, synthetic: true,
+   reason: 'Weekend sale: $40 off Galaxy Buds4'}
 - {sku: PX9-128, starts: '2026-11-27', price_cents: 59999, was_cents: 79999, synthetic: true,
    reason: 'Holiday promo expected: $200 off Pixel 9'}
 line_promos:

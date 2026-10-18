@@ -103,6 +103,7 @@ __all__ = [
     "GoalUpdate",
     "RequestDraft",
     "RequestIntent",
+    "RequestItem",
     "RequestPlan",
     "RequestStatus",
     "RequesterRole",
@@ -471,11 +472,26 @@ RequestIntent = Literal["shop", "fetch", "shelf_scan", "return_to_dock", "status
 RequestStatus = Literal["received", "planned", "executing", "completed", "failed", "needs_input", "rejected"]
 
 
+class RequestItem(Model):
+    """One exact line of a structured order (0.2.3): the web app's "order these" button after the shopper picked
+    suggestion cards. The SKU is used as-is (no LLM interpretation, no brand switch)."""
+
+    sku: Sku = Field(min_length=1)
+    qty: PositiveQty = 1
+    note: str = Field("", description="Why it is on the order, e.g. the suggestion reason (shown on the list).")
+
+
 class FleetRequest(Model):
     """POST /api/requests: anything a user types in the web app ('tacos for 6 under $40, one veg',
-    'scan the dairy aisle at Hill', 'Hazel, go charge')."""
+    'scan the dairy aisle at Hill', 'Hazel, go charge'), OR (0.2.3) a structured order: ``items`` with exact SKUs
+    (``text`` optional then). A structured order becomes ONE shop goal for exactly those SKUs at ``store_id`` (or the
+    fleet's store choice) -> an auto-execute trip -> a robot; checkout still needs the shopper's approval."""
 
-    text: str = Field(min_length=1)
+    text: str = Field("", description="Natural-language request; may be empty when ``items`` is given.")
+    items: list[RequestItem] = Field(
+        default_factory=list,
+        description="0.2.3: exact SKUs + quantities (skips the LLM); duplicates are merged by SKU.",
+    )
     user_id: UserId
     channel: Channel = "web"
     store_id: StoreId | None = Field(None, description="Store hint (UI selection); None = the fleet decides.")
@@ -485,6 +501,17 @@ class FleetRequest(Model):
         description="Answer to that request's clarifying question (status needs_input): the fleet re-interprets with "
         "the earlier turns as history and updates THAT RequestPlan (same request_id) instead of creating a new one.",
     )
+
+    @model_validator(mode="after")
+    def _text_or_items(self) -> "FleetRequest":
+        if not self.text.strip() and not self.items:
+            raise ValueError("give text or items")
+        return self
+
+    @property
+    def structured(self) -> bool:
+        """True for a structured order (exact SKUs, no LLM)."""
+        return bool(self.items)
 
 
 class RequestDraft(Model):

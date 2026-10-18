@@ -3,6 +3,7 @@
 import { mayaDevices } from "@/data/stores/tmobile";
 import { STORES, maya, online, productBySku, slotsOf, type StoreId } from "./data";
 import { upcomingFor } from "./prices";
+import { GROCERY_TRIPS, groceryTrip, type GroceryTripId } from "./grocery-trips";
 
 export type Sourcing = "in_store" | "online";
 export type ListLine = {
@@ -30,6 +31,7 @@ export type Rec = {
 export type Advice = { kind: "skip" | "wait"; sku: string; text: string; save_cents?: number };
 export type Draft = {
   store_id: StoreId;
+  trip_type?: GroceryTripId;
   intent: string;
   advice: Advice[];
   title: string;
@@ -39,10 +41,7 @@ export type Draft = {
 };
 
 export const PRESETS: Record<StoreId, { id: string; label: string; text: string }[]> = {
-  store_ave: [
-    { id: "tacos", label: "Tacos for 6", text: "tacos for 6, under $40, one vegetarian" },
-    { id: "basics", label: "Weekly basics", text: "my usual weekly basics, under $35" },
-  ],
+  store_ave: [...GROCERY_TRIPS],
   store_tmobile: [
     { id: "pixel", label: "New Pixel 9 setup", text: "case and screen protector for my new Pixel 9, under $90" },
     { id: "run", label: "Running earbuds", text: "earbuds for running, under $100" },
@@ -145,114 +144,86 @@ function expandWireless(text: string): Draft {
 }
 
 function expandGrocery(text: string): Draft {
-  const t = text.toLowerCase();
-  if (t.includes("taco")) {
-    const party = Number(t.match(/for (\d+)/)?.[1] ?? 6);
-    const budget = Number(t.match(/\$(\d+)/)?.[1] ?? 40) * 100;
-    const k = party / 6;
-    return {
-      store_id: "store_ave",
-      advice: [
-        { kind: "skip", sku: "HOTSAUCE-RED", text: "Skip hot sauce: you bought Classic Red on Oct 11 and usually go through one every ~5 weeks." },
-      ],
-      intent: text,
-      title: `Taco night for ${party}`,
-      budget_cents: budget,
-      lines: [
-        line("TORT-CORN", Math.max(1, Math.round(k)), { note: "30 ct covers ~3 tacos each" }),
-        line("BEEF-GROUND", Math.max(1, Math.round(2 * k))),
-        line("BEANS-BLACK", Math.max(1, Math.round(2 * k)), { vegetarian: true, note: "Protein for the vegetarian guest" }),
-        line("CHEESE-MEX", 1),
-        line("SALSA-MILD", 1, { note: "Your usual, though you rated it 3 stars" }),
-        line("AVOCADO", Math.max(2, Math.round(3 * k)), { note: "Robot picks the ripest 3 of 22" }),
-        line("LIMES", 4),
-        line("ONION-WHITE", 1),
-        line("CILANTRO", 1),
-        line("SOUR-CREAM", 1),
-      ],
-      recs: [
-        {
-          rec_id: "rec_salsa_chipotle",
-          sku: "SALSA-CHIPOTLE",
-          unit_cents: priceOf("SALSA-CHIPOTLE"),
-          interest: 0.82,
-          reason: "You rated Classic Red Hot Sauce 5★ but the mild salsa only 3★. This one is smoky and hotter.",
-          signals: { spicy_pref: maya.profile.prefs.spicy ?? 0, past_rating_mild: 3, similarity: 0.78 },
-          sponsored: false,
-          detour_m: 0,
-          detour_s: 6,
-        },
-        {
-          rec_id: "rec_guac_kit",
-          sku: "GUAC-KIT",
-          unit_cents: priceOf("GUAC-KIT"),
-          original_cents: productBySku["GUAC-KIT"].price_cents,
-          interest: 0.64,
-          reason: "33% off because it's best by tomorrow. You're making tacos tonight, so it won't go to waste.",
-          signals: { discount_pct: 33, near_expiry_days: 1, fresh_pref: maya.profile.prefs.fresh ?? 0 },
-          sponsored: false,
-          detour_m: 7.4,
-          detour_s: 14,
-        },
-        {
-          rec_id: "rec_chips",
-          sku: "CHIPS-TORTILLA",
-          unit_cents: priceOf("CHIPS-TORTILLA"),
-          original_cents: productBySku["CHIPS-TORTILLA"].price_cents,
-          interest: 0.51,
-          reason: "25% off on the taco-night endcap, about 4 m off your route. Goes with the salsa.",
-          signals: { discount_pct: 25, on_route: "endcap", deals_pref: maya.profile.prefs.deals ?? 0 },
-          sponsored: false,
-          detour_m: 4.1,
-          detour_s: 8,
-        },
-      ],
-    };
-  }
-  const budget = Number(t.match(/\$(\d+)/)?.[1] ?? 35) * 100;
+  const trip = groceryTrip(text);
+  const budget = text.match(/\$\s*(\d+(?:\.\d{1,2})?)/)?.[1];
+  const party = Math.max(1, Math.min(20, Number(text.match(/for (\d+)/i)?.[1] ?? 6)));
+  const vegetarianOnly = /(?:all|only) vegetarian|vegetarian (?:tacos|dinner)/i.test(text);
   const coffee = upcomingFor("COFFEE");
+  const lines = trip.items.map(([sku, qty]) => {
+    const scaled = trip.id === "tacos" ? Math.max(1, Math.round(qty * party / 6)) : qty;
+    const actualSku = vegetarianOnly && sku === "BEEF-GROUND" ? "SOYRIZO" : sku;
+    return line(actualSku, scaled, {
+      vegetarian: trip.id === "tacos" && (actualSku === "BEANS-BLACK" || actualSku === "SOYRIZO"),
+    });
+  });
   return {
     store_id: "store_ave",
-    advice: coffee ? [{ kind: "wait", sku: "COFFEE", text: `Coffee: ${coffee.reason} ($${(coffee.price_cents / 100).toFixed(2)}). You have ~6 days left in your bag, so it's still on the list, but buy 1 now, not 2.` }] : [],
+    trip_type: trip.id,
     intent: text,
-    title: "Weekly basics",
-    budget_cents: budget,
-    lines: [
-      line("OAT-MILK", 1, { note: "You buy it about every 10 days, last on Oct 8" }),
-      line("EGGS", 1),
-      line("BANANAS", 1),
-      line("LIMES", 4, { note: "You buy limes every ~9 days" }),
-      line("AVOCADO", 3),
-      line("BEANS-BLACK", 2),
-      line("BREAD-WHEAT", 1),
-      line("COFFEE", 1),
-    ],
-    recs: [
-      {
-        rec_id: "rec_yogurt",
-        sku: "YOGURT-GREEK",
-        unit_cents: priceOf("YOGURT-GREEK"),
-        original_cents: productBySku["YOGURT-GREEK"].price_cents,
-        interest: 0.58,
-        reason: "42% off, best by Oct 19. You buy Greek yogurt about every 12 days.",
-        signals: { discount_pct: 42, cadence_days: 12 },
+    title: trip.id === "tacos" ? `Taco night for ${party}` : trip.label,
+    budget_cents: budget ? Math.round(Number(budget) * 100) : trip.budget,
+    lines,
+    recs: trip.extras.map((extra) => {
+      const slot = slotsOf("store_ave")[extra.sku];
+      return {
+        rec_id: `rec_${trip.id}_${extra.sku.toLowerCase()}`,
+        sku: extra.sku,
+        unit_cents: priceOf(extra.sku),
+        original_cents: slot.deal ? productBySku[extra.sku].price_cents : undefined,
+        interest: extra.interest,
+        reason: extra.reason,
+        signals: { trip_type: trip.label, ...(slot.deal ? { deal: slot.deal.reason } : {}) },
         sponsored: false,
         detour_m: 0,
-        detour_s: 5,
-      },
-      {
-        rec_id: "rec_sourdough",
-        sku: "BREAD-SOURDOUGH",
-        unit_cents: priceOf("BREAD-SOURDOUGH"),
-        original_cents: productBySku["BREAD-SOURDOUGH"].price_cents,
-        interest: 0.4,
-        reason: "Half price today ($2.49). It's in the same aisle as your wheat bread.",
-        signals: { discount_pct: 50, same_aisle: "yes" },
-        sponsored: false,
-        detour_m: 1.2,
-        detour_s: 4,
-      },
-    ],
+        detour_s: 0,
+      };
+    }),
+    advice: trip.id === "tacos"
+      ? [{ kind: "skip", sku: "HOTSAUCE-RED", text: "Skip hot sauce: you bought Classic Red on Oct 11 and usually go through one every ~5 weeks." }]
+      : trip.id === "basics" && coffee
+        ? [{ kind: "wait", sku: "COFFEE", text: `Coffee: ${coffee.reason} ($${(coffee.price_cents / 100).toFixed(2)}). Buy one now to cover the week.` }]
+        : [],
+  };
+}
+
+/** Restock order from tapped "Running low" suggestions (exact SKUs) for the demo replay; the gateway path posts the
+ *  same SKUs to POST /api/requests. One deal suggestion rides along so the robot has something to ask about. */
+export function restockDraft(items: { sku: string; qty: number }[], storeId: StoreId = "store_ave"): Draft {
+  cur = storeId;
+  const sellable = (sku: string) => productBySku[sku] && (slotsOf(storeId)[sku] || online.items.some((o) => o.sku === sku));
+  const lines = items.filter((i) => sellable(i.sku)).map((i) => line(i.sku, Math.max(1, i.qty)));
+  const skus = new Set(lines.map((l) => l.sku));
+  const recSku = ["AVOCADO", "LIMES", "ONION-WHITE"].some((s) => skus.has(s)) ? "GUAC-KIT" : "CHIPS-TORTILLA";
+  const slot = slotsOf(storeId)[recSku];
+  const recs: Rec[] =
+    skus.has(recSku) || !slot?.deal
+      ? []
+      : [
+          {
+            rec_id: `rec_${recSku.toLowerCase()}`,
+            sku: recSku,
+            unit_cents: priceOf(recSku),
+            original_cents: productBySku[recSku].price_cents,
+            interest: 0.6,
+            reason:
+              recSku === "GUAC-KIT"
+                ? `You're restocking avocados and limes. ${slot.deal.reason}, so it's ${slot.deal.percent_off ?? 0}% off today.`
+                : `${slot.deal.reason}. It's on the front endcap, right on the way to checkout.`,
+            signals: { discount_pct: slot.deal.percent_off ?? 0, deals_pref: maya.profile.prefs.deals ?? 0 },
+            sponsored: false,
+            detour_m: 0,
+            detour_s: 6,
+          },
+        ];
+  const total = lines.reduce((s, l) => s + l.qty * l.unit_cents, 0);
+  return {
+    store_id: storeId,
+    intent: `Restock ${lines.map((l) => `${l.qty} × ${productBySku[l.sku].name}`).join(", ")}`,
+    advice: [],
+    title: "Restock",
+    budget_cents: Math.max(maya.profile.default_budget_cents, Math.ceil((total * 1.25) / 500) * 500),
+    lines,
+    recs,
   };
 }
 

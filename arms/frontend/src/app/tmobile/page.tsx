@@ -86,7 +86,7 @@ export default function TmoHome() {
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-semibold text-magenta">One agent for everything</div>
           <div className="text-[20px] leading-tight font-semibold">Ask Magenta: phone, plan, upgrade, basket</div>
-          <p className="mt-1 text-[14px] text-white/75">She picks the right phone, tells you honestly whether to upgrade, fixes the family plan, keeps your basket honest, and in the store walks you to things and brings sealed phones from the back.</p>
+          <p className="mt-1 text-[14px] text-white/75">She picks the right phone, tells you honestly whether to upgrade, fixes the family plan, keeps your basket honest, and in the store walks you to things and brings your new phone over.</p>
         </div>
         <Button asChild size="lg" className="shrink-0 bg-magenta text-white hover:bg-magenta-deep">
           <Link href="/tmobile/store">

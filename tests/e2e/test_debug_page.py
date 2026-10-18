@@ -214,6 +214,14 @@ def test_debug_page_shows_fleet_brains_and_cameras(page: object, gateway_url: st
     answered.extend(_answer_approvals(pg))
     assert answered, "could not click the approval card"
 
+    # --- planner -> VLA -> verifier loop (plan mode): Pico's step list with step states + the verifier's verdicts
+    pg.wait_for_function("document.querySelectorAll('#planSteps .step').length >= 20", timeout=30_000)  # type: ignore[attr-defined]
+    assert "plan" in pg.inner_text("#execMode").lower()  # type: ignore[attr-defined]
+    pg.wait_for_function("document.querySelectorAll('#verdicts .vd').length >= 1", timeout=60_000)  # type: ignore[attr-defined]
+    assert "verified by" in pg.inner_text("#verdicts")  # type: ignore[attr-defined]
+    assert "✓" in pg.inner_text("#planSteps")  # type: ignore[attr-defined]  # at least one step succeeded
+    _shot(pg, "02b_plan_and_verifier.png")
+
     # --- robots move: Pico's marker on the store_ave map changes position
     pg.wait_for_function("document.querySelectorAll('#map g').length >= 1", timeout=15_000)  # type: ignore[attr-defined]
     first = _robot_xy(pg, "Pico")

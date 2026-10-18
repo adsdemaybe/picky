@@ -4,6 +4,7 @@ import { motion } from "motion/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { LiveStoreOffers } from "@/components/LiveStoreOffers";
 import { CountUp } from "@/components/motion";
 import { Money, Panel, ProductTile, SectionTitle, VerdictChip, categoryIcon } from "@/components/picky";
 import { OffersTable, Sparkline } from "@/components/PriceBits";
@@ -99,6 +100,8 @@ function Find() {
           })}
         </div>
       </section>
+
+      <LiveStoreOffers query={query} />
 
       <div className="grid gap-6 lg:grid-cols-12">
         <div className={cn(sku ? "lg:col-span-5" : "lg:col-span-12")}>

@@ -13,7 +13,7 @@ import os
 import sys
 import time
 
-R = os.environ.get("PICKY_ASSET_ROOT") or f"/data/{os.environ.get('USER', 'advaiv2')}/picky-assets/products"
+R = os.environ.get("PICKY_ASSET_ROOT") or f"/data/{os.environ.get('USER', 'user')}/picky-assets/products"
 OUT = f"{R}/_renders"
 MODE = sys.argv[1] if len(sys.argv) > 1 else "shelf"
 VIEWS = MODE == "views"

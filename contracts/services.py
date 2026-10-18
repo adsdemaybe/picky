@@ -18,13 +18,19 @@ Rules (CLAUDE.md §4):
   ``trip_id = goal.trip_id`` (``events.goal_envelope``); trip events use ``events.trip_envelope``.
 - Errors at the HTTP edge (gateway): KeyError -> 404, ValueError (rule violation, e.g. restock over capacity) -> 409,
   pydantic ValidationError / bad enum -> 422.
+- 0.2.1 (planner -> VLA -> verifier loop, additive): OPTIONAL ``Services`` fields ``planner`` / ``runner`` (agent),
+  ``vla`` / ``truth`` / ``faults`` (robot), ``verifier`` / ``evidence`` (perception), all default None, built from
+  ``LOOP_SERVICE_FACTORIES`` (kept apart from ``SERVICE_FACTORIES`` until the gateway wires them). ``exec_mode`` is the
+  kill switch: anything but PICKY_EXEC_MODE=plan|tools with all four core loop services wired = the exact v0.2 path.
 """
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, fields
 from typing import Any, Protocol, runtime_checkable
 
 from contracts.api import AddLineResult, CheckoutStatus, CreateTripRequest
+from contracts.bridge import ExecMode, ToolStepOutcome
 from contracts.cameras import CameraInfo, VisionObservation
 from contracts.catalog import (
     CategoryInfo,
@@ -69,12 +75,15 @@ from contracts.common import (
     UserId,
 )
 from contracts.events import Event
+from contracts.evidence import EvidenceCameras, TruthSource
+from contracts.faults import FaultContext, FaultEffect, FaultFiring, FaultRule, FaultScenario
 from contracts.fleet import (
     BrainReply,
     BrainStatus,
     BrainStep,
     FleetRequest,
     Goal,
+    GoalItem,
     GoalKind,
     GoalSpec,
     GoalStatus,
@@ -86,7 +95,20 @@ from contracts.fleet import (
 )
 from contracts.messaging import InboundMessage, OutboundMessage, ReplyInterpretation, SendResult
 from contracts.perception import BasketCheck, PickChoice, ScanReport
+from contracts.plan import (
+    STALL_FACTOR,
+    Condition,
+    ExecId,
+    PlanDraft,
+    PlanId,
+    PlanIssue,
+    PlanRequest,
+    PlanStep,
+    PlanStepId,
+    StepPlan,
+)
 from contracts.planogram import Planogram
+from contracts.policy import PlanOutcome, PlanRunState, ReplanRequest, RetryPolicy, StepAttempt
 from contracts.profile import Feedback, ProfileUpdate, PurchaseRecord, UserProfile
 from contracts.routing import GridSpec, Route, RouteRequest, StopStatus
 from contracts.shopping import Cart, CartLine, Intent, Recommendation, ShoppingList
@@ -103,6 +125,18 @@ from contracts.trust import (
     TransparencyEntry,
     TrustLedger,
 )
+from contracts.verify import (
+    GroundingResult,
+    GroundRequest,
+    Verdict,
+    VerifierCapabilities,
+    VerifierMode,
+    VerifyBaseline,
+    VerifyRequest,
+    VisionAnswer,
+    VisionExpect,
+)
+from contracts.vla import ExecRecord, VlaCapabilities, VlaError, VlaRequest, VlaStatus
 
 
 @runtime_checkable
@@ -783,7 +817,12 @@ class RobotBrainService(Protocol):
         'disconnected' is retryable (the robot continues on the 2D fake): re-plan from the current pose. LLM / API
         failures mid-goal (overload, rate limit, refusal, max_tokens, malformed output) never propagate: publish an
         error event + brain.step(kind='error'), switch BrainStatus.mode to 'scripted' and finish the goal with the
-        scripted executor from the current goal state."""
+        scripted executor from the current goal state.
+
+        0.2.1 plan mode: when ``exec_mode(services, settings.picky_exec_mode) == 'plan'``, delegate to
+        ``services.runner.run_goal(robot_id, goal)`` and return ``await services.fleet.update_goal(goal.goal_id,
+        bridge.goal_update_from_outcome(outcome))`` (a RobotError from the runner propagates so the fleet reassigns).
+        'direct' (the default) is this v0.2 path unchanged."""
         ...
 
     async def handle_message(self, robot_id: RobotId, text: str, user_id: UserId | None = None) -> BrainReply:
@@ -809,9 +848,377 @@ class RobotBrainService(Protocol):
         ...
 
 
+# ======================================================================================================================
+# Planner -> VLA -> verifier loop (new in 0.2.1; every field below is OPTIONAL in Services, default None)
+#
+#     field     Protocol         arm         factories (LOOP_SERVICE_FACTORIES)  real impl
+#     planner   PlannerService   agent       create_planner / _fake              Gemini PlanDraft + code compiler
+#     runner    LoopRunner       agent       create_runner / _fake (*)           THE loop: pre/act/post/commit/recover
+#     vla       VlaService       robot       create_vla / _fake                  T0 = RobotService; T1/T2 = RunSkillCmd
+#     truth     TruthSource      robot       create_truth / _fake                2D fake world / Isaac instances
+#     faults    FaultInjector    robot       create_faults / _fake               demo faults (PICKY_FAULTS, dev routes)
+#     verifier  VerifierService  perception  create_verifier / _fake             VisionProvider (Perceptron) + truth
+#     evidence  EvidenceCameras  perception  create_evidence / _fake             CameraService.snapshot + retention
+#     (*) the runner is deterministic code: its "fake" is the same class wired to fakes.
+#
+# Kill switch (double): every loop field defaults to None AND PICKY_EXEC_MODE=direct. Blank PICKY_EXEC_MODE = 'plan'
+# when vla + verifier are wired (the gateway wires every loop field), else 'direct'. ``exec_mode``
+# returns 'direct' unless the mode is 'plan' / 'tools' AND planner, runner, vla and verifier are all wired; 'direct'
+# is the exact v0.2 brain path (tools call RobotService directly). Factories never call services at construction; a
+# real factory that raises falls back to its fake (v0.2 registry rules); PICKY_REAL_ARMS=planner|vla|verifier selects
+# real ones individually (field names, like 'brain' / 'cameras').
+# ======================================================================================================================
+@runtime_checkable
+class PlannerService(Protocol):
+    """NL / Goal -> typed StepPlan; re-plan on failure (agent arm). The LLM proposes a ``PlanDraft`` (WHAT, in which
+    order); ``compile`` (deterministic code: ``plan.normalize_draft`` then the macros) decides HOW. Real: Gemini
+    structured output (the utils.llm 'brain' model, default gemini-3.8-flash; PICKY_LLM_PROVIDER=anthropic switches to
+    Claude) via ``utils.llm.complete_json(prompt, PlanDraft)`` inside ``asyncio.wait_for(PICKY_PLAN_TIMEOUT_S, default
+    20 s)``; no key / timeout / refusal / invalid draft -> scripted draft (never raises for LLM errors;
+    ``plan.planner.origin`` + ``fallback_reason`` say which). ``replan`` stays deterministic (scripted draft over the
+    open tail: it runs mid-trip, so no LLM latency there). The runner bounds ``replan`` with the same timeout and ends
+    only that item if it raises. Fake: scripted (taco rules + catalog lookups via the v0.2 CatalogService); the real
+    planner subclasses it and overrides ``draft()`` only."""
+
+    async def plan(self, request: PlanRequest) -> StepPlan:
+        """READY StepPlan. Goal: its pending items in goal order (= the trip route for shop goals). Text: interpret
+        (fake: keyword rules; taco list = v0.2 expand_intent's) and resolve items in ``request.store_id`` through
+        ``catalog.search`` / ``get_locations``; items not on the shelf there are listed with status 'online' and get
+        no steps. Validation errors -> ValueError (nothing runs)."""
+        ...
+
+    async def compile(
+        self,
+        draft: PlanDraft,
+        request: PlanRequest,
+        *,
+        items: Sequence[GoalItem],
+        plan_id: PlanId | None = None,
+    ) -> StepPlan:
+        """Deterministic, no LLM: approach poses / lift heights from the planogram, ``TargetSpec`` from the product,
+        ``default_conditions``, timeouts, units = qty - picked_qty, optional -> ask first, produce -> pick_choice after
+        the scan, audit + checkout handoff when end_at='checkout'. Unknown item ids in the draft are dropped (listed in
+        ``planner.fixes``); drafts cannot add items."""
+        ...
+
+    async def replan(self, request: ReplanRequest) -> StepPlan:
+        """New revision (revision+1, supersedes = old plan_id, same root_plan_id): CLOSED steps carried over verbatim
+        (same ids -> same effect keys, nothing commits twice); only the tail changes (substitute SKU, skipped item, new
+        order). The old plan becomes SUPERSEDED. Budget: RetryPolicy.budget.max_replans (the runner enforces it)."""
+        ...
+
+    async def expand_tool_call(self, plan: StepPlan, tool_name: str, tool_input: Mapping[str, Any]) -> list[PlanStep]:
+        """Tools mode: ONE v0.2 brain motion tool call -> the steps to append to the goal's live plan
+        (``bridge.BRAIN_TOOL_STEPS``; ids 't<NN>.<k>'). KeyError for non-motion tools (they keep the v0.2 executor)."""
+        ...
+
+    def validate(self, plan: StepPlan) -> list[PlanIssue]:
+        """``plan.validate_plan`` + store checks (slots exist in the robot's store)."""
+        ...
+
+
+@runtime_checkable
+class VlaService(Protocol):
+    """Executes VLA steps (navigate_to, align, grasp, place, handoff) on one robot as an async status stream (robot
+    arm); see contracts.vla for the stream / idempotency / tier / deadline rules. T0 wraps v0.2 RobotService (navigate =
+    services.routing path + robot.navigate; align = a small robot.navigate to ``location.approach_pose`` only: v0.2
+    has no lift / pan-tilt command, so 'lift_preposition' / 'aiming_camera' are UI stages, the lift moves inside
+    robot.pick and the head is aimed by EvidenceCameras(aim_slot_id) / robot.scan; grasp = robot.pick(slot, sku,
+    grounding.instance_id) (magic grasp, slot_reachable); place = robot.place_in_basket; handoff =
+    robot.unload_basket), maps RobotError with ``VlaError.from_sim`` and is available on both backends, always.
+    ``running`` heartbeats come from the service itself (a timer task + pose from robot.state); RobotService has no
+    progress callback. T1/T2 (0.3.0 wire): ``vla.RunSkillCmd`` to the Isaac worker, availability from
+    ``vla.PolicyServerStatus``. All timestamps the service emits (VlaStatus.ts, VlaOutcome.ended_at) are GATEWAY
+    clock. Publishes nothing (the runner owns events)."""
+
+    async def capabilities(self, robot_id: RobotId) -> list[VlaCapabilities]:
+        """Every tier for that robot right now (available or not, with reason). KeyError for unknown robots."""
+        ...
+
+    def execute(self, request: VlaRequest, *, after_seq: int = 0) -> AsyncIterator[VlaStatus]:
+        """Start (or re-attach to) ``request.exec_id`` and stream its statuses (seq > after_seq). Never raises for robot
+        failures (they are 'failed' statuses); closing the iterator does NOT cancel the motion (use ``cancel``)."""
+        ...
+
+    async def get_exec(self, exec_id: ExecId) -> ExecRecord:
+        """Request + every status so far (KeyError if unknown / expired)."""
+        ...
+
+    async def cancel(self, exec_id: ExecId, reason: str = "") -> VlaStatus:
+        """Stop that execution (robot.stop on T0; abort the skill on T1/T2) and return its TERMINAL status. Idempotent:
+        an already-terminal exec returns its terminal status unchanged. KeyError if unknown."""
+        ...
+
+    async def cancel_robot(self, robot_id: RobotId, reason: str = "") -> list[VlaStatus]:
+        """Cancel every running execution of that robot (fleet stop / goal cancel)."""
+        ...
+
+
+StatusCallback = Callable[[VlaStatus], Awaitable[None]]
+
+
+async def run_vla_to_terminal(
+    vla: VlaService,
+    request: VlaRequest,
+    *,
+    on_status: StatusCallback | None = None,
+    stall_factor: float = STALL_FACTOR,
+    max_reattach: int = 2,
+    grace_heartbeats: float = 2.0,
+) -> VlaStatus:
+    """Drain ONE execution with the runner's safety nets and ALWAYS return exactly one TERMINAL status:
+
+    - stall: no status for ``stall_factor x heartbeat_s`` -> cancel, synthesize failed(deadline_exceeded, stalled)
+    - deadline: ``deadline_s`` (+ ``grace_heartbeats`` heartbeats) elapsed -> cancel, synthesize
+      failed(deadline_exceeded). Checked BEFORE every wait, so a slow ``on_status`` (event publishing) can never let a
+      TimeoutError escape: the passed-deadline branch is the same cancel + synthesize path as the wait timeout.
+    - dropped stream (gateway hiccup, worker reconnect): re-attach with the same exec_id + ``after_seq`` (idempotent,
+      no second motion), at most ``max_reattach`` times, then ``get_exec``
+    - caller cancelled (goal cancel / fleet stop): cancel the exec (shielded), re-raise CancelledError
+    Replayed statuses (seq <= last seen) are dropped, so ``on_status`` sees each seq once. A terminal status the runner
+    obtains by cancelling or synthesizes is passed to ``on_status`` too, so observers never see an exec stuck in
+    'accepted' / 'running' (a synthesized status has seq = last + 1 and exists only on the runner side).
+    """
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    budget = request.deadline_s + grace_heartbeats * request.heartbeat_s
+    stall_s = stall_factor * request.heartbeat_s
+    last: VlaStatus | None = None
+    reattach_left = max_reattach
+
+    def synth(code: str, message: str, base: VlaStatus | None, **details: Any) -> VlaStatus:
+        seq = max(base.seq if base else 0, last.seq if last else 0) + 1
+        tier = last.tier if last else None
+        return VlaStatus(
+            exec_id=request.exec_id,
+            robot_id=request.robot_id,
+            seq=seq,
+            phase="failed",
+            tier=tier,
+            backend=last.backend if last else None,
+            message=message,
+            error=VlaError(code=code, message=message, tier=tier, details=details),  # type: ignore[arg-type]
+            outcome=base.outcome if base else None,
+        )
+
+    async def deliver(status: VlaStatus) -> VlaStatus:
+        if on_status is not None and (last is None or status.seq > last.seq):
+            await on_status(status)
+        return status
+
+    async def give_up(stalled: bool) -> VlaStatus:
+        final = await vla.cancel(request.exec_id, "stalled" if stalled else "deadline")
+        if final.phase in ("succeeded", "failed"):  # it finished on its own while we were cancelling
+            return await deliver(final)
+        msg = f"no status for {stall_s:.1f}s" if stalled else f"deadline {request.deadline_s:.1f}s exceeded"
+        return await deliver(synth("deadline_exceeded", msg, final, stalled=stalled))
+
+    while True:
+        it = vla.execute(request, after_seq=last.seq if last else 0).__aiter__()
+        try:
+            while True:
+                remaining = budget - (loop.time() - started)
+                if remaining <= 0:
+                    return await give_up(stalled=False)
+                try:
+                    status = await asyncio.wait_for(it.__anext__(), timeout=min(remaining, stall_s))
+                except TimeoutError:
+                    return await give_up(stalled=stall_s < remaining)
+                if last is not None and status.seq <= last.seq:
+                    continue
+                last = status
+                if on_status is not None:
+                    await on_status(status)
+                if status.terminal:
+                    return status
+        except StopAsyncIteration:
+            record = await vla.get_exec(request.exec_id)
+            for s in record.statuses:
+                if last is None or s.seq > last.seq:
+                    last = s
+                    if on_status is not None:
+                        await on_status(s)
+            if record.terminal is not None:
+                return record.terminal
+            if reattach_left <= 0:
+                final = await vla.cancel(request.exec_id, "stream lost")
+                return await deliver(
+                    final if final.phase != "cancelled" else synth("internal", "status stream lost", final)
+                )
+            reattach_left -= 1
+        except asyncio.CancelledError:
+            await asyncio.shield(vla.cancel(request.exec_id, "caller cancelled"))
+            raise
+        finally:
+            aclose = getattr(it, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # noqa: BLE001 - closing a dead stream must not mask the result
+                    pass
+
+
+@runtime_checkable
+class VisionProvider(Protocol):
+    """One vision backend behind the verifier and grounding (perception arm, inside its VerifierService; not a
+    Services field). Implementations: **Perceptron** (THE real provider: SDK ``perceptron`` 0.4.x, PERCEPTRON_API_KEY,
+    base https://api.perceptron.inc/v1; one ``AsyncClient`` per event loop, model perceptron-mk1.5, fallback
+    perceptron-mk1; every call wrapped in ``asyncio.wait_for``), an optional general-VLM fallback (Gemini via
+    utils.llm by default, Claude when PICKY_LLM_PROVIDER=anthropic), and the fake (answers from sidecars). Every method
+    REJECTS frames with ``blurred=False`` (ValueError): faces are blurred before any frame reaches Perceptron or an
+    LLM (CLAUDE.md section 8). Provider errors (rate limit, quota, timeout) return a VisionAnswer with
+    ``call.error_code`` set and no boxes; they never raise into the runner. Mapping of each check to SDK calls:
+    ``verify.PERCEPTRON_CALLS`` and docs/vla-loop/perceptron.md.
+
+    ``timeout_s`` (every method): this call's budget = min(provider default PICKY_VISION_CALL_TIMEOUT_S, what is
+    left of ``VerifyRequest.deadline_s``); the verifier passes the remainder so a 2-3 call verify never overruns.
+    Timing (Perceptron mk1.5, one 640x480 JPEG): ~0.5-1.5 s per call, Multilook ~ one call for 2-4 prompts."""
+
+    name: str
+    model: str | None
+
+    async def detect(
+        self, frame: CameraFrame, classes: Sequence[str], *, timeout_s: float | None = None
+    ) -> VisionAnswer: ...
+
+    async def point(self, frame: CameraFrame, query: str, *, timeout_s: float | None = None) -> VisionAnswer:
+        """Grounded pointing ('Point to the best grasp spot on the mild salsa jar')."""
+        ...
+
+    async def question(
+        self, frame: CameraFrame, question: str, expects: VisionExpect = "text", *, timeout_s: float | None = None
+    ) -> VisionAnswer: ...
+
+    async def ocr(
+        self, frame: CameraFrame, prompt: str | None = None, *, timeout_s: float | None = None
+    ) -> VisionAnswer: ...
+
+    async def compare(
+        self,
+        before: CameraFrame,
+        after: CameraFrame,
+        question: str,
+        expects: VisionExpect = "box",
+        *,
+        timeout_s: float | None = None,
+    ) -> VisionAnswer:
+        """Two-image question (annotations without asset_idx refer to the LAST asset = ``after``)."""
+        ...
+
+    async def multilook(
+        self, frame: CameraFrame, prompts: Sequence[str], *, timeout_s: float | None = None
+    ) -> list[VisionAnswer]:
+        """Several prompts against ONE prefilled frame (Perceptron Multilook; others: sequential calls)."""
+        ...
+
+
+@runtime_checkable
+class VerifierService(Protocol):
+    """Evaluates Conditions on blurred camera frames + robot state; grounds targets (perception arm). Provider-agnostic
+    (VisionProvider; Perceptron in the real one). Stateless apart from caches; publishes nothing (the runner publishes
+    step.verified / target.grounded). See contracts.verify for the evaluation order, modes and fusion rules. Fake:
+    exact (``verify.evaluate_on_truth`` on ``TruthSource.truth`` with the fault overlay applied)."""
+
+    async def verify(self, request: VerifyRequest) -> Verdict:
+        """Idempotent per ``verify_id``. Never raises for provider failures (worst case 'uncertain', degraded).
+        Raises ``VerifierUnavailableError`` only when no verdict can be produced at all."""
+        ...
+
+    async def ground(self, request: GroundRequest) -> GroundingResult:
+        """Box + grasp point of the target in a fresh frame (Perceptron: detect + question(expects='point')); sim:
+        ``instance_id`` = the unit whose bbox contains the point, so T0 grabs exactly that unit."""
+        ...
+
+    async def baseline(self, robot_id: RobotId, condition: Condition | None, *, baseline_id: str) -> VerifyBaseline:
+        """Pre-step snapshot for relative atoms (basket_delta): basket counts, slot counts, holding (+ frame refs)."""
+        ...
+
+    async def capabilities(self) -> VerifierCapabilities: ...
+
+    async def set_mode(self, mode: VerifierMode) -> VerifierCapabilities:
+        """decide / shadow / gt_only (PUT /api/verifier/mode)."""
+        ...
+
+
+@runtime_checkable
+class FaultInjector(Protocol):
+    """Deterministic demo failures (robot arm; dev / demo only). The fake VLA, fake camera and fake verifier call
+    ``consult`` with their layer's effects; it applies ``faults.fault_fires`` (occurrence counted per rule over
+    distinct step keys), records the firing and publishes ``demo.fault``."""
+
+    async def load_scenario(self, scenario: FaultScenario | str) -> FaultScenario:
+        """Replace the active rules with a scenario (name from DEMO_SCENARIOS, or a full FaultScenario)."""
+        ...
+
+    async def inject(self, rule: FaultRule) -> FaultRule: ...
+
+    async def clear_faults(self) -> None: ...
+
+    async def firings(self) -> list[FaultFiring]:
+        """What fired so far (the presenter's cheat sheet; GET /api/dev/faults)."""
+        ...
+
+    async def consult(self, ctx: FaultContext, effects: Sequence[FaultEffect]) -> list[FaultFiring]:
+        """Rules among ``effects`` that fire for ``ctx`` now (each firing recorded once)."""
+        ...
+
+
+@runtime_checkable
+class LoopRunner(Protocol):
+    """THE orchestration entry point (agent arm). Runs StepPlans. Per step: pre-check (verifier) -> act (VLA via
+    ``run_vla_to_terminal`` / verifier / v0.2 scan + ask paths) -> baseline + postconditions (verifier; degrade policy
+    if it is down) -> commit ``COMMIT_ON_VERIFIED`` effects once per effect key -> next step; on failure
+    ``decide_recovery`` and apply it (insert steps, rerun on the next tier, open a breaker, ask via trips.ask /
+    approvals, replan via PlannerService, end the item / goal). One plan per robot at a time. Publishes the loop events
+    (plan.* / step.* / vla.* / target.grounded / camera.overlay) and mirrors one ``brain.step(kind='status')`` per
+    step transition (``bridge.mirror_brain_step``); goal / trip changes go only through fleet.update_goal and
+    services.trips (v0.2 rules)."""
+
+    async def run_goal(self, robot_id: RobotId, goal: Goal) -> PlanOutcome:
+        """plan (PlannerService) + run_plan. ``RobotBrainService.run_goal`` delegates here in PICKY_EXEC_MODE=plan and
+        then finishes the goal itself: ``fleet.update_goal(goal_id, bridge.goal_update_from_outcome(outcome))`` and
+        returns the fleet's terminal Goal. The runner patches goal ITEMS / progress and mirrors item status onto trip
+        route stops (``bridge.ITEM_TO_STOP_STATUS``); it never sets the goal's status."""
+        ...
+
+    async def run_plan(self, plan: StepPlan, *, policy: RetryPolicy | None = None) -> PlanOutcome:
+        """Run until completed / failed / cancelled (long-running; cancel the task or call ``cancel``). Raises only
+        RobotError for fatal codes ('escalate': battery_low, unknown_robot, gripper_fault) WITHOUT failing the goal,
+        so the fleet reassigns (v0.2 rule); CancelledError propagates after plan.completed(cancelled)."""
+        ...
+
+    async def run_tool_step(
+        self, robot_id: RobotId, goal: Goal, tool_name: str, tool_input: Mapping[str, Any]
+    ) -> ToolStepOutcome:
+        """Tools mode: expand one v0.2 motion tool call, append its steps to the goal's live plan, run them with
+        INNER_RECOVERIES only; outer decisions come back as ``ToolStepOutcome.error`` (BrainToolError)."""
+        ...
+
+    async def cancel(self, plan_id: PlanId, reason: str = "") -> PlanRunState:
+        """Cancel the running exec (VlaService.cancel_robot), withdraw a pending question (approvals.cancel), mark
+        CANCELLED. An in-flight effect commit finishes first (record_pick never lands without its cart line / goal
+        item). Goal-backed plans are cancelled through ``fleet.cancel_goal`` (the fleet owns goal status and the brain
+        task); call this directly only for goal-less dev plans (POST /api/dev/plans). A unit left in the gripper is
+        reported in ``PlanRunState.holding_instance_id`` (never committed)."""
+        ...
+
+    async def get_plan(self, plan_id: PlanId) -> StepPlan:
+        """Any revision (KeyError)."""
+        ...
+
+    async def current_plan(self, goal_id: GoalId) -> StepPlan | None:
+        """Latest non-superseded revision for a goal (GET /api/goals/{id}/plan); in tools mode the live plan."""
+        ...
+
+    async def run_state(self, plan_id: PlanId) -> PlanRunState: ...
+
+    async def attempts(self, plan_id: PlanId, step_id: PlanStepId | None = None) -> list[StepAttempt]: ...
+
+
 @dataclass
 class Services:
-    """DI container. Every field is optional so partial wiring (tests, fakes) works."""
+    """DI container. Every field is optional so partial wiring (tests, fakes) works. The loop fields (0.2.1) stay None
+    until the gateway wires ``LOOP_SERVICE_FACTORIES``; None = the v0.2 path (``exec_mode`` -> 'direct')."""
 
     catalog: CatalogService | None = None
     recommender: RecommenderService | None = None
@@ -828,6 +1235,14 @@ class Services:
     approvals: ApprovalBroker | None = None
     events: EventPublisher | None = None
     sim_link: SimLink | None = None
+    # planner -> VLA -> verifier loop (0.2.1; LOOP_SERVICE_FACTORIES)
+    planner: PlannerService | None = None
+    runner: LoopRunner | None = None
+    vla: VlaService | None = None
+    verifier: VerifierService | None = None
+    truth: TruthSource | None = None
+    evidence: EvidenceCameras | None = None
+    faults: FaultInjector | None = None
 
     def require(self, name: str) -> Any:
         """Return ``getattr(self, name)`` or raise a clear error if that service isn't wired."""
@@ -896,12 +1311,80 @@ GATEWAY_PROTOCOLS: dict[str, type] = {
 
 SERVICE_ARMS: tuple[str, ...] = tuple(SERVICE_PROTOCOLS)
 
+LOOP_CORE_FIELDS: tuple[str, ...] = ("planner", "runner", "vla", "verifier")
+"""Loop services that must ALL be wired before ``exec_mode`` leaves 'direct'."""
+
+
+def exec_mode(services: Services, configured: str | None) -> ExecMode:
+    """THE kill switch: 'direct' (exact v0.2) unless ``configured`` (settings PICKY_EXEC_MODE) is 'plan' / 'tools' AND
+    planner, runner, vla and verifier are all wired."""
+    if configured not in ("plan", "tools"):
+        return "direct"
+    if any(getattr(services, name, None) is None for name in LOOP_CORE_FIELDS):
+        return "direct"
+    return configured  # type: ignore[return-value]
+
+
+LOOP_SERVICE_PROTOCOLS: dict[str, type] = {
+    "planner": PlannerService,
+    "runner": LoopRunner,
+    "vla": VlaService,
+    "verifier": VerifierService,
+    "truth": TruthSource,
+    "evidence": EvidenceCameras,
+    "faults": FaultInjector,
+}
+"""Loop Services fields -> Protocol (0.2.1). ``VisionProvider`` is not a field: it lives inside the verifier."""
+
+LOOP_SERVICE_FACTORIES: dict[str, tuple[str, str, str]] = {
+    "planner": ("agent", "create_planner", "create_planner_fake"),
+    "runner": ("agent", "create_runner", "create_runner_fake"),
+    "vla": ("robot", "create_vla", "create_vla_fake"),
+    "truth": ("robot", "create_truth", "create_truth_fake"),
+    "faults": ("robot", "create_faults", "create_faults_fake"),
+    "verifier": ("perception", "create_verifier", "create_verifier_fake"),
+    "evidence": ("perception", "create_evidence", "create_evidence_fake"),
+}
+"""Loop Services field -> (arm, real factory, fake factory) exported by ``arms.<arm>`` (same rules as
+``SERVICE_FACTORIES``: real when the field or its arm is in PICKY_REAL_ARMS; a raising real factory falls back to the
+fake). Separate from ``SERVICE_FACTORIES`` on purpose: the gateway registry builds every SERVICE_FACTORIES entry, and
+the arms export these factories only once they implement them. Gateway step: wire ``{**SERVICE_FACTORIES,
+**LOOP_SERVICE_FACTORIES}`` and treat a missing loop factory as 'not wired' (None), never as an error."""
+
+LOOP_ENV_VARS: dict[str, str] = {
+    "PICKY_EXEC_MODE": "direct | plan | tools (blank = plan when the VLA + verifier are wired, else direct; "
+    "direct = exact v0.2 behaviour, the kill switch)",
+    "PICKY_VLA_TIERS": "tiers to offer, e.g. 't0_scripted,t1_pretrained' (default t0_scripted)",
+    "PICKY_VLA_T1_MODEL": "e.g. lerobot/smolvla_base (advertised by the Isaac worker as 'vla:t1:<model>')",
+    "PICKY_VERIFIER_MODE": "decide | shadow | gt_only (default: shadow on 2D-fake stores, decide on Isaac)",
+    "PICKY_VISION_PROVIDER": "perceptron | gemini | claude | fake (verifier backend; perceptron = THE real provider; "
+    "default fake when PERCEPTRON_API_KEY is unset)",
+    "PERCEPTRON_API_KEY": "Perceptron API key (the perceptron SDK reads it); unset = fake / ground truth only",
+    "PERCEPTRON_MODEL": "default perceptron-mk1.5 (fallback perceptron-mk1)",
+    "PERCEPTRON_BASE_URL": "default https://api.perceptron.inc/v1",
+    "PICKY_VERIFY_TIMEOUT_S": "the runner's wait_for around each verifier call (RetryPolicy.degrade.verify_timeout_s, "
+    "default 8); the verifier gets deadline_s = this - 1 s (verify.verify_deadline)",
+    "PICKY_VISION_CALL_TIMEOUT_S": "cap per provider call inside the verifier (default 4; also bounded by the "
+    "remaining deadline_s)",
+    "PICKY_PLAN_TIMEOUT_S": "wait_for around the LLM planner draft call and the runner's replan call (default 20)",
+    "PICKY_VLA_POLICY_URL": "Isaac worker side (vhagar): T1 policy server, e.g. ws://127.0.0.1:8000 (openpi wire)",
+    "PICKY_VLA_POLICY_PROTOCOL": "openpi_ws (default; msgpack-numpy over websocket) | lerobot_grpc (later)",
+    "PICKY_FAULTS": "demo fault scenario name from faults.DEMO_SCENARIOS (unset = no faults)",
+    "PICKY_DEV": "1 enables /api/dev/faults, /api/dev/plans and /api/verify presets",
+}
+"""Env vars the loop reads (documentation; Settings fields + .env.example land in the utils PR). The LLM itself is
+utils.llm's: PICKY_LLM_PROVIDER (gemini default | anthropic), GEMINI_API_KEY / ANTHROPIC_API_KEY."""
+
 ArmFactory = Callable[[Services], Any]
 
 __all__ = [
     "ARM_NAMES",
     "EXTRA_SERVICE_PROTOCOLS",
     "GATEWAY_PROTOCOLS",
+    "LOOP_CORE_FIELDS",
+    "LOOP_ENV_VARS",
+    "LOOP_SERVICE_FACTORIES",
+    "LOOP_SERVICE_PROTOCOLS",
     "SERVICE_ARMS",
     "SERVICE_FACTORIES",
     "SERVICE_PROTOCOLS",
@@ -911,10 +1394,14 @@ __all__ = [
     "CameraService",
     "CatalogService",
     "EventPublisher",
+    "EvidenceCameras",
+    "FaultInjector",
     "FleetService",
     "InboundHandler",
+    "LoopRunner",
     "MessagingService",
     "PerceptionService",
+    "PlannerService",
     "RecommenderService",
     "RobotBrainService",
     "RobotError",
@@ -922,6 +1409,13 @@ __all__ = [
     "RoutingService",
     "Services",
     "SimLink",
+    "StatusCallback",
     "TripController",
+    "TruthSource",
     "TrustService",
+    "VerifierService",
+    "VisionProvider",
+    "VlaService",
+    "exec_mode",
+    "run_vla_to_terminal",
 ]

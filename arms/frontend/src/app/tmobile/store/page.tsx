@@ -185,16 +185,17 @@ export default function InStore() {
   const fetchFromBack = useCallback(
     async (sku: string) => {
       const name = nice(productOf(sku)?.name ?? sku);
-      setTask({ kind: "fetch", label: `Getting a sealed ${name} from the back room`, fixture: "BACK-STOCK", sku });
+      const from = backStock(sku) ? "BACK-STOCK" : (displaySlot(sku)?.fixture_id ?? "COUNTER");
+      setTask({ kind: "fetch", label: `Getting your ${name} from ${fixtureName(from)}`, fixture: from, sku });
       const meet = { ...walker.pose.current.robot };
-      await walker.walk(approachOf("BACK-STOCK"), false);
+      await walker.walk(approachOf(from), false);
       await new Promise((r) => setTimeout(r, 1300));
       const y = walker.pose.current.you ?? meet;
       await walker.walk({ x: y.x + 0.5, y: y.y }, false);
       setTask(null);
-      const line = `Here's your sealed ${name}. It's in your basket.`;
+      const line = `Here's your ${name}. It's in your basket.`;
       post({ role: "magenta", text: line });
-      toast(`Magenta brought a sealed ${name}`, { icon: <PackageOpen className="size-4" /> });
+      toast(`Magenta brought your ${name}`, { icon: <PackageOpen className="size-4" /> });
       if (!mic.listening) void say(line);
     },
     [walker, post, say, mic.listening],
@@ -398,7 +399,7 @@ export default function InStore() {
               <Face mode="idle" size={200} />
               <div>
                 <h2 className="text-[26px] font-bold">Hi! I&apos;m Magenta.</h2>
-                <p className="mx-auto mt-1 max-w-[440px] text-[15px] text-muted-foreground">I can find anything in the store, walk you to it, check what fits your phone and bring sealed phones from the back.</p>
+                <p className="mx-auto mt-1 max-w-[440px] text-[15px] text-muted-foreground">I can find anything in the store, walk you to it, check what fits your phone and bring your new phone over to you.</p>
               </div>
               <Button size="lg" className="h-14 rounded-full bg-magenta px-8 text-[17px] text-white hover:bg-magenta-deep" onClick={begin}>
                 <Mic className="size-5" aria-hidden /> Tap to talk to me
@@ -587,7 +588,7 @@ export default function InStore() {
                           <div className="text-[13.5px] leading-tight font-semibold">{nice(p.name)}</div>
                           <div className="text-[12px] text-muted-foreground">
                             {l.qty > 1 ? `${l.qty} × ${fmt(unitPrice(l.sku))} · ` : ""}
-                            {backStock(l.sku) ? "sealed box from the back" : `from ${fixtureName(displaySlot(l.sku)?.fixture_id ?? "")}`}
+                            {backStock(l.sku) ? "boxed, from the back" : `from ${fixtureName(displaySlot(l.sku)?.fixture_id ?? "")}`}
                           </div>
                         </div>
                         <Money cents={l.qty * unitPrice(l.sku)} className="text-[13.5px] font-semibold" />

@@ -100,7 +100,7 @@ export function targetDevice(ctx: Pick<WContext, "cart" | "intent">): { sku: str
   const t = (ctx.intent ?? "").toLowerCase();
   const named = tmobileProducts
     .filter((p) => p.category === "phone")
-    .map((p) => ({ p, key: p.name.toLowerCase().replace(/\s+\d+\s*gb$/, "") }))
+    .map((p) => ({ p, key: p.name.toLowerCase().replace(/\s+\d+\s*gb$/, "").replace(/^(google|apple|samsung|motorola|t-mobile)\s+/, "") }))
     .sort((a, b) => b.key.length - a.key.length)
     .find(({ key }) => t.includes(key));
   if (named) return { sku: named.p.sku, name: shortName(named.p.sku), isNew: true };

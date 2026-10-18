@@ -9,32 +9,22 @@ schema_version: 1
 as_of: 2026-10-18
 
 # --------------------------------------------------------------------------------------------------- phones
-# Illustrative 1-5 ratings used by the Matchmaker to rank devices against what a shopper says matters. size: compact
+# Illustrative 1-5 ratings (phones on the store_tmobile floor) used by the Matchmaker to rank devices against what a shopper says matters. size: compact
 # (<6.2"), standard, large, foldable. os_support_until: last month of promised security updates (illustrative).
 phone_traits:
-  IP18PM-256: {camera: 5, battery: 5, performance: 5, value: 1, size: large}
-  IP18P-256: {camera: 5, battery: 4, performance: 5, value: 2, size: standard}
-  IPDUO-256: {camera: 5, battery: 4, performance: 5, value: 1, size: foldable}
-  IPAIR-256: {camera: 3, battery: 3, performance: 5, value: 2, size: large}
+  IP18PRO-256: {camera: 5, battery: 4, performance: 5, value: 1, size: standard}
+  IP17PRO-256: {camera: 5, battery: 4, performance: 5, value: 2, size: standard}
   IP17-256: {camera: 4, battery: 4, performance: 4, value: 3, size: standard}
-  IP17E-256: {camera: 3, battery: 4, performance: 4, value: 4, size: standard}
   IP16-128: {camera: 3, battery: 3, performance: 4, value: 3, size: standard}
-  PX11PXL-256: {camera: 5, battery: 5, performance: 4, value: 2, size: large}
-  PX11P-256: {camera: 5, battery: 4, performance: 4, value: 2, size: compact}
-  PX11-256: {camera: 4, battery: 4, performance: 4, value: 3, size: standard}
-  PX11PF-256: {camera: 4, battery: 3, performance: 4, value: 1, size: foldable}
-  PX10A-128: {camera: 4, battery: 4, performance: 3, value: 5, size: standard}
-  PX9-128: {camera: 4, battery: 3, performance: 3, value: 3, size: standard}
   GS26U-256: {camera: 5, battery: 5, performance: 5, value: 1, size: large}
   GS26-256: {camera: 4, battery: 3, performance: 5, value: 3, size: compact}
-  GS26FE-128: {camera: 3, battery: 4, performance: 3, value: 4, size: standard}
-  ZFOLD8-256: {camera: 4, battery: 3, performance: 5, value: 1, size: foldable}
-  ZFLIP8-256: {camera: 3, battery: 3, performance: 4, value: 2, size: foldable}
   GS25-128: {camera: 4, battery: 3, performance: 4, value: 3, size: compact}
-  RAZRP26-256: {camera: 3, battery: 3, performance: 4, value: 2, size: foldable}
-  RAZR26-256: {camera: 3, battery: 4, performance: 3, value: 3, size: foldable}
-  MOTOG26-128: {camera: 2, battery: 5, performance: 2, value: 5, size: large}
+  GZF8-256: {camera: 3, battery: 3, performance: 4, value: 2, size: foldable}
+  PX11P-256: {camera: 5, battery: 4, performance: 4, value: 2, size: compact}
+  PX10-128: {camera: 4, battery: 4, performance: 4, value: 4, size: standard}
+  PX9-128: {camera: 4, battery: 3, performance: 3, value: 3, size: standard}
   REVVL8P-256: {camera: 2, battery: 4, performance: 2, value: 5, size: large}
+  MOTOG26-128: {camera: 2, battery: 5, performance: 2, value: 5, size: large}
 
 # --------------------------------------------------------------------------------------------------- Matchmaker
 # Preset conversations: each is a shopper's answers to the five questions, so the demo is one tap per persona.
@@ -233,7 +223,7 @@ upgrade_cases:
   storage_used_pct: 71
   os_support_until: 2026-10
   issues: ['Security updates end this month']
-  target_sku: PX10A-128
+  target_sku: PX10-128
 - id: marco
   name: 'Marco (Garcia family)'
   account_id: acct_garcia
@@ -244,7 +234,7 @@ upgrade_cases:
   storage_used_pct: 55
   os_support_until: 2027-02
   issues: []
-  target_sku: GS26FE-128
+  target_sku: GS25-128
 
 # --------------------------------------------------------------------------------------------------- Household Mix
 # Households for the optimizer. account_ids pull lines from data/wireless.yaml; `separate` households are people

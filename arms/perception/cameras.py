@@ -1,8 +1,9 @@
 """Cameras API (``contracts.services.CameraService``): registry, blurred snapshots / live streams, ``observe``.
 
 ``create_cameras_fake(services)`` -> :class:`FakeCameras` (base deps only: pillow);
-``create_cameras(services)``      -> :class:`RealCameras` (same, plus ``observe`` through claude-haiku-5-5 vision via
-``utils.llm``; raises without ``ANTHROPIC_API_KEY`` so the gateway boots the fake).
+``create_cameras(services)``      -> :class:`RealCameras` (same, plus ``observe`` through the ``utils.llm`` fast model's
+vision (gemini-3.8-flash by default); raises without the provider's key (``GEMINI_API_KEY``) so the gateway boots the
+fake).
 
 Registry: ``utils.data.load_cameras()`` (data/fixtures/robots.yaml: each robot's front / wrist / basket camera + the
 store ceiling cameras; built-in defaults with the fixed ids if the file is missing), overlaid at call time with what
@@ -42,12 +43,15 @@ from pydantic import BaseModel, Field
 
 from contracts.cameras import (
     DEFAULT_ROBOT_CAMERA_MOUNTS,
+    PERCEIVED_SOURCE_KINDS,
     ROBOT_CAMERA_KINDS,
     CameraInfo,
     CameraMount,
     ObservedItem,
     VisionObservation,
+    director_camera_id,
     parse_camera_id,
+    perceived_camera_id,
     robot_camera_id,
 )
 from contracts.catalog import Product
@@ -60,6 +64,7 @@ from utils.log import get_logger
 from utils.money import fmt_cents
 
 from .fake import FakePerception, basket_instances, shelf_tag_price
+from .perceived import FIRST_DETECT_WAIT_S, PerceivedStreams
 
 log = get_logger(__name__)
 
@@ -79,6 +84,8 @@ MJPEG_CONTENT_TYPE = f"multipart/x-mixed-replace; boundary={MJPEG_BOUNDARY}"
 JPEG_QUALITY = 82
 
 RENDERED_SOURCES = ("isaac", "fake")
+DIRECTOR_MOUNT = CameraMount(frame="world", z=2.35, pitch=-0.6, hfov_deg=78.0, width=640, height=480)
+"""Nominal mount of a '<robot>.director' chase camera (it follows the rover; the pose per frame is in the frame)."""
 
 _STOPWORDS = frozenset(
     "the a an is are there any how many much what see you do does can could have has stock in on at of shelf this "
@@ -386,7 +393,14 @@ class _Stats:
 class FakeCameras:
     """CameraService with deterministic ground-truth ``observe``. Frames come from ``services.robot``."""
 
-    def __init__(self, services: Services | None = None, *, data_root: Any = None, seed: int | str = "cameras") -> None:
+    def __init__(
+        self,
+        services: Services | None = None,
+        *,
+        data_root: Any = None,
+        seed: int | str = "cameras",
+        perceived_provider: Any = None,
+    ) -> None:
         self._services = services or Services()
         self._data_root = data_root
         self._ids = IdFactory(seed)
@@ -394,6 +408,8 @@ class FakeCameras:
         self._registry: dict[CameraId, CameraInfo] | None = None
         self._stats: dict[CameraId, _Stats] = {}
         self._placeholders = 0
+        self._perceived_provider = perceived_provider
+        self._perceived: PerceivedStreams | None = None
 
     # ---- registry --------------------------------------------------------------------------------------------------
     async def _base(self) -> dict[CameraId, CameraInfo]:
@@ -447,7 +463,58 @@ class FakeCameras:
                 upd["last_frame_at"] = st.last_frame_at
                 upd["fps"] = round(st.fps, 2) if st.fps is not None else None
             out[cid] = info.model_copy(update=upd)
+        self._add_livestream_cameras(out, isaac_robots, robot_wired)
         return out
+
+    def _add_livestream_cameras(
+        self, out: dict[CameraId, CameraInfo], isaac_robots: set[RobotId], robot_wired: bool
+    ) -> None:
+        """0.2.3 livestream cameras: '<robot>.director' (Isaac: when the worker announces it; 2D fake: when
+        PICKY_DIRECTOR_CAMERA) and '<robot>.front|wrist.perceived' (PICKY_PERCEIVED_STREAMS)."""
+        from utils.config import get_settings
+
+        settings = get_settings()
+        sources = [c for c in out.values() if c.robot_id and c.kind in ROBOT_CAMERA_KINDS]
+        names = {c.robot_id: c.name.split(" · ")[0] for c in sources if c.kind == "front"}
+        for rid, name in names.items():
+            did = director_camera_id(rid)
+            front = out[robot_camera_id(rid, "front")]
+            if did in out:  # announced by the Isaac worker
+                if " · " not in out[did].name:
+                    out[did] = out[did].model_copy(update={"name": f"{name} · director"})
+                continue
+            if rid in isaac_robots or not settings.picky_director_camera or not robot_wired:
+                continue
+            st = self._stats.get(did)
+            out[did] = CameraInfo(
+                camera_id=did,
+                kind="director",
+                name=f"{name} · director",
+                store_id=front.store_id,
+                robot_id=rid,
+                mount=DIRECTOR_MOUNT.model_copy(),
+                source=front.source,
+                online=front.online,
+                fps=round(st.fps, 2) if st is not None and st.fps is not None else None,
+                last_frame_at=st.last_frame_at if st is not None else None,
+            )
+        if not settings.picky_perceived_streams:
+            return
+        for src in sources:
+            if src.kind not in PERCEIVED_SOURCE_KINDS or src.robot_id is None:
+                continue
+            pid = perceived_camera_id(src.robot_id, src.kind)
+            st = self._stats.get(pid)
+            out[pid] = src.model_copy(
+                update={
+                    "camera_id": pid,
+                    "kind": "perceived",
+                    "name": f"{names.get(src.robot_id, src.robot_id)} · {src.kind} · perceived",
+                    "derived_from": src.camera_id,
+                    "fps": round(st.fps, 2) if st is not None and st.fps is not None else None,
+                    "last_frame_at": st.last_frame_at if st is not None else None,
+                }
+            )
 
     async def list_cameras(self, store_id: StoreId | None = None, robot_id: RobotId | None = None) -> list[CameraInfo]:
         cams = await self._cameras()
@@ -532,7 +599,59 @@ class FakeCameras:
 
     async def snapshot(self, camera_id: CameraId, max_width: int | None = None) -> CameraFrame:
         cam = await self.get_camera(camera_id)
+        if cam.kind == "perceived":
+            return await self._perceived_snapshot(cam, max_width)
         return await self._serve(await self._capture_raw(cam), cam, max_width)
+
+    # ---- perceived streams (0.2.3) ---------------------------------------------------------------------------------
+    def _perceived_provider_choice(self) -> tuple[Any, str]:
+        """(VisionProvider or None, why not). The fake: ground truth unless a provider was injected."""
+        if self._perceived_provider is not None:
+            return self._perceived_provider, ""
+        return None, "fake cameras arm"
+
+    def _perceived_engine(self) -> PerceivedStreams:
+        if self._perceived is None:
+            from utils.config import get_settings
+
+            settings = get_settings()
+            provider, note = self._perceived_provider_choice()
+            self._perceived = PerceivedStreams(
+                self._services,
+                provider=provider,
+                capture_gt=self._gt_capture,
+                detect_hz=settings.picky_perceived_detect_hz,
+                trip_budget=settings.picky_perceived_call_budget,
+                timeout_s=settings.picky_perceived_timeout_s,
+                provider_note=note,
+            )
+        return self._perceived
+
+    async def _gt_capture(self, camera_id: CameraId) -> CameraFrame:
+        """RAW capture of a source camera, used ONLY for its ground-truth instance boxes (pixels never leave)."""
+        robot = self._services.robot
+        if robot is None:
+            raise RuntimeError("no robot service")
+        return await robot.capture_camera(camera_id)
+
+    async def _perceived_snapshot(self, cam: CameraInfo, max_width: int | None) -> CameraFrame:
+        src = await self.get_camera(cam.derived_from or "")
+        frame = await self._serve(await self._capture_raw(src), src, max_width)
+        out = await self._perceived_engine().annotate(cam, frame, wait_s=FIRST_DETECT_WAIT_S)
+        self._record(cam.camera_id, out)
+        return out
+
+    async def _perceived_stream(self, cam: CameraInfo, fps: float, max_width: int | None) -> AsyncIterator[CameraFrame]:
+        engine = self._perceived_engine()
+        inner = self.stream(cam.derived_from or "", fps=fps, max_width=max_width)
+        try:
+            async for frame in inner:
+                out = await engine.annotate(cam, frame)
+                self._record(cam.camera_id, out)
+                yield out
+        finally:
+            with suppress(BaseException):
+                await inner.aclose()
 
     def _open_live(self, camera_id: CameraId) -> tuple[AsyncIterator[CameraFrame] | None, bool]:
         """robot.frames(camera_id=...) -> (iterator, needs_filter). (None, False) when there is no live source."""
@@ -572,6 +691,10 @@ class FakeCameras:
         self, camera_id: CameraId, fps: float = 5.0, max_width: int | None = None
     ) -> AsyncIterator[CameraFrame]:
         cam = await self.get_camera(camera_id)
+        if cam.kind == "perceived":
+            async for frame in self._perceived_stream(cam, fps, max_width):
+                yield frame
+            return
         fps = min(max(float(fps or 0.0), STREAM_FPS_MIN), STREAM_FPS_MAX)
         interval = 1.0 / fps
         source, filt = self._open_live(cam.camera_id)
@@ -717,6 +840,8 @@ class FakeCameras:
     ) -> VisionObservation:
         t0 = time.perf_counter()
         cam = await self.get_camera(camera_id)
+        if cam.kind == "perceived" and cam.derived_from:  # describe what the onboard camera itself sees
+            cam = await self.get_camera(cam.derived_from)
         frame = await self.snapshot(cam.camera_id)
         question = question.strip() if question and question.strip() else None
         try:
@@ -772,6 +897,30 @@ class RealCameras(FakeCameras):
 
             self._real_blurrer = RealPerception(self._services)
         return self._real_blurrer
+
+    def _perceived_provider_choice(self) -> tuple[Any, str]:
+        """Perceptron Mk1.5 for the perceived streams (PICKY_PERCEIVED_PROVIDER=perceptron + PERCEPTRON_API_KEY + the
+        SDK); otherwise ground truth, with the reason shown on the stream."""
+        if self._perceived_provider is not None:
+            return self._perceived_provider, ""
+        from utils.config import get_settings
+
+        settings = get_settings()
+        if settings.picky_perceived_provider.strip().lower() in ("ground_truth", "gt", "fake", "off"):
+            return None, "PICKY_PERCEIVED_PROVIDER=ground_truth"
+        from .vision.perceptron import PerceptronVisionProvider
+
+        provider = PerceptronVisionProvider(
+            api_key=settings.perceptron_api_key,
+            model=settings.perceptron_model or None,
+            base_url=settings.perceptron_base_url or None,
+            timeout_s=settings.picky_perceived_timeout_s,
+        )
+        reason = provider.unavailable_reason()
+        if reason is not None:
+            log.info("cameras: perceived streams use ground truth (%s)", reason)
+            return None, reason
+        return provider, ""
 
     def _messages(self, cam: CameraInfo, frame: CameraFrame, question: str | None, seen: _Seen) -> list[dict]:
         hints = (
@@ -869,7 +1018,8 @@ def create_cameras(services: Services) -> RealCameras:
     from utils import llm
 
     if not llm.is_configured():
-        raise llm.LLMNotConfigured("cameras: ANTHROPIC_API_KEY not set; the fake (ground-truth observe) runs instead")
+        reason = llm.not_configured_reason() or "no LLM configured"
+        raise llm.LLMNotConfigured(f"cameras: {reason}; the fake (ground-truth observe) runs instead")
     return RealCameras(services)
 
 

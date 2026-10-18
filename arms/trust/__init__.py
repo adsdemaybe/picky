@@ -17,4 +17,11 @@ def create_fake(services: Services):
     return FakeTrustService(services)
 
 
-__all__ = ["create", "create_fake"]
+async def run_payment_agent(trust, request, on_step=None, **kw):  # noqa: ANN001, ANN201
+    """The Visa payment agent (judges' demo): checkout as a ``payment.agent_step`` timeline (``arms.trust.agent``)."""
+    from arms.trust.agent import run_payment_agent as _run
+
+    return await _run(trust, request, on_step, **kw)
+
+
+__all__ = ["create", "create_fake", "run_payment_agent"]
