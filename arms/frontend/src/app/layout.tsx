@@ -4,6 +4,7 @@ import { TripGuideNavigation } from "@/components/TripGuide";
 import { AskSheet } from "@/components/AskPanel";
 import { MotionProvider } from "@/components/motion";
 import { BottomTabs, TopBar } from "@/components/Shell";
+import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import "./globals.css";
 
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <BottomTabs />
             <AskSheet />
             <TripGuideNavigation />
+            <Toaster />
           </TooltipProvider>
         </MotionProvider>
       </body>

@@ -64,7 +64,7 @@ data/fixtures/*    ─┘
 
            ┌─────────────── TripSource (interface) ───────────────┐
            │ ReplaySource: deterministic client-side trip engine   │  ← now (no backend needed)
-           │ GatewaySource: POST /api/trips + WS /ws (contracts)   │  ← later, same reducer
+           │ GatewaySource: POST /api/requests + WS /ws (contracts)│  ← src/lib/gateway, same store
            └──────────────────────┬────────────────────────────────┘
                                   ▼ events named after contracts.events
                       tripStore (zustand reducer) ─▶ screens
@@ -135,8 +135,10 @@ Legend: **P0** = needed for the demo, **P1** = makes it look finished, **P2** = 
 - [x] P1 Permissions page: mandate view/edit (local), taste profile chips with delete, approvals history
 
 ### Later (P2, not in this pass)
-- [ ] GatewaySource: `POST /api/trips`, `WS /ws?trip_id=`, `WS /ws/frames`, `POST /api/approvals/{id}`
-- [ ] Generated TS types from `contracts` (`make gen-types`) replacing the hand-kept event subset
+- [x] GatewaySource (`src/lib/gateway/tripSource.ts`): `POST /api/requests`, `GET /api/trips/{id}` + `WS /ws?trip_id=`
+  (snapshot, seq dedupe, `after_seq` resume), `POST /api/approvals/{id}`, brain thinking log, MJPEG/snapshot cameras;
+  `/ws/frames` source fixed for v0.2 (`camera.frame`, `?trip_id=|robot_id=`)
+- [x] Generated TS types from `contracts` (`pnpm gen-types` → `src/lib/gateway/{api-types,events}.ts`)
 - [ ] Merchant dashboard, voice, trip-2 side-by-side
 
 ### Done when

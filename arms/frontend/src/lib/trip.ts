@@ -1,10 +1,11 @@
 "use client";
 // Trip store + demo replay engine.
-// Events use contracts.events names (route.planned, robot.state, item.picked, approval.requested, ...), so a
-// GatewaySource can feed the same store later. In demo mode the engine below produces them client-side and
-// pauses on every approval until the shopper answers.
+// Events use contracts.events names (route.planned, robot.state, item.picked, approval.requested, ...), so the
+// GatewaySource (lib/gateway/tripSource.ts) feeds the same store from a real gateway trip (`source: "gateway"`).
+// In demo mode the engine below produces them client-side and pauses on every approval until the shopper answers.
 import { create } from "zustand";
 import { STORES, maya, online, productBySku, slotsOf, type Pose, type Purchase, type StoreId } from "./data";
+import { answerGateway, startGateway, stopGateway, type FollowOptions } from "./gateway/tripSource";
 import { draftTotal, mandateCheck, type Draft } from "./order";
 import type { PlannedRoute } from "./routing";
 import { buildTripPlan } from "./trip-plan";
@@ -31,15 +32,19 @@ export type CartLine = {
   source: "in_store" | "online";
   verified: boolean | null;
   lot?: string;
+  /** gateway cart line id (gateway trips only) */
+  line_id?: string;
 };
 export type Approval =
-  | { id: string; kind: "detour"; stop_id: string; sku: string; reason: string; unit_cents: number }
+  | { id: string; kind: "detour"; stop_id: string; sku: string; reason: string; unit_cents: number; sponsored?: boolean; note?: string }
   | {
       id: string;
       kind: "pick";
       stop_id: string;
       sku: string;
-      candidates: { instance_id: string; lot_id: string; freshness: number; expiry: string | null; note: string }[];
+      candidates: { instance_id: string; lot_id: string; freshness: number; expiry: string | null; note: string; thumb?: string }[];
+      /** instance the camera ranked first (gateway); the replay recommends the 2nd candidate */
+      recommended?: string;
     }
   | {
       id: string;
@@ -47,6 +52,17 @@ export type Approval =
       total_cents: number;
       cart_hash: string;
       reasons: { code: string; text: string; level: "ok" | "ask" | "block" }[];
+    }
+  /** gateway: over_threshold / substitution / online_order / question / multi-item recommendation */
+  | {
+      id: string;
+      kind: "question";
+      title: string;
+      body: string;
+      sku?: string;
+      amount_cents?: number;
+      options: { id: string; label: string; detail?: string }[];
+      multi: boolean;
     };
 export type LogEvent = { seq: number; t: number; type: string; summary: string };
 export type RobotStatus = "idle" | "driving" | "scanning" | "picking" | "waiting" | "done";
@@ -61,9 +77,11 @@ export type Receipt = {
   ts: string;
 };
 
-type Phase = "idle" | "waiting_login" | "shopping" | "checkout" | "done";
+export type Phase = "idle" | "waiting_login" | "shopping" | "checkout" | "done";
+/** One row of the robot brain's thinking log (gateway brain.step). */
+export type ThinkStep = { id: string; no: number; kind: string; tool: string | null; text: string; ok: boolean; t: number; camera: string | null };
 
-type TripStore = {
+export type TripStore = {
   storeId: StoreId;
   phase: Phase;
   mode: Mode;
@@ -89,8 +107,27 @@ type TripStore = {
   autoAnswer: boolean;
   paused: boolean;
   startedAt: number | null;
+  // gateway trips (lib/gateway/tripSource.ts); demo trips keep the defaults
+  source: "demo" | "gateway";
+  tripId: string | null;
+  requestId: string | null;
+  goalId: string | null;
+  robotId: string | null;
+  robotName: string | null;
+  /** raw contract TripState */
+  tripState: string | null;
+  error: string | null;
+  /** online delivery fee charged by the gateway (Cart.shipping_cents when there are online lines) */
+  shippingCents: number;
+  /** approval queue; `approval` stays pending[0] */
+  pending: Approval[];
+  steps: ThinkStep[];
+  followup: { text: string; skus: string[]; quick: string[] } | null;
+  /** bumped when gateway products are registered at runtime (forces a re-render) */
+  productsVersion: number;
   // actions
   placeOrder: (draft: Draft, accepted: string[], mode: Mode) => void;
+  followGateway: (o: FollowOptions) => void;
   robotLogin: () => void;
   answer: (value: string) => void;
   setSpeed: (n: number) => void;
@@ -125,6 +162,19 @@ const initial = {
   receipt: null,
   paused: false,
   startedAt: null,
+  source: "demo" as TripStore["source"],
+  tripId: null as string | null,
+  requestId: null as string | null,
+  goalId: null as string | null,
+  robotId: null as string | null,
+  robotName: null as string | null,
+  tripState: null as string | null,
+  error: null as string | null,
+  shippingCents: 0,
+  pending: [] as Approval[],
+  steps: [] as ThinkStep[],
+  followup: null as TripStore["followup"],
+  productsVersion: 0,
 };
 
 export const useTrip = create<TripStore>((set, get) => {
@@ -308,6 +358,7 @@ export const useTrip = create<TripStore>((set, get) => {
     autoAnswer: false,
 
     placeOrder: (draft, accepted, mode) => {
+      stopGateway();
       runToken++;
       resolveApproval = null;
       seq = 0;
@@ -340,8 +391,15 @@ export const useTrip = create<TripStore>((set, get) => {
       }
     },
 
+    followGateway: (o) => {
+      runToken++;
+      resolveApproval = null;
+      set({ ...initial, source: "gateway", tripId: o.tripId, requestId: o.requestId ?? null, robotId: o.robotId ?? null, mode: o.mode ?? "pickup", phase: "shopping" });
+      startGateway(useTrip, o);
+    },
+
     robotLogin: () => {
-      if (get().phase !== "waiting_login") return;
+      if (get().phase !== "waiting_login" || get().source === "gateway") return;
       set({ phase: "shopping" });
       emit("robot.login", `${maya.profile.display_name} logged in at the robot with code ${get().loginCode}`);
       const t = runToken;
@@ -351,6 +409,7 @@ export const useTrip = create<TripStore>((set, get) => {
     answer: (value) => {
       const a = get().approval;
       if (!a) return;
+      if (get().source === "gateway") return void answerGateway(useTrip, a, value, approvalLabel(a));
       set((s) => ({
         approval: null,
         approvalsLog: [...s.approvalsLog, { id: a.id, kind: a.kind, label: approvalLabel(a), answer: value, t: Date.now() }],
@@ -361,14 +420,23 @@ export const useTrip = create<TripStore>((set, get) => {
       r?.(value);
     },
 
-    setSpeed: (n) => set({ speed: n }),
+    // playback controls drive the replay only; a real robot is never auto-answered (checkout must be the shopper's yes)
+    setSpeed: (n) => {
+      if (get().source === "gateway") return;
+      set({ speed: n });
+    },
     setAutoAnswer: (b) => {
+      if (get().source === "gateway") return;
       set({ autoAnswer: b });
       const a = get().approval;
       if (b && a) get().answer(a.kind === "pick" ? a.candidates[1].instance_id : a.kind === "checkout" ? "approve" : "yes");
     },
-    togglePause: () => set((s) => ({ paused: !s.paused })),
+    togglePause: () => {
+      if (get().source === "gateway") return;
+      set((s) => ({ paused: !s.paused }));
+    },
     reset: () => {
+      stopGateway();
       runToken++;
       resolveApproval = null;
       set({ ...initial });
@@ -388,7 +456,8 @@ function cartHash(cart: CartLine[]) {
 }
 
 export function approvalLabel(a: Approval) {
-  if (a.kind === "detour") return `Add ${productBySku[a.sku].name}?`;
-  if (a.kind === "pick") return `Pick which ${productBySku[a.sku].name}?`;
+  if (a.kind === "detour") return `Add ${productBySku[a.sku]?.name ?? a.sku}?`;
+  if (a.kind === "pick") return `Pick which ${productBySku[a.sku]?.name ?? a.sku}?`;
+  if (a.kind === "question") return a.title;
   return `Approve checkout $${(a.total_cents / 100).toFixed(2)}?`;
 }

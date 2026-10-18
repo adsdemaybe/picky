@@ -6,6 +6,7 @@ import { Suspense, useMemo, useState, useTransition } from "react";
 import { GroceryTrips } from "@/components/GroceryTrips";
 import { TripRoutePreview } from "@/components/TripRoutePreview";
 import { groupFoodLines } from "@/lib/grocery-trips";
+import { toast } from "sonner";
 import { StoreThumb } from "@/components/art";
 import { ImageSlot } from "@/components/media";
 import { CountUp } from "@/components/motion";
@@ -15,7 +16,9 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { STORES, maya, productBySku, slotsOf, type StoreId } from "@/lib/data";
+import { STORES, STORE_IDS, maya, productBySku, slotsOf, type StoreId } from "@/lib/data";
+import { startGatewayOrder } from "@/lib/gateway/tripSource";
+import { useGateway } from "@/lib/gateway/useGateway";
 import { fmt } from "@/lib/money";
 import { PRESETS, defaultAccepted, draftTotal, expandIntent, mandateCheck, type Draft } from "@/lib/order";
 import { planRoute } from "@/lib/routing";
@@ -42,8 +45,41 @@ function OrderBuilder() {
   const [accepted, setAccepted] = useState<Set<string>>(() => defaultAccepted(draft));
   const [mode, setMode] = useState<Mode>("with_me");
   const [thinking, startTransition] = useTransition();
+  const [sending, setSending] = useState(false);
   const placeOrder = useTrip((s) => s.placeOrder);
   const router = useRouter();
+  const gatewayLive = useGateway((s) => s.status === "live");
+  const live = gatewayLive && store.kind === "grocery";
+
+  const runDemo = () => {
+    placeOrder(draft, [...accepted], mode);
+    router.push("/trip");
+  };
+
+  // Gateway mode (grocery): the gateway plans from live stock and the robot starts by itself, so this only happens on
+  // "Send", never on "Plan it". The preview above stays the instant local plan. T-Mobile always stays demo.
+  const send = async () => {
+    const gateway = store.kind === "grocery" && (gatewayLive || (await useGateway.getState().check()));
+    if (!gateway) {
+      if (store.kind === "grocery" && useGateway.getState().status === "down") toast("No gateway reachable, so this is the demo trip");
+      return runDemo();
+    }
+    setSending(true);
+    const text = draft.intent + (add && productBySku[add] ? `, plus 1 ${productBySku[add].name}` : "");
+    const r = await startGatewayOrder(useTrip, { text, storeId, mode, title: draft.title });
+    setSending(false);
+    if (r.kind === "following") {
+      toast(r.reply);
+      router.push(r.url);
+    } else if (r.kind === "unreachable") {
+      toast("The gateway didn't answer, so this is the demo trip", { description: r.reply });
+      runDemo();
+    } else if (r.kind === "failed") {
+      toast.error(r.reply, { action: { label: "Run the demo trip", onClick: runDemo } });
+    } else {
+      toast(r.reply);
+    }
+  };
 
   const submit = (t: string, sid: StoreId = storeId) => {
     setText(t);
@@ -87,7 +123,7 @@ function OrderBuilder() {
         <p className="mt-2 text-[16px] text-muted-foreground">Choose a trip or write your list. See what it needs, where it lives, and the path the robot will take.</p>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Store">
-          {(Object.keys(STORES) as StoreId[]).map((id) => {
+          {STORE_IDS.map((id) => {
             const on = storeId === id;
             const grocery = STORES[id].kind === "grocery";
             return (
@@ -181,6 +217,9 @@ function OrderBuilder() {
             <SectionTitle>
               {draft.title} <span className="font-sans text-[15px] font-medium text-muted-foreground">for {maya.profile.display_name}</span>
             </SectionTitle>
+            {live && (
+              <p className="-mt-2 mb-3 text-[13px] text-muted-foreground">Preview. The robot re-plans from live store stock when you send it, and asks before any extra.</p>
+            )}
             <div className="flex flex-col gap-3">
               {(store.kind === "grocery" ? groupFoodLines(draft.lines) : [{ id: "wireless", label: "Phones & accessories", lines: draft.lines }]).map((department) => (
                 <Panel key={department.id} className="overflow-hidden">
@@ -371,13 +410,10 @@ function OrderBuilder() {
             <Button
               size="lg"
               className="h-14 text-[16px]"
-              disabled={verdict.verdict === "deny" || thinking}
-              onClick={() => {
-                placeOrder(draft, [...accepted], mode);
-                router.push("/trip");
-              }}
+              disabled={verdict.verdict === "deny" || thinking || sending}
+              onClick={send}
             >
-              <Bot className="size-5" /> Send the robot, about {fmt(totals.total)}
+              <Bot className="size-5" /> {sending ? "Sending…" : `Send the robot, about ${fmt(totals.total)}`}
             </Button>
             <p className="text-center text-[13px] text-muted-foreground">Nothing is charged until you approve checkout.</p>
           </div>

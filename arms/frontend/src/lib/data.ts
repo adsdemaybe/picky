@@ -113,6 +113,8 @@ export const STORES: Record<StoreId, Store & { kind: "grocery" | "wireless"; sho
   store_ave: { ...store, kind: "grocery", short: "Picky Market" },
   store_tmobile: { ...tmobileStore, kind: "wireless", short: "T-Mobile" },
 };
+/** The demo stores, fixed before registerStore() adds gateway stores to STORES (the order page offers only these). */
+export const STORE_IDS = Object.keys(STORES) as StoreId[];
 
 /** Every product the assistant can help with: groceries + wireless store. */
 export const allProducts: (Product & { compatible_with?: string[] })[] = [...products, ...tmobileProducts];
@@ -122,6 +124,17 @@ export const slotBySku: Record<string, Slot> = Object.fromEntries(store.slots.ma
 const slotIdx: Record<string, Record<string, Slot>> = {};
 export function slotsOf(storeId: StoreId): Record<string, Slot> {
   return (slotIdx[storeId] ??= Object.fromEntries(STORES[storeId].slots.map((s) => [s.sku, s])));
+}
+
+// Runtime registration for gateway data the generated demo JSON doesn't have yet (lib/gateway/tripSource.ts):
+// products the gateway sends that aren't in data/ on this branch, and stores other than the demo ones.
+export function registerProduct(p: Product) {
+  productBySku[p.sku] = p;
+}
+export function registerStore(planogram: { store_id: string; name: string; entrance: Pose; robot_home?: Pose | null }) {
+  const id = planogram.store_id as StoreId;
+  STORES[id] = { ...(planogram as unknown as Store), robot_home: planogram.robot_home ?? planogram.entrance, kind: "grocery", short: planogram.name };
+  delete slotIdx[id];
 }
 export const isWireless = (sku: string) => tmobileProducts.some((p) => p.sku === sku);
 
@@ -275,5 +288,5 @@ export function fmtDate(ts: string | Date, opts: Intl.DateTimeFormatOptions = { 
 }
 
 export function storeName(id: string) {
-  return id === "online" ? "Picky Online" : id === "store_ave" ? "The Ave" : id === "store_tmobile" ? "T-Mobile" : id;
+  return id === "online" ? "Picky Online" : id === "store_ave" ? "The Ave" : id === "store_tmobile" ? "T-Mobile" : (STORES[id as StoreId]?.short ?? id);
 }

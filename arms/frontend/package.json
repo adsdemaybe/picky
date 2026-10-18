@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "gen-data": "node scripts/gen-data.mjs",
+    "gen-types": "node scripts/gen-types.mjs",
     "typecheck": "tsc --noEmit",
     "predev": "node scripts/gen-data.mjs",
     "prebuild": "node scripts/gen-data.mjs",
@@ -39,6 +40,8 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.2",
+    "json-schema-to-typescript": "15.0.4",
+    "openapi-typescript": "7.13.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "yaml": "^2.9.1"
