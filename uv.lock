@@ -2043,6 +2043,7 @@ messaging = [
     { name = "photonhq-api" },
 ]
 mujoco = [
+    { name = "glfw" },
     { name = "mujoco" },
     { name = "pillow" },
 ]
@@ -2090,6 +2091,7 @@ requires-dist = [
     { name = "deepgram-sdk", marker = "extra == 'agent'", specifier = ">=7.13" },
     { name = "duckdb", marker = "extra == 'catalog'", specifier = ">=1.0" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "glfw", marker = "extra == 'mujoco'", specifier = ">=2.7" },
     { name = "google-genai", marker = "extra == 'agent'", specifier = ">=2.31,<3" },
     { name = "httpx", specifier = ">=0.27" },
     { name = "mujoco", marker = "extra == 'mujoco'", specifier = ">=3.3" },

@@ -1493,7 +1493,10 @@ def make_backend(kind: str, args: argparse.Namespace, assets: SkuAssets | None =
         from arms.sim.mujoco_backend import MujocoBackend, MujocoUnavailable
 
         try:
-            return None, MujocoBackend()
+            from arms.sim.mujoco_models import ModelLibrary
+
+            models = None if args.no_assets else ModelLibrary.load(os.environ.get("PICKY_MJ_ASSET_ROOT") or None)
+            return None, MujocoBackend(viewer=args.viewer, models=models)
         except MujocoUnavailable as exc:
             raise IsaacUnavailable(str(exc)) from exc
     if kind in ("sketch", "kinematic"):
@@ -1516,6 +1519,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--width", type=int, default=1280, help="Isaac app window (cameras use their mount size)")
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--no-headless", action="store_true", help="open the Isaac UI (needs a display)")
+    ap.add_argument("--viewer", action="store_true", help="mujoco: open the MuJoCo window (macOS: run under mjpython)")
     ap.add_argument("--worker-id", default=os.environ.get("PICKY_SIM_WORKER_ID", "isaac-0"))
     ap.add_argument("--label-dir", default=os.environ.get("PICKY_SIM_LABEL_DIR", DEFAULT_LABEL_DIR))
     ap.add_argument("--so101-urdf", default=os.environ.get("PICKY_SO101_URDF") or None)

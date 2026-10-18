@@ -16,20 +16,29 @@ offscreen with ``mujoco.Renderer`` (CGL on macOS, EGL / OSMesa on Linux via ``MU
 import io
 import math
 import threading
+import time
 from typing import Any
 from xml.sax.saxutils import quoteattr
 
+from arms.sim import mujoco_dressing, mujoco_models
 from arms.sim.geometry import NEAR_CLIP_M, CameraPose
 from arms.sim.scene_spec import PrimSpec, RoverSpec, SceneSpec, Vec3
 from arms.sim.sketch import SketchBackend
 from arms.sim.worker import grey_jpeg
 from contracts.common import Point3
+from utils.log import get_logger
+
+log = get_logger(__name__)
 
 JPEG_QUALITY = 80
 MAX_FRAME_W = 1280
 MAX_FRAME_H = 960
 PARKED_Z_M = -50.0
 _CAM_BODY = "picky_cam"
+VIEWER_PERIOD_S = 1 / 30
+ZFAR_M = 200.0
+CEILING_GROUP = 3  # MuJoCo's viewer shows groups 0-2 by default, so the window looks into the store from above
+HIDDEN_IN_VIEWER = ("ceiling", "light")
 
 
 class MujocoUnavailable(RuntimeError):
@@ -81,15 +90,23 @@ def _quat_from_axes(x: Vec3, y: Vec3, z: Vec3) -> tuple[float, float, float, flo
     return ((m10 - m01) / s, (m02 + m20) / s, (m12 + m21) / s, 0.25 * s)
 
 
-def _geom_xml(prim: PrimSpec, pos: Vec3 | None = None, quat: tuple[float, ...] | None = None) -> str:
+def _geom_xml(
+    prim: PrimSpec, pos: Vec3 | None = None, quat: tuple[float, ...] | None = None, material: str = ""
+) -> str:
     sx, sy, sz = (max(1e-3, v) for v in prim.size)
-    if prim.shape == "cylinder":
+    if prim.path.rsplit("/", 1)[-1].startswith("wheel_"):
+        # rover wheels are authored as boxes (diameter, width, diameter): draw a cylinder lying along local y
+        attrs = f'type="cylinder" size="{sx / 2:.4f} {sy / 2:.4f}"'
+        quat = quat or (0.7071068, 0.7071068, 0.0, 0.0)
+    elif prim.shape == "cylinder":
         attrs = f'type="cylinder" size="{max(sx, sy) / 2:.4f} {sz / 2:.4f}"'
     elif prim.shape == "sphere":
         attrs = f'type="ellipsoid" size="{sx / 2:.4f} {sy / 2:.4f} {sz / 2:.4f}"'
     else:
         attrs = f'type="box" size="{sx / 2:.4f} {sy / 2:.4f} {sz / 2:.4f}"'
-    extra = ' material="lamp"' if prim.role == "light" else ""
+    extra = ' material="lamp"' if prim.role == "light" else f' material="{material}"' if material else ""
+    if prim.role in HIDDEN_IN_VIEWER:
+        extra += f' group="{CEILING_GROUP}"'
     where = ""
     if pos is not None:
         where += f' pos="{pos[0]:.4f} {pos[1]:.4f} {pos[2]:.4f}"'
@@ -104,8 +121,14 @@ class MujocoBackend(SketchBackend):
 
     camera_source = "isaac"
 
-    def __init__(self, jpeg_quality: int = JPEG_QUALITY) -> None:
+    def __init__(
+        self, jpeg_quality: int = JPEG_QUALITY, viewer: bool = False, models: "mujoco_models.ModelLibrary | None" = None
+    ) -> None:
         super().__init__(jpeg_quality=jpeg_quality)
+        self.models = models
+        self._want_viewer = viewer
+        self._viewer: Any = None
+        self._viewer_synced = 0.0
         self._mj = require_mujoco()
         self._lock = threading.RLock()
         self._model: Any = None
@@ -118,6 +141,8 @@ class MujocoBackend(SketchBackend):
         self._cam_id = -1
         self._parked: set[tuple[str, str]] = set()
         self.builds = 0
+        self._scene_option = self._mj.MjvOption()
+        self._scene_option.geomgroup[CEILING_GROUP] = 1  # cameras see the ceiling; the viewer window hides it
 
     # ---- structural changes -> recompile on the next render
     def build_store(self, spec: SceneSpec, offset: Vec3) -> None:
@@ -157,30 +182,50 @@ class MujocoBackend(SketchBackend):
         bodies: list[str] = []
         instance_keys: list[tuple[str, str]] = []
         rover_parts: dict[str, int] = {}
+        dressing = mujoco_dressing.Dressing()
         for sid, spec in self.stores.items():
             ox, oy, oz = self._offset(sid)
             for p in self._static_prims(spec):
                 c = p.center
-                static.append(_geom_xml(p, (c[0] + ox, c[1] + oy, c[2] + oz), _quat(p.yaw, p.pitch)))
+                mat = dressing.material_for_role(p.role)
+                static.append(_geom_xml(p, (c[0] + ox, c[1] + oy, c[2] + oz), _quat(p.yaw, p.pitch), mat))
+            try:
+                from arms.sim.scene_spec import fixture_style
+                from utils.data import load_planogram
+
+                plan = load_planogram(sid)
+                tables = {f.fixture_id for f in plan.fixtures if fixture_style(sid, f.fixture_id) == "table"}
+                dressing.add_store(plan, (ox, oy, oz), tables)
+            except Exception as exc:  # noqa: BLE001 - dressing is cosmetic; the bare fixtures still render
+                log.warning("store %s: no fixture dressing (%s)", sid, exc)
+        static.append(dressing.geoms_xml())
         for key, prim in self.instance_prims.items():
             instance_keys.append(key)
-            bodies.append(f'<body name={quoteattr("i/" + "/".join(key))} mocap="true">{_geom_xml(prim)}</body>')
+            plan = self.models.plan(prim.sku, tuple(prim.size), key[1]) if self.models is not None else None
+            if plan:
+                inner = "".join(mujoco_models.geom_xml(g, _quat) for g in plan)
+            else:
+                inner = _geom_xml(prim)
+            bodies.append(f'<body name={quoteattr("i/" + "/".join(key))} mocap="true">{inner}</body>')
         for rid, rover in self.rovers.items():
             rover_parts[rid] = len(rover.prims)
             for k, p in enumerate(rover.prims):
                 bodies.append(f'<body name={quoteattr(f"r/{rid}/{k}")} mocap="true">{_geom_xml(p)}</body>')
+        model_assets = self.models.asset_xml() if self.models else ""
         xml = f"""<mujoco model="picky_stores">
   <compiler angle="radian"/>
   <visual>
     <global offwidth="{MAX_FRAME_W}" offheight="{MAX_FRAME_H}"/>
     <quality shadowsize="0"/>
-    <headlight ambient="0.3 0.3 0.3" diffuse="0.35 0.35 0.35" specular="0.05 0.05 0.05"/>
+    <headlight ambient="0.42 0.42 0.42" diffuse="0.30 0.30 0.30" specular="0.05 0.05 0.05"/>
     <map znear="{NEAR_CLIP_M / 10:.4f}" zfar="20"/>
   </visual>
-  <asset><material name="lamp" emission="1" rgba="1 1 0.98 1"/></asset>
+  <asset><material name="lamp" emission="1" rgba="1 1 0.98 1"/>{model_assets}{dressing.asset_xml()}</asset>
   <worldbody>
     <light directional="true" dir="0.3 0.2 -1" diffuse="0.25 0.25 0.25" castshadow="false"/>
     <light directional="true" dir="-0.3 -0.4 -1" diffuse="0.2 0.2 0.2" castshadow="false"/>
+    <light directional="true" dir="0.8 -0.5 -0.3" diffuse="0.12 0.12 0.12" castshadow="false"/>
+    <light directional="true" dir="-0.8 0.5 -0.3" diffuse="0.12 0.12 0.12" castshadow="false"/>
     {"".join(static)}
     {"".join(bodies)}
     <body name="{_CAM_BODY}" mocap="true"><camera name="{_CAM_BODY}" fovy="45"/></body>
@@ -189,7 +234,7 @@ class MujocoBackend(SketchBackend):
         model = mj.MjModel.from_xml_string(xml)
         # map z clip planes are fractions of the model extent; set them absolutely
         model.vis.map.znear = NEAR_CLIP_M / max(model.stat.extent, 1e-6)
-        model.vis.map.zfar = 40.0 / max(model.stat.extent, 1e-6)
+        model.vis.map.zfar = ZFAR_M / max(model.stat.extent, 1e-6)
         data = mj.MjData(model)
 
         def mocap_of(name: str) -> int:
@@ -205,6 +250,45 @@ class MujocoBackend(SketchBackend):
         self._parked = {k for k in self._parked if k in self._instance_mocap and k not in self.instance_prims}
         self._dirty = False
         self.builds += 1
+        if self._want_viewer:
+            self._open_viewer()
+
+    # ---- optional interactive window (dev / demo): ``--viewer``; on macOS run the worker under ``mjpython``
+    def _open_viewer(self) -> None:
+        import mujoco.viewer
+
+        if self._viewer is not None:
+            self._viewer.close()
+        self._viewer = mujoco.viewer.launch_passive(self._model, self._data, show_left_ui=False, show_right_ui=False)
+        cam = self._viewer.cam
+        # start above the first store (the model extent is inflated by parked units): ceilings are hidden there
+        spec = next(iter(self.stores.values()))
+        ox, oy, _ = self._offset(spec.store_id)
+        b = spec.bounds
+        cam.lookat[:] = (ox + b.x + b.w / 2, oy + b.y + b.h / 2, 0.8)
+        cam.distance, cam.elevation, cam.azimuth = 1.1 * max(b.w, b.h), -55.0, 60.0
+
+    def _sync_viewer(self) -> None:
+        v = self._viewer
+        if v is None or time.monotonic() - self._viewer_synced < VIEWER_PERIOD_S:
+            return
+        self._viewer_synced = time.monotonic()
+        if not v.is_running():
+            self._viewer, self._want_viewer = None, False  # window closed: keep streaming without it
+            return
+        with v.lock():
+            self._sync()
+            self._mj.mj_kinematics(self._model, self._data)
+        v.sync()
+
+    def step(self) -> None:
+        """Called by the run loop when no frame was rendered this tick: keeps the viewer window current."""
+        with self._lock:
+            if self._model is None or self._dirty:
+                if not self._want_viewer or not self.stores:
+                    return
+                self._build()
+            self._sync_viewer()
 
     def _sync(self) -> None:
         d = self._data
@@ -250,8 +334,9 @@ class MujocoBackend(SketchBackend):
             self._mj.mj_kinematics(self._model, d)
             self._mj.mj_camlight(self._model, d)
             renderer = self._renderer(w, h)
-            renderer.update_scene(d, camera=self._cam_id)
+            renderer.update_scene(d, camera=self._cam_id, scene_option=self._scene_option)
             pixels = renderer.render()
+            self._sync_viewer()
         from PIL import Image
 
         out = io.BytesIO()
