@@ -192,9 +192,7 @@ class Recorder:
             elapsed = time.time() - started
             if int(elapsed) % 30 < 5:
                 self.log(f"t+{elapsed:.0f}s request={req_status} trips={states} frames={self.frame_counts}")
-            finished = (self.trip_ids and all(s in TERMINAL_TRIP for s in states)) or (
-                not self.trip_ids and req_status in TERMINAL_REQUEST
-            )
+            finished = (self.trip_ids and all(s in TERMINAL_TRIP for s in states)) or req_status in TERMINAL_REQUEST
             if finished and done_at is None:
                 done_at = time.time()
                 self.log(f"finished: request={req_status} trips={states}; recording {self.args.tail_s}s more")

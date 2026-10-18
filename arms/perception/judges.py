@@ -11,7 +11,9 @@ The vision model only reports what it sees (boxes, points, yes/no, text); CODE d
 - label_matches: OCR text contains ``expect_text`` (casefold) -> pass; text read but no match -> fail (evidence =
   the text); nothing read -> uncertain.
 - basket_delta / basket_contains: per-SKU box counts on the basket frame (before-count from the baseline's basket
-  frame, else the baseline's state counts at lower confidence).
+  frame, else the baseline's state counts at lower confidence). Occlusion-aware: fewer units than expected in a basket
+  that already holds others (delta), or a subset of the expected units with nothing foreign (contains), is uncertain
+  (the robot state then decides), never a 'missing item' fail; an empty basket or a foreign / extra unit still fails.
 - item_on_shelf: visible count >= min_count -> pass; fewer -> uncertain, never fail (back rows are hidden; the scan
   step is the out-of-stock authority). slot_visible: the slot's product in view -> pass, else uncertain.
 - shelf_tag_reads: OCR -> ``parse_price_cents`` == expected cents.
@@ -299,6 +301,11 @@ def judge_basket_delta(
     ok = d == atom.delta
     name = ans.names.get(atom.sku, atom.sku)
     reason = f"camera: basket {d:+d} {name} (want {atom.delta:+d}; {src})"
+    if not ok and 0 <= d < atom.delta and sum(before.values()) > 0:
+        # A unit dropped into a basket that already holds others can land under / behind them: the top-down camera
+        # seeing fewer is not evidence it is missing (measured on Isaac: '+0, want +1' on most places once the
+        # basket had 2+ units). Uncertain -> the robot state decides (combine_verdicts), never a false 'missing'.
+        return _av(path, atom, "uncertain", f"{reason}; may be hidden under the other units", 0.5, method, ev[:6])
     return _av(path, atom, "pass" if ok else "fail", reason, pass_c if ok else fail_c, method, ev[:6], {"delta": d})
 
 
@@ -312,6 +319,13 @@ def judge_basket_contains(
     if atom.exact:
         ok = ok and {s: n for s, n in have.items() if n} == {s: n for s, n in atom.counts.items() if n}
     reason = f"camera: basket {dict(sorted(have.items()))}"
+    seen, want = sum(have.values()), sum(atom.counts.values())
+    extra = any(n > atom.counts.get(s, 0) for s, n in have.items() if n) if atom.exact else False
+    if not ok and not extra and 0 < seen < want and all(have.get(s, 0) <= n for s, n in atom.counts.items()):
+        # Occlusion, not absence: a top-down camera sees the top layer of a full basket (Isaac taco trip: 2 of 11
+        # units visible at the audit). Seeing a subset with nothing foreign is uncertain -> the robot state decides.
+        why = f"{reason}: {seen} of {want} units visible (the rest are under / behind them)"
+        return _av(path, atom, "uncertain", why, 0.5, method, ev[:6], {"basket": have})
     conf = COUNT_PASS_CONFIDENCE if ok else COUNT_FAIL_CONFIDENCE
     return _av(path, atom, "pass" if ok else "fail", reason, conf, method, ev[:6], {"basket": have})
 
