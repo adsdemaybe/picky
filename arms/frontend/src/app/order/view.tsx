@@ -91,10 +91,16 @@ function OrderBuilder() {
   const detours = useMemo(() => {
     const start = { id: "start", pose: store.robot_home };
     const end = { id: "end", pose: store.checkout };
-    const list = draft.lines.filter((l) => l.sourcing === "in_store").map((l) => ({ id: l.sku, pose: slotBySku[l.sku].approach_pose }));
+    // skip lines with no slot in this store (the draft can briefly belong to the previous store while it switches)
+    const list = draft.lines
+      .filter((l) => l.sourcing === "in_store" && slotBySku[l.sku])
+      .map((l) => ({ id: l.sku, pose: slotBySku[l.sku].approach_pose }));
     const base = planRoute(store, start, list, end).total_m;
     const out: Record<string, number> = { __base: base };
-    for (const r of draft.recs) out[r.rec_id] = planRoute(store, start, [...list, { id: r.sku, pose: slotBySku[r.sku].approach_pose }], end).total_m - base;
+    for (const r of draft.recs) {
+      const slot = slotBySku[r.sku];
+      if (slot) out[r.rec_id] = planRoute(store, start, [...list, { id: r.sku, pose: slot.approach_pose }], end).total_m - base;
+    }
     return out;
   }, [draft, store, slotBySku]);
 
@@ -132,8 +138,13 @@ function OrderBuilder() {
                 whileTap={{ scale: 0.985 }}
                 onClick={() => {
                   if (on) return;
+                  // switch store and draft together: the detour math indexes the new store's slots by the draft's SKUs
+                  const t = PRESETS[id][0].text;
+                  const d = expandIntent(t, id);
                   setStoreId(id);
-                  submit(PRESETS[id][0].text, id);
+                  setText(t);
+                  setDraft(d);
+                  setAccepted(defaultAccepted(d));
                 }}
                 className={cn(
                   "relative flex cursor-pointer items-center gap-4 rounded-2xl bg-card p-3 pr-5 text-left ring-1 transition-colors",
