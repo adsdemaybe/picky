@@ -32,7 +32,8 @@ export default function OrderPage() {
 function OrderBuilder() {
   const params = useSearchParams();
   const add = params.get("add");
-  const [storeId, setStoreId] = useState<StoreId>(params.get("store") === "store_tmobile" ? "store_tmobile" : "store_ave");
+  // the T-Mobile store has its own site (/tmobile); this page plans grocery trips
+  const [storeId, setStoreId] = useState<StoreId>("store_ave");
   const initial = params.get("preset") === "basics" ? PRESETS.store_ave[1].text : PRESETS[storeId][0].text;
   const [text, setText] = useState<string>(initial);
   const [draft, setDraft] = useState<Draft>(() => expandIntent(initial, storeId, add));
@@ -132,6 +133,7 @@ function OrderBuilder() {
                 whileTap={{ scale: 0.985 }}
                 onClick={() => {
                   if (on) return;
+                  if (!grocery) return router.push("/tmobile/shop");
                   setStoreId(id);
                   submit(PRESETS[id][0].text, id);
                 }}

@@ -108,7 +108,7 @@ export default function TripPage() {
         </div>
       </section>
 
-      <Controls onRestart={() => (t.reset(), router.push("/order"))} />
+      <Controls onRestart={() => (t.reset(), router.push(t.storeId === "store_tmobile" ? "/tmobile/shop" : "/order"))} />
 
       <div className="grid gap-6 xl:grid-cols-12">
         <div className="flex flex-col gap-6 xl:col-span-8">

@@ -117,13 +117,20 @@ export const STORES: Record<StoreId, Store & { kind: "grocery" | "wireless"; sho
 export const STORE_IDS = Object.keys(STORES) as StoreId[];
 
 /** Every product the assistant can help with: groceries + wireless store. */
-export const allProducts: (Product & { compatible_with?: string[] })[] = [...products, ...tmobileProducts];
+// products.json already carries the wireless SKUs (data/products.yaml is one product master)
+export const allProducts: (Product & { compatible_with?: string[] })[] = products;
 export const productBySku: Record<string, Product & { compatible_with?: string[] }> = Object.fromEntries(allProducts.map((p) => [p.sku, p]));
 /** Grocery store slots (store_ave). Use slotsOf() for any store. */
 export const slotBySku: Record<string, Slot> = Object.fromEntries(store.slots.map((s) => [s.sku, s]));
 const slotIdx: Record<string, Record<string, Slot>> = {};
 export function slotsOf(storeId: StoreId): Record<string, Slot> {
-  return (slotIdx[storeId] ??= Object.fromEntries(STORES[storeId].slots.map((s) => [s.sku, s])));
+  // first stocked slot wins (store_tmobile lists boxed back stock before the one-unit demo stand, like the catalog)
+  if (!slotIdx[storeId]) {
+    const idx: Record<string, Slot> = {};
+    for (const s of STORES[storeId].slots) if (!idx[s.sku] || (idx[s.sku].qty <= 0 && s.qty > 0)) idx[s.sku] = s;
+    slotIdx[storeId] = idx;
+  }
+  return slotIdx[storeId];
 }
 
 // Runtime registration for gateway data the generated demo JSON doesn't have yet (lib/gateway/tripSource.ts):
@@ -136,7 +143,8 @@ export function registerStore(planogram: { store_id: string; name: string; entra
   STORES[id] = { ...(planogram as unknown as Store), robot_home: planogram.robot_home ?? planogram.entrance, kind: "grocery", short: planogram.name };
   delete slotIdx[id];
 }
-export const isWireless = (sku: string) => tmobileProducts.some((p) => p.sku === sku);
+const wirelessSkus = new Set(tmobileProducts.map((p) => p.sku));
+export const isWireless = (sku: string) => wirelessSkus.has(sku);
 
 /** The demo's "today" (Sat Oct 17, 2026). Fixed so prerendering is deterministic. */
 export const TODAY = new Date("2026-10-17T12:00:00-07:00");

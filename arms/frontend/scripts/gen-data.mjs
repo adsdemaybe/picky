@@ -1,6 +1,7 @@
 // Generates the app's demo data from the repo's source-of-truth YAML (CLAUDE.md rule 5).
-//   data/products.yaml, data/planograms/store_ave.yaml, data/online_store.yaml, data/fixtures/users.yaml
-//   -> src/data/generated/{products,store_ave,online,maya}.json
+//   data/products.yaml, data/planograms/{store_ave,store_tmobile}.yaml, data/online_store.yaml,
+//   data/fixtures/{users,wireless}.yaml
+//   -> src/data/generated/{products,store_ave,store_tmobile,wireless,online,maya}.json
 // Purchase history beyond the fixture trips is synthesized deterministically (seeded) and flagged synthetic=true.
 // Run: pnpm gen-data   (never hand-edit the output)
 
@@ -36,13 +37,16 @@ write(
     label_color: p.asset?.label_color ?? "#cccccc",
     shape: p.asset?.shape ?? "box",
     dims_m: p.asset?.dims_m ?? [0.15, 0.08, 0.2],
+    description: p.description ?? null,
+    // accessories carry `fits:<sku>` tags (lowercase); the app compares against upper-case SKUs
+    compatible_with: (p.tags ?? []).filter((t) => t.startsWith("fits:")).map((t) => t.slice(5).toUpperCase()),
+    requires: (p.tags ?? []).includes("requires_ios") ? "ios" : (p.tags ?? []).includes("requires_android") ? "android" : null,
   })),
 );
 const bySku = Object.fromEntries(products.map((p) => [p.sku, p]));
 
-// ---- store layout ----
-const store = load("data/planograms/store_ave.yaml");
-write("store_ave.json", {
+// ---- store layouts ----
+const storeJson = (store) => ({
   store_id: store.store_id,
   name: store.name,
   address: store.address,
@@ -73,6 +77,21 @@ write("store_ave.json", {
     lots: (s.lots ?? []).map((l) => ({ lot_id: l.lot_id, qty: l.qty, expiry: l.expiry ?? null, freshness: l.freshness ?? null })),
     deal: s.deal ?? null,
   })),
+});
+const store = load("data/planograms/store_ave.yaml");
+write("store_ave.json", storeJson(store));
+const tmo = load("data/planograms/store_tmobile.yaml");
+write("store_tmobile.json", storeJson(tmo));
+
+// ---- wireless account signals + promo calendar (Cart Whisperer, T-Mobile track) ----
+const wireless = load("data/fixtures/wireless.yaml");
+write("wireless.json", {
+  as_of: wireless.as_of,
+  accounts: wireless.accounts,
+  upcoming_promos: wireless.upcoming_promos ?? [],
+  line_promos: wireless.line_promos ?? [],
+  online_sale_prices: wireless.online_sale_prices ?? [],
+  sources: wireless.sources ?? [],
 });
 
 // ---- online store ----
@@ -180,7 +199,7 @@ purchases.sort((a, b) => a.ts.localeCompare(b.ts));
 write("maya.json", { profile: maya.profile, mandate: maya.mandate, purchases });
 
 console.log(
-  `gen-data: ${products.length} products, ${store.slots.length} slots, ${purchases.length} purchases (${purchases.filter((p) => p.synthetic).length} synthetic) -> ${out}`,
+  `gen-data: ${products.length} products, ${store.slots.length} + ${tmo.slots.length} slots, ${purchases.length} purchases (${purchases.filter((p) => p.synthetic).length} synthetic) -> ${out}`,
 );
 
 // ---- retailer offers + price history (Find / price check) ----
