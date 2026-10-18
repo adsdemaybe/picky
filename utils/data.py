@@ -4,12 +4,16 @@
     data/planograms/<store_id>.yaml   -> Planogram         (load_planogram / list_store_ids)
     data/online_store.yaml            -> OnlineCatalog     (load_online_catalog)
     data/fixtures/users.yaml          -> FixturesFile      (load_demo_fixtures / load_demo_user)
+    data/fixtures/robots.yaml         -> RobotsFile        (load_robots / load_robot / robots_for_store /
+                                                            load_store_cameras / load_cameras)
+    data/categories.yaml              -> CategoriesFile    (load_categories_file / load_categories)
 
 Results are cached per (file, mtime), so edits are picked up without a restart. Every call returns a deep copy, so
 callers may mutate what they get (e.g. stock levels) without corrupting the cache.
 
-Run ``python -m utils.data`` to validate the data directory (cross-file + physical-consistency checks). Problems
-prefixed ``warning:`` don't fail the run.
+Run ``python -m utils.data`` to validate the data directory (cross-file + physical-consistency checks: robot
+clearance, SO-101 reach via ``contracts.common.slot_reachable``, slot ids unique across stores, qty / low_threshold
+within capacity, dock spacing, ...). Problems prefixed ``warning:`` don't fail the run.
 """
 
 import math
@@ -22,9 +26,39 @@ from typing import Any, TypeVar
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from contracts.cameras import DEFAULT_ROBOT_CAMERA_MOUNTS, CameraInfo, robot_camera_id
 from contracts.catalog import Product, is_valid_ean13
-from contracts.common import ONLINE_STORE_ID, ROBOT_RADIUS_M, Pose2D, Sku, StoreId, UserId, angle_diff, utcnow
-from contracts.planogram import DemoUser, FixturesFile, OnlineCatalog, Planogram, ProductsFile
+from contracts.common import (
+    APPROACH_DIST_MAX_M,
+    APPROACH_DIST_MIN_M,
+    ARM_MOUNT_X_M,
+    ARM_REACH_M,
+    ONLINE_STORE_ID,
+    REACH_Z_MAX_M,
+    REACH_Z_MIN_M,
+    ROBOT_RADIUS_M,
+    CategoryId,
+    Pose2D,
+    RobotId,
+    Sku,
+    StoreId,
+    UserId,
+    angle_diff,
+    slot_reachable,
+    utcnow,
+)
+from contracts.planogram import (
+    CategoriesFile,
+    CategoryDef,
+    DemoUser,
+    FixturesFile,
+    OnlineCatalog,
+    Planogram,
+    ProductsFile,
+    RobotsFile,
+    RobotSpec,
+    StoreCameraSpec,
+)
 from utils.config import get_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +67,8 @@ PRODUCTS_FILE = "products.yaml"
 PLANOGRAM_DIR = "planograms"
 ONLINE_FILE = "online_store.yaml"
 USERS_FILE = "fixtures/users.yaml"
+ROBOTS_FILE = "fixtures/robots.yaml"
+CATEGORIES_FILE = "categories.yaml"
 
 M = TypeVar("M", bound=BaseModel)
 
@@ -134,11 +170,78 @@ def load_demo_user(user_id: UserId, data_root: str | Path | None = None) -> Demo
     return user
 
 
+def load_robots_file(data_root: str | Path | None = None) -> RobotsFile:
+    """data/fixtures/robots.yaml (fleet robots + store ceiling cameras)."""
+    return _load(data_dir(data_root) / ROBOTS_FILE, RobotsFile, "robots")
+
+
+def load_robots(data_root: str | Path | None = None) -> dict[RobotId, RobotSpec]:
+    """Every fleet robot keyed by robot_id (file order preserved)."""
+    return {r.robot_id: r for r in load_robots_file(data_root).robots}
+
+
+def load_robot(robot_id: RobotId, data_root: str | Path | None = None) -> RobotSpec:
+    robot = load_robots_file(data_root).robot(robot_id)
+    if robot is None:
+        raise KeyError(f"unknown robot {robot_id!r}")
+    return robot
+
+
+def robots_for_store(store_id: StoreId, data_root: str | Path | None = None) -> list[RobotSpec]:
+    return load_robots_file(data_root).robots_in(store_id)
+
+
+def load_store_cameras(store_id: StoreId | None = None, data_root: str | Path | None = None) -> list[StoreCameraSpec]:
+    rf = load_robots_file(data_root)
+    return rf.store_cameras if store_id is None else rf.cameras_in(store_id)
+
+
+def load_cameras(
+    store_id: StoreId | None = None, robot_id: RobotId | None = None, data_root: str | Path | None = None
+) -> list[CameraInfo]:
+    """CameraInfo for every configured camera: each robot's cameras ('<robot_id>.<kind>', DEFAULT_ROBOT_CAMERA_MOUNTS)
+    then the store ceiling cameras. ``source='fake'``/``online=True`` (CameraService overlays live Isaac info)."""
+    rf = load_robots_file(data_root)
+    out: list[CameraInfo] = []
+    for r in rf.robots:
+        if (store_id is not None and r.store_id != store_id) or (robot_id is not None and r.robot_id != robot_id):
+            continue
+        for kind in r.cameras:
+            out.append(
+                CameraInfo(
+                    camera_id=robot_camera_id(r.robot_id, kind),
+                    kind=kind,
+                    name=f"{r.name} · {kind}",
+                    store_id=r.store_id,
+                    robot_id=r.robot_id,
+                    mount=DEFAULT_ROBOT_CAMERA_MOUNTS[kind].model_copy(),
+                )
+            )
+    if robot_id is None:
+        for c in rf.store_cameras:
+            if store_id is None or c.store_id == store_id:
+                out.append(
+                    CameraInfo(camera_id=c.camera_id, kind="ceiling", name=c.name, store_id=c.store_id, mount=c.mount)
+                )
+    return out
+
+
+def load_categories_file(data_root: str | Path | None = None) -> CategoriesFile:
+    """data/categories.yaml (category taxonomy)."""
+    return _load(data_dir(data_root) / CATEGORIES_FILE, CategoriesFile, "categories")
+
+
+def load_categories(data_root: str | Path | None = None) -> dict[CategoryId, CategoryDef]:
+    """Every category (top-level and subcategories) keyed by id, in file order."""
+    return {c.category_id: c for c in load_categories_file(data_root).categories}
+
+
 # --------------------------------------------------------------------------------------------------------------------
 # Cross-file validation
 # --------------------------------------------------------------------------------------------------------------------
 WARNING = "warning: "
 _EPS = 1e-6
+_REACH_SLACK = 0.02
 MANDATE_MIN_VALIDITY = timedelta(hours=48)
 
 
@@ -182,7 +285,24 @@ def _validate_planogram(plan: Planogram, products: dict[Sku, Product]) -> list[s
         problems += _clearance_problems(f"{where}: approach_pose", ap, plan)
         if not plan.bounds.contains(item.x, item.y):
             problems.append(f"{where}: item_position outside store bounds")
-        if math.hypot(item.x - ap.x, item.y - ap.y) > _EPS:
+        reach = math.hypot(item.x - ap.x, item.y - ap.y)
+        reachable = slot_reachable(ap, ap, item)  # THE predicate the robot fake and the sim use
+        if not reachable and reach > ARM_MOUNT_X_M + ARM_REACH_M + _EPS:
+            problems.append(
+                f"{where}: item_position is {reach:.2f} m from approach_pose, beyond the SO-101 reach "
+                f"({ARM_MOUNT_X_M + ARM_REACH_M:.2f} m); put the approach pose {APPROACH_DIST_MIN_M}-"
+                f"{APPROACH_DIST_MAX_M} m off the shelf face"
+            )
+        elif not APPROACH_DIST_MIN_M - _REACH_SLACK <= reach <= APPROACH_DIST_MAX_M + _REACH_SLACK:
+            problems.append(
+                f"{WARNING}{where}: approach_pose is {reach:.2f} m from item_position "
+                f"(design range {APPROACH_DIST_MIN_M}-{APPROACH_DIST_MAX_M} m)"
+            )
+        if not reachable and not REACH_Z_MIN_M - _EPS <= item.z <= REACH_Z_MAX_M + _EPS:
+            problems.append(
+                f"{where}: item_position.z {item.z} outside the lift + arm range {REACH_Z_MIN_M}-{REACH_Z_MAX_M} m"
+            )
+        if reach > _EPS:
             heading = math.atan2(item.y - ap.y, item.x - ap.x)
             if abs(angle_diff(heading, ap.theta)) >= math.pi / 4:
                 problems.append(
@@ -205,6 +325,10 @@ def _validate_planogram(plan: Planogram, products: dict[Sku, Product]) -> list[s
             problems.append(f"{where}: item_position.z {item.z} above fixture height {fixture.height_m}")
         if slot.aisle_id and fixture.aisle_id and slot.aisle_id != fixture.aisle_id:
             problems.append(f"{where}: aisle_id {slot.aisle_id!r} != fixture aisle_id {fixture.aisle_id!r}")
+        if slot.qty > slot.capacity:
+            problems.append(f"{where}: qty {slot.qty} > capacity {slot.capacity}")
+        if slot.low_threshold is not None and slot.low_threshold > slot.capacity:
+            problems.append(f"{where}: low_threshold {slot.low_threshold} > capacity {slot.capacity}")
         if slot.lots and sum(lot.qty for lot in slot.lots) != slot.qty:
             problems.append(f"{where}: lot qty sum {sum(lot.qty for lot in slot.lots)} != slot qty {slot.qty}")
         if slot.deal is not None and slot.deal.lot_id is not None:
@@ -239,6 +363,70 @@ def _validate_user(user: DemoUser, products: dict[Sku, Product], store_ids: list
     return problems
 
 
+DOCK_SPACING_M = 2 * ROBOT_RADIUS_M + 0.1
+"""Minimum distance between two docks in the same store (rovers must not spawn inside each other)."""
+
+
+def _validate_robots(rf: RobotsFile, plans: dict[StoreId, Planogram]) -> list[str]:
+    problems: list[str] = []
+    for r in rf.robots:
+        plan = plans.get(r.store_id)
+        if plan is None:
+            problems.append(f"robot {r.robot_id}: store {r.store_id!r} has no planogram")
+            continue
+        problems += _clearance_problems(f"robot {r.robot_id}: dock", r.dock, plan)
+        for slot in plan.slots:
+            d = r.dock.distance_to(slot.approach_pose)
+            if d < ROBOT_RADIUS_M - _EPS:
+                problems.append(
+                    f"robot {r.robot_id}: dock is {d:.2f} m from {plan.store_id}/{slot.slot_id} approach_pose "
+                    f"(< ROBOT_RADIUS_M={ROBOT_RADIUS_M})"
+                )
+    for sid in plans:
+        docks = rf.robots_in(sid)
+        for i, a in enumerate(docks):
+            for b in docks[i + 1 :]:
+                d = a.dock.distance_to(b.dock)
+                if d < DOCK_SPACING_M - _EPS:
+                    problems.append(
+                        f"robot {a.robot_id} / {b.robot_id}: docks are {d:.2f} m apart (< {DOCK_SPACING_M:.1f} m)"
+                    )
+    for c in rf.store_cameras:
+        plan = plans.get(c.store_id)
+        if plan is None:
+            problems.append(f"camera {c.camera_id}: store {c.store_id!r} has no planogram")
+            continue
+        if not plan.bounds.contains(c.mount.x, c.mount.y) or not 0.0 < c.mount.z <= 8.0:
+            problems.append(f"camera {c.camera_id}: mount ({c.mount.x}, {c.mount.y}, {c.mount.z}) is outside the store")
+    for sid in plans:
+        if not rf.robots_in(sid):
+            problems.append(f"{WARNING}store {sid} has no robots in {ROBOTS_FILE}")
+    return problems
+
+
+def _validate_categories(
+    cats: CategoriesFile, products: dict[Sku, Product], plans: dict[StoreId, Planogram], users: list[DemoUser]
+) -> list[str]:
+    problems: list[str] = []
+    top = {c.category_id for c in cats.top_level()}
+    for sku, prod in products.items():
+        if prod.category not in top:
+            problems.append(f"product {sku}: category {prod.category!r} is not a top-level id in {CATEGORIES_FILE}")
+        elif prod.subcategory and prod.subcategory not in {c.category_id for c in cats.children(prod.category)}:
+            problems.append(f"{WARNING}product {sku}: subcategory {prod.subcategory!r} is not under {prod.category!r}")
+    known = {c.category_id for c in cats.categories}
+    for sid, plan in plans.items():
+        for aisle in plan.aisles:
+            for cat in aisle.categories:
+                if cat not in known:
+                    problems.append(f"{WARNING}{sid}/{aisle.aisle_id}: unknown category {cat!r}")
+    for user in users:
+        for cat in [*user.mandate.allowed_categories, *user.mandate.blocked_categories]:
+            if cat not in top:
+                problems.append(f"{WARNING}user {user.user_id}: mandate category {cat!r} is not a top-level id")
+    return problems
+
+
 def validate_data(data_root: str | Path | None = None) -> list[str]:
     """Load every file and run cross-file + physical checks. Returns problems (empty = all good); entries starting
     with ``warning:`` are advisory."""
@@ -254,13 +442,24 @@ def validate_data(data_root: str | Path | None = None) -> list[str]:
     if not store_ids:
         problems.append(f"no planograms in {data_dir(data_root) / PLANOGRAM_DIR}")
 
+    plans: dict[StoreId, Planogram] = {}
     for sid in store_ids:
         try:
             plan = load_planogram(sid, data_root)
         except DataError as exc:
             problems.append(str(exc))
             continue
+        plans[sid] = plan
         problems += _validate_planogram(plan, products)
+    slot_owner: dict[str, StoreId] = {}
+    for sid, plan in plans.items():  # slot ids are global (sim instance ids '<slot_id>#nn' must not collide)
+        for slot in plan.slots:
+            other = slot_owner.setdefault(slot.slot_id, sid)
+            if other != sid:
+                problems.append(
+                    f"{sid}/{slot.slot_id}: slot_id also used in {other}; slot ids must be unique across stores "
+                    f"(prefix them with the store, e.g. 'AVE-...')"
+                )
 
     try:
         online = load_online_catalog(data_root)
@@ -270,12 +469,29 @@ def validate_data(data_root: str | Path | None = None) -> list[str]:
     except DataError as exc:
         problems.append(str(exc))
 
+    users: list[DemoUser] = []
     try:
-        fixtures = load_demo_fixtures(data_root)
-        for user in fixtures.users:
+        users = load_demo_fixtures(data_root).users
+        for user in users:
             problems += _validate_user(user, products, store_ids)
     except DataError as exc:
         problems.append(str(exc))
+
+    root = data_dir(data_root)
+    if (root / ROBOTS_FILE).exists():
+        try:
+            problems += _validate_robots(load_robots_file(data_root), plans)
+        except DataError as exc:
+            problems.append(str(exc))
+    else:
+        problems.append(f"{WARNING}no {ROBOTS_FILE} (fleet robots + store cameras)")
+    if (root / CATEGORIES_FILE).exists():
+        try:
+            problems += _validate_categories(load_categories_file(data_root), products, plans, users)
+        except DataError as exc:
+            problems.append(str(exc))
+    else:
+        problems.append(f"{WARNING}no {CATEGORIES_FILE} (category taxonomy)")
     return problems
 
 
@@ -288,7 +504,8 @@ def main() -> int:
     if errors:
         print(f"{len(errors)} problem(s) in {root}")
         return 1
-    print(f"data OK: {root} (stores: {', '.join(list_store_ids(include_online=True))})")
+    robots = ", ".join(load_robots(root)) if (root / ROBOTS_FILE).exists() else "none"
+    print(f"data OK: {root} (stores: {', '.join(list_store_ids(include_online=True))}; robots: {robots})")
     return 0
 
 

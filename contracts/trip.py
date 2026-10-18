@@ -7,7 +7,7 @@ Defined here (not in shopping.py) because it aggregates routing + trust models; 
 
 from pydantic import Field, computed_field
 
-from contracts.common import Model, StopId, StoreId, Timestamp, TripId, UserId, utcnow
+from contracts.common import GoalId, Model, RequestId, RobotId, StopId, StoreId, Timestamp, TripId, UserId, utcnow
 from contracts.messaging import OutboundMessage
 from contracts.routing import Route, StopStatus
 from contracts.shopping import Cart, Intent, Recommendation, ShoppingList, TripState
@@ -46,6 +46,14 @@ class Trip(Model):
         None, description="The post-purchase question sent ('How was the salsa?'); about_skus = what it asks about."
     )
     robot_logged_in: bool = False
+    auto_execute: bool = Field(
+        False,
+        description="Created from an NL request (CreateTripRequest.auto_execute): no login step; the trip goes "
+        "ROUTE_PLANNED -> EXECUTING by itself and the fleet runs its shop goal.",
+    )
+    robot_id: RobotId | None = Field(None, description="Robot executing the trip (TripController.assign_robot).")
+    goal_id: GoalId | None = Field(None, description="The fleet's shop Goal that executes this trip in store.")
+    request_id: RequestId | None = Field(None, description="NL request (POST /api/requests) that created the trip.")
     history: list[TripTransition] = Field(default_factory=list)
     error: str | None = None
     created_at: Timestamp = Field(default_factory=utcnow)

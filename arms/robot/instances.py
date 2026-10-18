@@ -27,7 +27,9 @@ __all__ = [
     "build_instances",
     "instance_id",
     "layout_bboxes",
+    "resync_slot",
     "slot_instances",
+    "unit_position",
 ]
 
 
@@ -36,15 +38,27 @@ def asset_for(products: dict[str, Product] | None, sku: str) -> SimAsset:
     return prod.asset if prod is not None else SimAsset()
 
 
-def slot_instances(slot: Slot, asset: SimAsset | None = None) -> list[ItemInstance]:
-    """All units currently on ``slot`` (qty from lots when present, else ``slot.qty``)."""
-    asset = asset or SimAsset()
+def unit_position(slot: Slot, asset: SimAsset, k: int) -> Point3:
+    """Center of the ``k``-th unit position of a slot (k=0 front-left column; columns across, then rows deeper)."""
     width, depth, height = asset.dims_m
     th = slot.approach_pose.theta
     deep = (math.cos(th), math.sin(th))  # into the shelf
     lateral = (-math.sin(th), math.cos(th))  # left when facing the shelf
     facings = max(slot.facings, 1)
+    col, row = k % facings, k // facings
+    off_lat = (col - (facings - 1) / 2.0) * width * 1.1
+    off_deep = depth / 2.0 + row * depth * 1.05
+    base = slot.item_position
+    return Point3(
+        x=round(base.x + deep[0] * off_deep + lateral[0] * off_lat, 4),
+        y=round(base.y + deep[1] * off_deep + lateral[1] * off_lat, 4),
+        z=round(base.z + height / 2.0, 4),
+    )
 
+
+def slot_instances(slot: Slot, asset: SimAsset | None = None, store_id: str | None = None) -> list[ItemInstance]:
+    """All units currently on ``slot`` (qty from lots when present, else ``slot.qty``)."""
+    asset = asset or SimAsset()
     units: list[tuple[str | None, float | None]] = []
     if slot.lots:
         for lot in slot.lots:
@@ -53,24 +67,16 @@ def slot_instances(slot: Slot, asset: SimAsset | None = None) -> list[ItemInstan
         units = [(None, None)] * slot.qty
 
     out: list[ItemInstance] = []
-    base = slot.item_position
     for n, (lot_id, lot_fresh) in enumerate(units):
-        col, row = n % facings, n // facings
-        off_lat = (col - (facings - 1) / 2.0) * width * 1.1
-        off_deep = depth / 2.0 + row * depth * 1.05
         iid = instance_id(slot.slot_id, n)
-        fresh = unit_freshness(lot_fresh, iid)
         out.append(
             ItemInstance(
                 instance_id=iid,
                 sku=slot.sku,
+                store_id=store_id,
                 slot_id=slot.slot_id,
-                position=Point3(
-                    x=round(base.x + deep[0] * off_deep + lateral[0] * off_lat, 4),
-                    y=round(base.y + deep[1] * off_deep + lateral[1] * off_lat, 4),
-                    z=round(base.z + height / 2.0, 4),
-                ),
-                freshness=fresh,
+                position=unit_position(slot, asset, n),
+                freshness=unit_freshness(lot_fresh, iid),
                 lot_id=lot_id,
             )
         )
@@ -78,8 +84,59 @@ def slot_instances(slot: Slot, asset: SimAsset | None = None) -> list[ItemInstan
 
 
 def build_instances(planogram: Planogram, products: dict[str, Product] | None = None) -> dict[str, list[ItemInstance]]:
-    """slot_id -> instances on that slot (empty list for OOS slots)."""
-    return {s.slot_id: slot_instances(s, asset_for(products, s.sku)) for s in planogram.slots}
+    """slot_id -> instances on that slot (empty list for OOS slots); every unit carries the planogram's store_id."""
+    return {s.slot_id: slot_instances(s, asset_for(products, s.sku), planogram.store_id) for s in planogram.slots}
+
+
+def _n_of(inst: ItemInstance) -> int:
+    try:
+        return int(inst.instance_id.rsplit("#", 1)[1])
+    except (IndexError, ValueError):
+        return 0
+
+
+def resync_slot(
+    units: list[ItemInstance], slot: Slot, asset: SimAsset | None, next_n: int, store_id: str | None = None
+) -> tuple[list[ItemInstance], int]:
+    """Make a slot hold exactly what the catalog says (``slot.qty`` / ``slot.lots``), deterministically.
+
+    Existing units are kept where possible; surplus units are removed highest ``n`` first (back rows) and missing
+    units are spawned with fresh ids ``instance_id(slot_id, next_n)``, ``next_n + 1``, ... (never reusing an id that
+    may still sit in a basket). Lots: per-lot counts follow ``slot.lots`` (planogram order) when present, else only
+    the total follows ``slot.qty``. Units are re-laid front-to-back. Returns (units, new next_n).
+    """
+    asset = asset or SimAsset()
+    keep = sorted((u for u in units if not u.in_basket), key=_n_of)
+    spawn: list[tuple[str | None, float | None]] = []
+    if slot.lots:
+        targets = {lot.lot_id: lot for lot in slot.lots}
+        kept: list[ItemInstance] = []
+        for lot in slot.lots:
+            mine = [u for u in keep if u.lot_id == lot.lot_id]
+            kept += mine[: lot.qty]
+            spawn += [(lot.lot_id, lot.freshness)] * max(0, lot.qty - len(mine))
+        keep = sorted((u for u in kept if u.lot_id in targets), key=_n_of)
+    else:
+        keep = keep[: slot.qty]
+        spawn = [(None, None)] * max(0, slot.qty - len(keep))
+    for lot_id, fresh in spawn:
+        iid = instance_id(slot.slot_id, next_n)
+        next_n += 1
+        keep.append(
+            ItemInstance(
+                instance_id=iid,
+                sku=slot.sku,
+                store_id=store_id,
+                slot_id=slot.slot_id,
+                position=Point3(x=0.0, y=0.0, z=0.0),
+                freshness=unit_freshness(fresh, iid),
+                lot_id=lot_id,
+            )
+        )
+    out = [
+        u.model_copy(update={"position": unit_position(slot, asset, k), "sku": slot.sku}) for k, u in enumerate(keep)
+    ]
+    return out, next_n
 
 
 def basket_position(pose: Pose2D, index: int) -> Point3:
