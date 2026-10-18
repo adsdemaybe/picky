@@ -37,6 +37,7 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 - [x] **P1** Per-item grocery models (`PICKY_ASSET_ROOT`, `data/sim/sku_assets.yaml`, `assets.py`, `ASSETS.md`). Every stocked unit is its own kinematic prim that references its model (117 of 125 SKUs; gap and missing SKUs fall back to the primitive), sized to the model, with our label decal and shelf tags for loose produce. Shelves fill wide first, from the tag outwards. Live on the vhagar worker: the taco request and a staff shelf scan ran on Isaac with 1,248 + 536 model units
 - [x] **P1** LeKiwi + SO-101 + lift rover USD as a kinematic puppet (`PICKY_ROVER_USD`, `rover_puppet.py`): IK puts the jaws on the held unit, and the primitive rover is the fallback. Live on the vhagar worker for all 3 rovers (wrist camera shows the jaws holding the labelled unit)
 - [ ] **P1** White SO-101 rover v3 (`picky_so101_rover.usd` from `supermarket/robot/build_so101_rover.py`) as the puppet: set `PICKY_ROVER_USD` to it (detected by name or its `.kin.json`; `RoverModel` in `rover_puppet.py`). Flat `/Picky` links mapped onto the canonical SO-101 links, arm turned to face forward at pan 0 (same joint degrees on the wire), no lift (fixed riser: the reach table covers 0.2..1.2 m as drops below 1.2 m), no primitive mast / basket next to it. Chain + reach table checked offline with pxr; not yet run on the Isaac worker. `picky_rover.usda` stays the default / fallback
+- [x] **P1** External scenes (`external.py`): a store drawn by its own USD instead of planogram primitives (first user: `store_genie`, the AgiBot Genie Sim `supermarket_06` market). `data/sim/<store>_prims.yaml` (generated with the planogram) maps unit n of each slot to a product prim of the USD + its box in the store frame. When the USD exists on the host (`$PICKY_GENIESIM_ROOT/<path>` or `PICKY_EXTERNAL_USD_<STORE>`), `IsaacBackend` references it under `<store>/Scene` (translate = USD -> store frame), freezes its rigid bodies, binds every unit to its prim (picks / basket / unload move it with a matrix op, unload / stock-down hide it, restock shows it again) and draws only what the USD lacks (checkout counter, markers). Ids, counts and the data hash are host-independent; without the USD the store is built from primitives. `PICKY_EXTERNAL_SCENES=0` turns it off, `PICKY_EXTERNAL_LIGHT_SCALE` dims the scene's own lights. Live on a vhagar test stack (gateway + one Isaac worker hosting only store_genie, white SO-101 rover v3): 678 units bound to Genie prims, a 3-item request ran end to end (Perceptron T1 grasps on Genie products, counter unload, payment)
 - [ ] **P1** Real SO-101 URDF on the lift (`--so101-urdf`, experimental importer path; joints stay at zero)
 - [ ] **P2** Physics grasp (FixedJoint), animated SO-101 joints, VLA (LeRobot / LeIsaac) later, per CLAUDE.md "Later"
 
@@ -63,6 +64,7 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 | `worker.py` | Isaac-free `WorkerCore` (stores, rovers, actions, cameras, streams, resets, set_slot_stock), the `SimBackend` seam, `NullBackend` |
 | `sketch.py` | `SketchBackend`: Pillow 3D raster (no Isaac) |
 | `assets.py` | PURE: `SkuAssets` (SKU -> per-item model plan + why it falls back), label decal geometry, `PICKY_ROVER_USD` lookup |
+| `external.py` | PURE: external scenes (`ExternalScene`, `load_external_scene`): a store's USD + slot -> product prim map from `data/sim/<store>_prims.yaml`, resolved per host |
 | `rover_puppet.py` | PURE (stdlib): forward kinematics + DLS IK + reach table that pose the LeKiwi/SO-101 USD kinematically |
 | `ASSETS.md` | Asset sources, licenses + credit line, exact rebuild commands for vhagar, fallbacks |
 | `tools/` | Asset pipeline scripts (download, normalize, SKU map generator / validator, rover overlay composer); not imported |
@@ -89,7 +91,9 @@ Flags / env: `--stores` / `PICKY_SIM_STORES` (comma list, default all planograms
 `--asset-root` / `PICKY_ASSET_ROOT` (per-item models; unset = primitives), `--sku-assets` / `PICKY_SKU_ASSETS`,
 `--no-assets` / `PICKY_SIM_ASSETS=off`, `--rover-usd` / `PICKY_ROVER_USD` (Isaac backend only). `PICKY_SIM_AMBIENT`
 (default 0.1): RTX ambient fill so the shelf interiors are not dark grey (0 = Isaac's default; 0.6 already washes the
-store out).
+store out). External scenes (`external.py`): `PICKY_GENIESIM_ROOT` (Genie Sim asset root, e.g.
+`/data/$USER/picky-suraj/geniesim`) or `PICKY_EXTERNAL_USD_<STORE_ID>` (full path), `PICKY_EXTERNAL_SCENES=0` (off),
+`PICKY_EXTERNAL_LIGHT_SCALE` (scene lights multiplier, default 1).
 
 **Credits (CC BY 4.0, required wherever the models are shown):** Product 3D models: NVIDIA SimReady Assets (CC BY
 4.0), RoboCasa (Nasiriany et al., RSS 2024; CC BY 4.0), Lightwheel/NVIDIA PhysicalAI Kitchen objects (CC BY 4.0);
