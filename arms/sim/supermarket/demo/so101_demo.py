@@ -324,7 +324,7 @@ def choose_items(cat: Catalog, n_items: int, start_xy, rng_seed: int = 3, fixed=
                     chosen.append((p, g))
                     break
         n_secs = len({p.section for p, _ in chosen})
-        if len(chosen) >= min(n_items, 10) and n_secs >= 5:
+        if len(chosen) >= min(n_items, 10) and n_secs >= min(5, n_items):
             break
     return chosen
 
@@ -394,6 +394,7 @@ class IsaacIO:
         self.wheel_idx = [self.idx[n] for n in self.wheels]
         self.bodies = {}
         self._boxes = {}
+        self._yaw = None
         q0 = {**{n: 0.0 for n in CTRL}, **kin.k["poses"]["stow"]}
         q0.update({"base_x": spawn[0], "base_y": spawn[1], "base_yaw": spawn[2]})
         self.art.set_dof_positions([[q0[n] for n in CTRL]], dof_indices=self.ctrl_idx)
@@ -414,7 +415,12 @@ class IsaacIO:
                 pass
 
     def apply(self, cmd_q, cmd_v, wheel_v):
-        self.art.set_dof_position_targets([[cmd_q[n] for n in CTRL]], dof_indices=self.ctrl_idx)
+        # keep the yaw target within half a turn of the measured yaw: the mission's yaw is continuous, PhysX may
+        # report the unlimited revolute joint wrapped; either way the drive then sees the short error
+        q = dict(cmd_q)
+        m = self._yaw if self._yaw is not None else q["base_yaw"]
+        q["base_yaw"] = m + wrap(q["base_yaw"] - m)
+        self.art.set_dof_position_targets([[q[n] for n in CTRL]], dof_indices=self.ctrl_idx)
         self.art.set_dof_velocity_targets([[cmd_v[n] for n in CTRL]], dof_indices=self.ctrl_idx)
         self.art.set_dof_velocity_targets([wheel_v], dof_indices=self.wheel_idx)
 
@@ -423,7 +429,9 @@ class IsaacIO:
 
     def q(self) -> dict:
         v = self.art.get_dof_positions().numpy()[0]
-        return {n: float(v[i]) for n, i in self.idx.items()}
+        out = {n: float(v[i]) for n, i in self.idx.items()}
+        self._yaw = out["base_yaw"]
+        return out
 
     def efforts(self):
         if not self.eff_fn:
@@ -841,6 +849,8 @@ class Mission:
                 )
                 + "\n"
             )
+            if self.k % 60 == 0:
+                self.frames.flush()
 
     def wait(self, s):
         for _ in range(max(1, int(round(s / DT)))):
@@ -1746,6 +1756,24 @@ def plan_doc(plan, items, smap, meta, slot, ck, spawn):
     }
 
 
+def orbit_start(hg: HeightGrid, c, radius, z, arc) -> float:
+    """start angle of an orbit arc (radius, height z, length arc) around c whose eye stays in free air with c in view"""
+    angs = np.linspace(0, 2 * math.pi, 72, endpoint=False)
+
+    def ok(a):
+        eye = np.array([c[0] + radius * math.cos(a), c[1] + radius * math.sin(a), z])
+        return hg.eye_ok(eye) and hg.visible(eye, c)
+
+    good = np.array([ok(a) for a in angs])
+    n = int(math.ceil(arc / (2 * math.pi / 72))) + 1
+    best, best_k = -1, 0
+    for k in range(72):
+        run = sum(good[(k + j) % 72] for j in range(n))
+        if run > best:
+            best, best_k = run, k
+    return float(angs[best_k])
+
+
 def product_closeups(app, stage, items, out: Path, hide=(), look_at=None):
     """one 448 px close-up per shopping-list item from the aisle (for Gemini to name it + the plan card)"""
     import omni.replicator.core as rep  # noqa: PLC0415
@@ -1956,12 +1984,13 @@ def run(app, args, tele):
         d = ms.director
         d.mode = "orbit"
         n_intro = int(args.intro / DT)
+        c_in = np.array([spawn[0], spawn[1], 0.55])
+        a0 = orbit_start(hg, c_in, 2.1, 1.75, 0.9)
         for i in range(n_intro):
-            a = 2.4 + 0.9 * i / n_intro
-            eye = np.array([spawn[0] + 2.1 * math.cos(a), spawn[1] + 2.1 * math.sin(a), 1.75 - 0.25 * i / n_intro])
-            if not hg.eye_ok(eye):
-                eye[2] = 2.3
-            d.eye, d.tgt = eye, np.array([spawn[0], spawn[1], 0.55])
+            u = minjerk(i / max(n_intro - 1, 1))
+            a = a0 + 0.9 * u
+            eye = np.array([c_in[0] + 2.1 * math.cos(a), c_in[1] + 2.1 * math.sin(a), 1.75 - 0.2 * u])
+            d.eye, d.tgt = eye, c_in
             ms.step()
         d.mode = "chase"
         if rec:
@@ -1976,14 +2005,13 @@ def run(app, args, tele):
         q = ms.qm
         d.mode = "orbit"
         n_out = int(args.outro / DT)
+        c_out = np.array([q["base_x"], q["base_y"], 0.6])
+        a0 = orbit_start(hg, c_out, 2.0, 1.9, 0.8)
         for i in range(n_out):
-            a = math.pi * 0.5 + 0.8 * i / n_out
-            c = np.array([q["base_x"], q["base_y"] + 0.35])
-            eye = np.array([c[0] + 2.0 * math.cos(a + math.pi), c[1] - 1.6, 1.9])
-            d.eye, d.tgt = (
-                eye if hg.eye_ok(eye) else np.array([c[0], c[1] - 1.8, 2.2]),
-                np.array([c[0], c[1] + 0.3, 0.7]),
-            )
+            u = minjerk(i / max(n_out - 1, 1))
+            a = a0 + 0.8 * u
+            d.eye = np.array([c_out[0] + 2.0 * math.cos(a), c_out[1] + 2.0 * math.sin(a), 1.9 + 0.2 * u])
+            d.tgt = c_out
             ms.step()
     finally:
         stats = {

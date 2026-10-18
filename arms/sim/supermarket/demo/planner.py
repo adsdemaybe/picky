@@ -19,7 +19,15 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-MODELS = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-flash-latest"]
+# tried in order; a model whose quota is exhausted (HTTP 429) is skipped for the rest of the run
+MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.7-flash",
+    "gemini-3.6-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-3.5-flash-lite",
+]
 URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 
 SYSTEM = (
@@ -63,6 +71,7 @@ def load_key() -> str | None:
 class Planner:
     def __init__(self, log_path: str, models=MODELS, system: str = SYSTEM):
         self.system = system
+        self.exhausted: set[str] = set()
         self.key = load_key()
         self.models = list(models)
         self.log_path = Path(log_path)
@@ -79,7 +88,8 @@ class Planner:
             raise RuntimeError("GEMINI_API_KEY not set (env or ~/.config/picky/secrets.env)")
         parts = [{"text": prompt}]
         for label, data in images or []:
-            parts += [{"text": label}, {"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(data).decode()}}]
+            b64 = base64.b64encode(data).decode()
+            parts += [{"text": label}, {"inline_data": {"mime_type": "image/jpeg", "data": b64}}]
         body = {
             "systemInstruction": {"parts": [{"text": system or self.system}]},
             "contents": [{"role": "user", "parts": parts}],
@@ -87,6 +97,8 @@ class Planner:
         }
         last = None
         for model in self.models:
+            if model in self.exhausted:
+                continue
             for attempt in range(2):
                 t0 = time.time()
                 req = urllib.request.Request(
@@ -105,10 +117,17 @@ class Planner:
                                "response": out})  # fmt: skip
                     return out
                 except urllib.error.HTTPError as e:
-                    last = f"{model}: HTTP {e.code}"
+                    try:
+                        detail = json.loads(e.read()).get("error", {}).get("message", "")[:240]
+                    except Exception:  # noqa: BLE001
+                        detail = ""
+                    last = f"{model}: HTTP {e.code} {detail}".replace(self.key, "<key>")
                     self._log({"t": time.time(), "kind": kind, "model": model, "error": last})
                     if e.code in (404, 400):
                         break  # model not available -> next model
+                    if e.code == 429:  # quota exhausted: skip this model for the rest of the run
+                        self.exhausted.add(model)
+                        break
                     time.sleep(3 * (attempt + 1))
                 except Exception as e:  # noqa: BLE001  (timeouts, malformed JSON)
                     last = f"{model}: {type(e).__name__}: {e}"
