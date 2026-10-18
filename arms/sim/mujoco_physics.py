@@ -15,9 +15,13 @@ What is simulated (MuJoCo 3.16, implicitfast, 4 ms steps, body sleeping on):
   unit is ignored until the gripper opens). Otherwise (too wide for the 75 mm jaw, missed) the core's scripted grasp
   pose is applied, so trips never break. ``grasp_log`` records which one happened per pick.
 
-Collision groups (MuJoCo: two geoms touch when ``contype_a & conaffinity_b`` or ``contype_b & conaffinity_a``):
-fixtures contype 1 / conaffinity 0; products 2 / 7; rover colliders 4 / 0; SO-101 (its own defaults) 1 / 1. So the
-arm hits shelves and products but never its own mast, and the rover body pushes products but not the arm.
+Collision groups (MuJoCo: two geoms touch when ``contype_a & conaffinity_b`` or ``contype_b & conaffinity_a``),
+chosen so the robot is CAREFUL: only its jaws ever touch stock.
+fixtures contype 1 / conaffinity 0; products 2 / 19 (fixtures, other products, jaws); rover body 4 / 0 (touches
+nothing: navigation keeps it clear, and it must never shove a shelf); SO-101 links 8 / 0 (touch nothing); SO-101 jaws
+16 / 0 (touch products only). Basket units are posed by the core every tick, so the basket needs no walls.
+Safety net: a unit that still ends up off its spot (tipped, fallen, pushed) is put back once it is at rest
+(``_tidy``), so the shelves always match the store's inventory.
 """
 
 import math
@@ -57,6 +61,10 @@ ROVER_COLLIDERS = ("chassis", "mast", "basket_floor", "basket_front", "basket_ba
 WHEEL_RADIUS_M = 0.06
 STOW_EXT_M = 0.13
 SYNC_MIN_S = 0.03
+TIDY_EVERY_S = 1.0
+TIDY_OFF_M = 0.02
+TIDY_TILT_COS = 0.95  # ~18 degrees
+TIDY_REST_SPEED = 0.05
 PHYSICS_BUDGET_S = 0.012  # max wall time spent stepping physics per sync
 HOLD_RADIUS_M = 0.09  # a grasped unit whose center stays this close to the fingertips is still held
 
@@ -105,6 +113,8 @@ class MujocoPhysicsBackend(MujocoBackend):
         self._last_step: float | None = None
         self._ikd: Any = None
         self.grasp_log: list[dict[str, Any]] = []
+        self.tidied = 0
+        self._tidy_at = 0.0
         self._screen_feed: mujoco_screen.ScreenFeed | None = None
         self._screen_tick = mujoco_screen.ScreenTicker()
         self._screen_tex: dict[str, int] = {}
@@ -185,7 +195,7 @@ class MujocoPhysicsBackend(MujocoBackend):
         sleep = "init" if key in getattr(self, "_supported", set()) else "auto"
         collider = (
             f'<geom type="box" size="{sx * 0.48:.4f} {sy * 0.48:.4f} {sz / 2 - 0.001:.4f}" mass="{mass:.3f}" '
-            f'contype="2" conaffinity="7" friction="1.0 0.02 0.002" group="3" rgba="0 0 0 0"/>'
+            f'contype="2" conaffinity="19" friction="1.0 0.02 0.002" group="3" rgba="0 0 0 0"/>'
         )
         return (
             f"<body name={quoteattr('i/' + '/'.join(key))} "
@@ -326,6 +336,16 @@ class MujocoPhysicsBackend(MujocoBackend):
             self._screen_feed.robot_ids = list(rover_parts)
         self._screen_tick.last = 0.0
         self._synced_at = 0.0
+        # careful robot: arm links touch nothing, jaws touch products only (see module docstring)
+        for rid in rover_parts:
+            jaws = {self._arm[rid]["jaw_moving"], self._arm[rid]["jaw_fixed"]} if rid in self._arm else set()
+            for g in range(model.ngeom):
+                name = mj.mj_id2name(model, mj.mjtObj.mjOBJ_BODY, int(model.geom_bodyid[g])) or ""
+                if not name.startswith(f"{rid}/") or not (model.geom_contype[g] or model.geom_conaffinity[g]):
+                    continue
+                model.geom_contype[g] = 16 if int(model.geom_bodyid[g]) in jaws else 8
+                model.geom_conaffinity[g] = 0
+        self._tidy_at = 0.0
         self._ikd = mj.MjData(model)
         self._pending = set()
         self._grasped = {}
@@ -436,6 +456,33 @@ class MujocoPhysicsBackend(MujocoBackend):
             done += 1
         self._last_step = now if done < n else self._last_step + n * TIMESTEP_S
         self._detect_grasps()
+        if now - self._tidy_at > TIDY_EVERY_S:
+            self._tidy_at = now
+            self._tidy()
+
+    def _tidy(self) -> None:
+        """Put back any unit that is off its spot and at rest (knocked over, slid off, pushed): the shelves must match
+        the inventory. Units the core moves (held, in a basket, restocked) are posed by the core, not here."""
+        d = self._data
+        held = set(self._grasped.values())
+        fixed = 0
+        for key, qa in self._qadr.items():
+            prim = self.instance_prims.get(key)
+            if prim is None or key in held or key in self._pending:
+                continue
+            pos = self.positions.get(key)
+            ox, oy, oz = self._offset(key[0])
+            want = np.array(((pos.x, pos.y, pos.z) if pos is not None else prim.center), float) + (ox, oy, oz + 0.0015)
+            off = float(np.linalg.norm(d.qpos[qa : qa + 3] - want))
+            tilt = 1.0 - 2.0 * float(d.qpos[qa + 4] ** 2 + d.qpos[qa + 5] ** 2)  # cos of the tilt from upright
+            da = self._dadr[key]
+            moving = float(np.abs(d.qvel[da : da + 6]).max())
+            if (off > TIDY_OFF_M or tilt < TIDY_TILT_COS) and moving < TIDY_REST_SPEED:
+                self._pending.add(key)
+                fixed += 1
+        if fixed:
+            self.tidied += fixed
+            log.info("put back %d unit(s) that were knocked off their spot (total %d)", fixed, self.tidied)
 
     def _forward_for_render(self) -> None:
         # the render camera's mocap was just moved: refresh kinematics (cheap, leaves the dynamics state alone)
