@@ -62,6 +62,8 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 | `app.py` | `GatewayLink` (WS thread), `IsaacBackend` (pxr/replicator), `run()` main loop, CLI |
 | `DEPLOY.md` | exact vhagar steps |
 | `director.py` | dev-only chase camera + frame tee for demo videos (`PICKY_SIM_DIRECTOR`, off by default); `tools/director/record.py` records a run through the gateway, `tools/director/render.py` composites the video |
+| `visuals.yaml` / `visuals.py` | Visual-only store dressing for Isaac: 3D models per SKU (CC-BY, Objaverse), per-store colors, fixture styles (`table`), decor (brand panels, signs, props). Pure loader, no Isaac |
+| `fetch_visuals.py` | Downloads the models in `visuals.yaml` and converts them to USD (Kit asset converter) into `PICKY_SIM_ASSET_DIR`; writes `ATTRIBUTION.md` |
 | `tests/` | scene spec (multi-store, rovers), pure pursuit + cameras + labels, worker protocol (two stores, three robots), WS round-trip, sketch frames, asset mapping / fallbacks / rover puppet (`test_assets.py`) |
 
 ## How to run
@@ -108,7 +110,43 @@ matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop t
   (non-level reach into the basket at lift 0.32 m, level place on the counter), the unit attached to the gripper at
   the close keyframe and laid on the counter at the open keyframe; capability `basket_unload`. Redeploy: DEPLOY.md §10.
 
+## Store visuals (T-Mobile store)
+
+`arms/sim/visuals.yaml` dresses `store_tmobile` for the Isaac backend without touching ground truth (slot ids, unit
+counts, positions on the wire): white fixtures, magenta brand walls and counter band, lit "T-Mobile" / "Accessories" /
+"Audio & Power" signs, bar stools, wood-top phone tables (`fixture_styles: table`: one layer of display units side by
+side), phones on display pucks with one price card per model, and boxed audio / watch stock with the device in front.
+Products without a model stay labeled retail boxes (chargers, cables, cases, glass, iPad).
+
+```bash
+OMNI_KIT_ACCEPT_EULA=YES python -m arms.sim.fetch_visuals        # once per sim host, Isaac's Python; ~40 MB
+export PICKY_SIM_ASSET_DIR=/data/$USER/picky-sim-assets           # optional (default arms/sim/assets/build/visuals)
+```
+Without the fetch step everything still works and renders as boxes. Model credits: `ATTRIBUTION.md` next to the models
+(all CC-BY 4.0; author + Sketchfab URL per model in `visuals.yaml`).
+
+Wireless accessory boxes use retail package art (`labels.package_image`: brand, a product window drawn per kind, name,
+small price sticker and a still-decodable EAN-13) on the whole front face; grocery labels are unchanged.
+
+### Physics demo (standalone, opt-in)
+
+`arms/sim/tools/live_physics_demo.py` runs `store_tmobile` under PhysX with the #19 LeKiwi + SO-101 rover as a real
+articulation: it drives on its base joints along the routing visibility-graph paths, picks phones out of static U-slot
+holders top-down (`tools/physics_ik.py`; a FixedJoint locks the phone to the gripper only once the closed jaws are on
+it), lowers them into a 32 x 24 x 16 cm basket (front-left of the deck, where the folded arm reaches at pan -110 deg)
+and lets go softly; checkout empties the basket. Other units get static colliders. It is not wired into the worker /
+gateway (picks there stay the magic grasp); low render quality: `tools/low_quality.py`.
+
+```bash
+PICKY_ROVER_USD=.../picky_rover.usda PYTHONPATH=.:arms/sim/tools python arms/sim/tools/live_physics_demo.py  # Isaac python
+```
+
 ## Known limitations
+
+- Store visuals: the phone models are close stand-ins from Objaverse (iPhone 13 Pro Max for every iPhone, Galaxy S22
+  Ultra for Galaxy / REVVL, Pixel 6 Pro for Pixel / moto, Z Flip 3 for the Z Flip8); the price card names the exact
+  model. Phone tables are `produce_bin` in the planogram until a `display_table` FixtureKind exists (contracts PR);
+  the `table` style keeps them from piling units like produce. The sketch backend ignores models, decor and signs.
 
 - Isaac frames cost one synchronous replicator step whenever the camera or the scene changed (~60-135 ms with 1-3 enabled
   render products on vhagar): fine for 2 fps streams + snapshots, not for many high-fps live views. Idle render products

@@ -145,6 +145,9 @@ def test_committed_map_covers_every_product():
     # live in other stores (e.g. store_tmobile) are unmapped on purpose and render as today's primitive + label.
     mapped_stores = _mapped_store_ids(path)
     products_ = {s: p for s, p in all_products.items() if s in sa.entries or _stocked_in(s, mapped_stores)}
+    # (#23) the T-Mobile store's wireless SKUs stay out of this grocery map: arms/sim/visuals.yaml dresses them
+    wireless = {s for s, p in all_products.items() if p.category == "wireless"}
+    assert wireless and all(sa.resolve(s) is None for s in wireless)
     assert set(sa.entries) == set(products_)
     renders = [e["render"] for e in sa.entries.values()]
     assert renders.count("asset") + renders.count("parts") + renders.count("primitive") == len(products_)
