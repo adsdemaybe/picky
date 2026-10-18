@@ -7,7 +7,8 @@ hit wins::
 
 By default (``PICKY_SECRETS_BACKEND=auto``) keys live in the per-user file ``~/.config/picky/secrets.env`` (dir 700,
 file 600) on every machine: an OS keychain asks for the login password once per Python binary, i.e. every venv and
-worktree. ``PICKY_SECRETS_BACKEND=keyring`` opts into the macOS Keychain (Secret Service on a Linux desktop). ``utils.config.Settings`` reads the vault through :func:`settings_sources`, so
+worktree. ``PICKY_SECRETS_BACKEND=keyring`` opts into the macOS Keychain (Secret Service on a Linux desktop).
+``utils.config.Settings`` reads the vault through :func:`settings_sources`, so
 ``settings.anthropic_api_key`` just works; ``Settings(_env_file=None)`` stays hermetic (env + defaults only).
 
 CLI (values are never logged or printed, except by ``env``, which exists to feed ``eval``)::
