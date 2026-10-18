@@ -1697,7 +1697,10 @@ class Mission:
         best = self._best_unload(cands)
         mesh = False
         if best is None:
-            best = self._best_unload(self.mesh_grasps(path))
+            try:
+                best = self._best_unload(self.mesh_grasps(path))
+            except Exception as e:  # noqa: BLE001
+                self.log(f"[so101-demo] mesh grasp failed: {e}")
             mesh = best is not None
         if best is None:
             return None
