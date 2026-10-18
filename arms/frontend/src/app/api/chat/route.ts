@@ -31,7 +31,8 @@ export async function POST(req: Request) {
 
   const hasCreds = !!(process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN);
   const hasGemini = !!process.env.GEMINI_API_KEY;
-  if (!hasCreds && !hasGemini) return Response.json({ ...localAnswer(last, purchases), source: "offline" });
+  const hasGrok = !!process.env.XAI_API_KEY;
+  if (!hasCreds && !hasGemini && !hasGrok) return Response.json({ ...localAnswer(last, purchases), source: "offline" });
 
   const tools = [
     betaTool({
@@ -83,13 +84,19 @@ export async function POST(req: Request) {
   ];
 
   if (!hasCreds) {
-    try {
-      const text = await geminiAnswer(body.messages.slice(-12), tools as unknown as ToolLike[]);
-      return Response.json({ text: text || "Done.", cards, source: "gemini" });
-    } catch (err) {
-      console.error("[chat] Gemini failed; answering offline", err);
-      return Response.json({ ...localAnswer(last, purchases), source: "offline" });
+    // Gemini, then Grok (xAI), then the offline answerer
+    const engines: [string, () => Promise<string>][] = [];
+    if (hasGemini) engines.push(["gemini", () => geminiAnswer(body.messages.slice(-12), tools as unknown as ToolLike[])]);
+    if (hasGrok) engines.push(["grok", () => grokAnswer(body.messages.slice(-12), tools as unknown as ToolLike[])]);
+    for (const [source, run] of engines) {
+      try {
+        const text = await run();
+        if (text) return Response.json({ text, cards, source });
+      } catch (err) {
+        console.error(`[chat] ${source} failed`, err);
+      }
     }
+    return Response.json({ ...localAnswer(last, purchases), source: "offline" });
   }
 
   try {
@@ -196,6 +203,39 @@ async function geminiAnswer(history: ChatMsg[], tools: ToolLike[]): Promise<stri
       results.push({ functionResponse: { name: c.functionCall!.name, response: { result } } });
     }
     contents.push({ role: "user", parts: results });
+  }
+  return "";
+}
+
+// ---- Grok (XAI_API_KEY): OpenAI-compatible chat completions with the same tools ------------------------------------
+async function grokAnswer(history: ChatMsg[], tools: ToolLike[]): Promise<string> {
+  const model = process.env.PICKY_GROK_MODEL || "grok-4.20-0309-non-reasoning";
+  const defs = tools.map((t) => ({
+    type: "function",
+    function: { name: t.name, description: t.description ?? "", parameters: t.input_schema ?? t.inputSchema ?? { type: "object", properties: {} } },
+  }));
+  type Msg = { role: string; content: string; tool_calls?: { id: string; function: { name: string; arguments: string } }[]; tool_call_id?: string };
+  const convo: Msg[] = [{ role: "system", content: SYSTEM }, ...history.map((m) => ({ role: m.role, content: m.content }))];
+  for (let i = 0; i < 6; i++) {
+    const r = await fetch("https://api.x.ai/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${process.env.XAI_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages: convo, tools: defs, max_tokens: 1200 }),
+    });
+    if (!r.ok) throw new Error(`grok ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    const msg = ((await r.json()) as { choices: { message: Msg }[] }).choices[0].message;
+    if (!msg.tool_calls?.length) return (msg.content ?? "").trim();
+    convo.push({ role: "assistant", content: msg.content ?? "", tool_calls: msg.tool_calls });
+    for (const c of msg.tool_calls) {
+      const tool = tools.find((t) => t.name === c.function.name);
+      let result: unknown;
+      try {
+        result = tool ? await tool.run(JSON.parse(c.function.arguments || "{}")) : `unknown tool ${c.function.name}`;
+      } catch (e) {
+        result = `error: ${String(e)}`;
+      }
+      convo.push({ role: "tool", tool_call_id: c.id, content: typeof result === "string" ? result : JSON.stringify(result) });
+    }
   }
   return "";
 }

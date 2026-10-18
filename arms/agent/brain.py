@@ -527,7 +527,8 @@ class _BrainBase:
         LLM is configured or it fails / is slow (the caller falls back to the scripted reply)."""
         from utils import llm
 
-        if not llm.is_configured() or not store_id:
+        grok_key = _env("XAI_API_KEY")
+        if not store_id or not (llm.is_configured() or grok_key):
             return None
         catalog = self._services.catalog
         name = rt.robot_id
@@ -608,23 +609,34 @@ class _BrainBase:
         )
         history = self._chat.setdefault(rt.robot_id, deque(maxlen=6))
         messages = [*history, {"role": "user", "content": text}]
-        try:
-            res = await asyncio.wait_for(
-                llm.run_tool_loop(
-                    messages,
-                    tools,
-                    {"search_store": search_store, "where_is": where_is},
-                    system=system,
-                    kind="fast",
-                    max_iters=5,
-                    max_tokens=400,
-                ),
-                timeout=25,
+        handlers = {"search_store": search_store, "where_is": where_is}
+
+        async def via_grok() -> str:
+            return await _grok_tool_loop(grok_key, system, messages, tools, handlers)
+
+        async def via_llm() -> str:
+            res = await llm.run_tool_loop(
+                messages, tools, handlers, system=system, kind="fast", max_iters=5, max_tokens=400
             )
-        except Exception as exc:  # noqa: BLE001 - scripted fallback
-            log.warning("robot chat via LLM failed (%s); using the scripted reply", exc)
-            return None
-        reply = (res.text or "").strip()
+            return res.text or ""
+
+        # fastest first for a person standing at the robot: Grok (~1 s/turn) then the configured LLM (Gemini/Claude)
+        order = []
+        if grok_key and (_env("PICKY_CHAT_LLM") or "grok").lower() == "grok":
+            order.append(("grok", via_grok))
+        if llm.is_configured():
+            order.append(("llm", via_llm))
+        if grok_key and ("grok", via_grok) not in order:
+            order.append(("grok", via_grok))
+        reply = ""
+        for label, run in order:
+            try:
+                reply = (await asyncio.wait_for(run(), timeout=20)).strip()
+            except Exception as exc:  # noqa: BLE001 - try the next model, then the scripted reply
+                log.warning("robot chat via %s failed (%s)", label, exc)
+                continue
+            if reply:
+                break
         if not reply:
             return None
         history.append({"role": "user", "content": text})
@@ -1070,3 +1082,73 @@ def _pick(key: str, options: tuple[str, ...]) -> str:
     import zlib
 
     return options[zlib.crc32(key.encode()) % len(options)]
+
+
+def _env(name: str) -> str:
+    """A key from the process env or the repo's .env (keys that utils.config.Settings doesn't model, e.g. XAI)."""
+    import os
+
+    if name in os.environ:  # set, even blank (tests blank it to stay offline), wins over .env
+        return os.environ[name]
+    with contextlib.suppress(Exception):
+        from dotenv import dotenv_values
+
+        from utils.config import REPO_ROOT
+
+        return dotenv_values(REPO_ROOT / ".env").get(name) or ""
+    return ""
+
+
+async def _grok_tool_loop(
+    key: str,
+    system: str,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    handlers: dict[str, Any],
+    max_iters: int = 5,
+) -> str:
+    """xAI Grok (OpenAI-compatible chat completions) tool loop over the same Anthropic-shaped tool defs."""
+    import urllib.request
+
+    model = _env("PICKY_GROK_MODEL") or "grok-4.20-0309-non-reasoning"
+    defs = [
+        {
+            "type": "function",
+            "function": {
+                "name": t["name"],
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {"type": "object"}),
+            },
+        }
+        for t in tools
+    ]
+    convo: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    convo += [{"role": m["role"], "content": m["content"]} for m in messages]
+
+    def post(body: dict[str, Any]) -> dict[str, Any]:
+        req = urllib.request.Request(
+            "https://api.x.ai/v1/chat/completions",
+            data=json.dumps(body).encode(),
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return json.load(r)
+
+    for _ in range(max_iters):
+        data = await asyncio.to_thread(post, {"model": model, "messages": convo, "tools": defs, "max_tokens": 400})
+        msg = data["choices"][0]["message"]
+        calls = msg.get("tool_calls") or []
+        if not calls:
+            return msg.get("content") or ""
+        convo.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
+        for c in calls:
+            fn = c["function"]
+            try:
+                args = json.loads(fn.get("arguments") or "{}")
+                out = handlers[fn["name"]](args)
+                if asyncio.iscoroutine(out):
+                    out = await out
+            except Exception as exc:  # noqa: BLE001 - the model can recover
+                out = {"error": str(exc)}
+            convo.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps(out, default=str)})
+    return ""
