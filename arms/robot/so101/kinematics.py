@@ -38,9 +38,22 @@ class SO101Kinematics:
         target = np.array(xyz)
         heading = math.atan2(target[1], target[0])
         seeds = self._seeds(seed_deg)
-        for pitch_deg in (90, 75, 60, 45, 30, 15):
+        # Seeds with the base already turned toward the target: starting from a pose facing elsewhere, the solver
+        # often stalls in a local minimum for targets far to the side.
+        pan_i = next((i for i, n in zip(self.active, self.active_names, strict=True) if n == "shoulder_pan"), None)
+        if pan_i is not None:
+            for base in list(seeds[:2]):
+                for sign in (1.0, -1.0):
+                    s = base.copy()
+                    s[pan_i] = sign * heading
+                    seeds.insert(0, s)
+        # Vertical first, then tilted outward (+1) or inward toward the base (-1); inward tilts need less wrist bend,
+        # which matters when a joint's calibrated range is narrow.
+        tilts = [(90, 1.0)] + [(p, d) for p in (75, 60, 45, 30, 15) for d in (1.0, -1.0)]
+        for pitch_deg, direction in tilts:
             p = math.radians(pitch_deg)
-            approach = np.array([math.cos(p) * math.cos(heading), math.cos(p) * math.sin(heading), -math.sin(p)])
+            c = direction * math.cos(p)
+            approach = np.array([c * math.cos(heading), c * math.sin(heading), -math.sin(p)])
             q, err = self._solve(target, approach, seeds)
             out = {n: self._rad_to_deg(n, q[i]) for i, n in zip(self.active, self.active_names, strict=True)}
             within = all(
