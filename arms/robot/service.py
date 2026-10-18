@@ -321,6 +321,26 @@ class SimRobot:
         res = await self._isaac(spec, UnloadBasketCmd(cmd_id=new_id("cmd"), robot_id=robot_id))
         return [i.model_copy(update={"store_id": i.store_id or spec.store_id}) for i in res.instances]
 
+    # ---- extras for the VLA layer (arms/robot/vla.py; not in the RobotService Protocol) ------------------------------
+    def _on_isaac(self, robot_id: RobotId) -> bool:
+        return self._spec(robot_id).store_id in self._isaac_stores and self.is_connected()
+
+    def can_put_back(self, robot_id: RobotId) -> bool:
+        """Put-back exists only on the 2D fake (the 0.2 sim wire has no detach-on-shelf command)."""
+        return not self._on_isaac(robot_id)
+
+    async def put_back(self, robot_id: RobotId, slot_id: SlotId | None = None) -> RobotState:
+        if self._on_isaac(robot_id):
+            raise RobotError("internal", "no put-back primitive on Isaac (contracts 0.2 sim wire)")
+        return await self.fake.put_back(robot_id, slot_id)
+
+    async def grab_unit(
+        self, robot_id: RobotId, slot_id: SlotId, instance_id: InstanceId | None = None
+    ) -> ItemInstance:
+        if self._on_isaac(robot_id):
+            raise RobotError("internal", "grab_unit (wrong_item fault) exists only on the 2D fake")
+        return await self.fake.grab_unit(robot_id, slot_id, instance_id)
+
     async def sync_stock(self, store_id: StoreId, slot_ids: list[SlotId] | None = None) -> None:
         # the fake shelves always follow the catalog (they are the fallback world)
         try:
