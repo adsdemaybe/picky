@@ -31,6 +31,7 @@ import { Meter, Money, Panel, ProductTile, SectionTitle } from "@/components/pic
 import { MapLegend, StoreMap } from "@/components/StoreMap";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -201,9 +202,11 @@ function GatewayControls({ onRestart }: { onRestart: () => void }) {
   const { robotName, robotId, phase } = useTrip();
   const socket = useGateway((s) => s.socket);
   const [stopping, setStopping] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const name = robotName ?? "the robot";
   const stop = async () => {
-    if (!robotId || !window.confirm(`Stop ${name} where it is?`)) return;
+    setConfirming(false);
+    if (!robotId) return;
     setStopping(true);
     try {
       await gw.stopRobot(robotId);
@@ -223,9 +226,25 @@ function GatewayControls({ onRestart }: { onRestart: () => void }) {
         Live from the Picky gateway{robotName ? ` · ${robotName}` : ""}
       </span>
       {robotId && phase !== "done" && (
-        <Button variant="ghost" size="sm" onClick={stop} disabled={stopping}>
-          <Ban /> Stop robot
-        </Button>
+        <Dialog open={confirming} onOpenChange={setConfirming}>
+          <DialogTrigger asChild>
+            <Button variant="ghost" size="sm" disabled={stopping}>
+              <Ban /> Stop robot
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Stop {name} where it is?</DialogTitle>
+              <DialogDescription>It halts right away and this trip ends. Nothing is charged.</DialogDescription>
+            </DialogHeader>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="outline">Keep shopping</Button>
+              </DialogClose>
+              <Button onClick={stop}>Stop {name}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
       <Button variant="ghost" size="sm" onClick={onRestart} className="ml-auto">
         <RotateCcw /> New trip
@@ -257,6 +276,12 @@ function LoginPanel() {
   );
 }
 
+/** Gateway reasons are lower-case fragments ("the in-store goal was cancelled: …"): show them as a sentence. */
+function sentence(s: string | null) {
+  const t = (s ?? "").trim();
+  return t ? t[0].toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? "" : ".") : "";
+}
+
 function ApprovalPanel() {
   const { approval, answer, receipt, phase, mode, source, tripState, error, approvalsLog } = useTrip();
   if (receipt) return <ReceiptPanel />;
@@ -265,7 +290,7 @@ function ApprovalPanel() {
       <Panel className="flex items-start gap-3 bg-tomato-wash p-5 text-[15px] text-tomato">
         <TriangleAlert className="mt-0.5 size-5 shrink-0" aria-hidden />
         <span>
-          <span className="font-semibold">The trip stopped.</span> {error ?? "The robot couldn't finish."} Nothing was charged.
+          <span className="font-semibold">The trip stopped.</span> {sentence(error) || "The robot couldn't finish."} Nothing was charged.
         </span>
       </Panel>
     );
@@ -577,7 +602,8 @@ function StopList() {
                 key={id}
                 layout
                 animate={active ? { scale: [1, 1.015, 1] } : { scale: 1 }}
-                transition={active ? { duration: 1.6, repeat: Infinity } : undefined}
+                // the pulse repeats; scope it to scale so the row's layout move (approval card in/out) still settles
+                transition={active ? { scale: { duration: 1.6, repeat: Infinity } } : undefined}
                 className={cn("flex items-center gap-3 rounded-xl p-2.5 transition-colors", active && "bg-sky-wash")}
               >
                 <span

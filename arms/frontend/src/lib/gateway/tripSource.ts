@@ -304,6 +304,7 @@ async function apply(store: TripApi, ev: GatewayEvent) {
       else if (s.robot.status === "waiting" || s.robot.status === "done") patch.robot = { ...s.robot, status: "idle" };
       if (ev.to_state === "failed") {
         patch.error = ev.reason || "The trip failed";
+        patch.activeStop = null; // nothing is in progress any more (Stop robot, cancelled goal)
         toast.error(`Trip failed: ${patch.error}`);
       }
       if (atCheckout(ev.to_state) && s.stops.end) Object.assign(patch, { activeStop: "end", stopStatus: { ...s.stopStatus, end: "done" } });
@@ -521,6 +522,7 @@ async function hydrate(store: TripApi, trip: Trip) {
   });
   if (trip.route) applyRoute(store, trip.route, false, trip.stop_status, trip.current_stop_id);
   if (atCheckout(trip.state) && store.getState().stops.end) store.setState((st) => ({ activeStop: "end", stopStatus: { ...st.stopStatus, end: "done" } }));
+  if (trip.state === "failed") store.setState({ activeStop: null });
   if (robotId && robotId !== boundRobot) bindRobot(store, robotId);
 }
 

@@ -295,7 +295,8 @@ export function approvalFromContract(r: ApprovalRequest, ctx: { pick?: PickChoic
     title: r.title,
     body: r.body,
     sku: r.sku ?? undefined,
-    amount_cents: r.amount_cents ?? undefined,
+    // over_threshold titles already quote the price ("Ground Beef ($10.98) puts you …"): don't repeat it
+    amount_cents: r.amount_cents != null && !r.title.includes(fmt(r.amount_cents)) ? r.amount_cents : undefined,
     options: r.options.map((o) => ({ id: o.option_id, label: o.label, detail: o.detail ?? undefined })),
     multi: r.multi,
   };
