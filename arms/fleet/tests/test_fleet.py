@@ -12,6 +12,7 @@ import arms.fleet as fleet_arm
 from arms.fleet.core import FleetManager
 from arms.fleet.fake import FakeFleet
 from arms.fleet.tests.stubs import (
+    ESCALATED,
     SPECS,
     EventLog,
     StubAgent,
@@ -230,6 +231,75 @@ async def test_max_attempts_stops_reassigning(world: World):
     final = await world.fleet.get_goal(g.goal_id)
     assert final.status == GoalStatus.FAILED and final.attempts == MAX_GOAL_ATTEMPTS
     assert final.assignments[-1].outcome == "failed"
+
+
+async def test_escalated_goal_moves_to_the_free_robot_with_the_step_code(world: World):
+    """The agent hands a goal back with RobotError('unknown_robot', '<step code>: <why>'): the fleet records the
+    step's code, stops the failed robot and runs the goal on the other robot in the store."""
+    world.brain.behavior["rover-ave-1"] = "escalate"
+    plan = await world.fleet.submit_request(FleetRequest(text="tacos for 6", user_id="maya"))
+    tid = plan.trip_ids[0]
+    await until(lambda: tid in world.trips.results)
+    goal = world.trips.results[tid]
+    assert goal.status == GoalStatus.COMPLETED and goal.robot_id == "rover-ave-2"
+    assert [a.robot_id for a in goal.assignments] == ["rover-ave-1", "rover-ave-2"]
+    assert goal.assignments[0].note == "unsupported_step: " + ESCALATED.message.split(": ", 1)[1]
+    assert "rover-ave-1" in world.robot.stopped
+    pico = await world.fleet.get_robot("rover-ave-1")
+    assert pico.current_goal_id is None and pico.queued_goal_ids == [] and pico.available
+
+
+async def test_escalation_with_the_only_other_robot_stopped_fails_readably(world: World):
+    """Live trip B (goal_xrytx8eq, 12:03 PT): Pico stopped from the web app, Rhea escalates the put-back. The goal
+    must fail at once with a reason the shopper can read (not 'unknown_robot'), and Rhea must be free again."""
+    await world.fleet.stop_robot("rover-ave-1")
+    world.brain.behavior["rover-ave-2"] = "escalate"
+    plan = await world.fleet.submit_request(FleetRequest(text="tacos for 6", user_id="maya"))
+    tid = plan.trip_ids[0]
+    await until(lambda: tid in world.trips.results)
+    goal = world.trips.results[tid]
+    assert goal.status == GoalStatus.FAILED and goal.failure_code == "unsupported_step"
+    assert "unknown_robot" not in (goal.error or "")
+    assert goal.error == (
+        "Rhea could not finish: no place-back primitive on this backend (T0 over the 0.2 sim wire); "
+        "no other robot at Picky Market - The Ave can take over (Pico is stopped)"
+    )
+    assert world.events.of("goal.failed")[-1].reason == goal.error
+    rhea = await world.fleet.get_robot("rover-ave-2")
+    assert rhea.current_goal_id is None and rhea.queued_goal_ids == [] and rhea.available
+
+
+async def test_stopping_the_queued_robot_never_hands_the_goal_back_to_the_failed_one(world: World):
+    """Live trip A (goal_bu7gy5gm, 11:57 PT): Rhea escalated, the goal queued behind busy Pico, then Pico was stopped
+    from the web app. stop_robot used to move the goal straight back to Rhea (the robot that had just failed it, still
+    holding the salsa) and its driver then waited for Pico's resume forever: 'assigned' for good. Now the goal ends
+    failed with the reason and neither robot keeps it."""
+    world.brain.behavior["rover-ave-1"] = "block"
+    other = await world.fleet.create_goal(GoalSpec(kind="shelf_scan", robot_id="rover-ave-1"))
+    await until(lambda: world.brain.runs)
+    world.brain.behavior["rover-ave-2"] = "escalate"
+    plan = await world.fleet.submit_request(FleetRequest(text="tacos for 6", user_id="maya"))
+    gid, tid = plan.goals[0].goal_id, plan.trip_ids[0]
+    assert plan.goals[0].robot_id == "rover-ave-2"  # Pico is busy
+    await until(lambda: world.fleet._goals[gid].robot_id == "rover-ave-1")  # Rhea escalated: queued behind Pico
+    assert world.fleet._goals[gid].status == GoalStatus.ASSIGNED
+    assert (await world.fleet.get_robot("rover-ave-1")).queued_goal_ids == [gid]
+
+    await world.fleet.stop_robot("rover-ave-1", "stopped from the web app")
+    assert (await world.fleet.get_goal(other.goal_id)).status == GoalStatus.CANCELLED
+    await until(lambda: tid in world.trips.results)
+    goal = world.trips.results[tid]
+    assert goal.status == GoalStatus.FAILED and goal.failure_code == "unsupported_step"
+    assert [a.robot_id for a in goal.assignments] == ["rover-ave-2", "rover-ave-1"]  # never back to Rhea
+    assert goal.error == (
+        "Rhea could not finish: no place-back primitive on this backend (T0 over the 0.2 sim wire); "
+        "no other robot at Picky Market - The Ave can take over (Pico is stopped)"
+    )
+    assert [r for r, g in world.brain.runs if g == gid] == ["rover-ave-2"]
+    for rid in ("rover-ave-1", "rover-ave-2"):
+        info = await world.fleet.get_robot(rid)
+        assert info.current_goal_id is None and info.queued_goal_ids == [], rid
+    assert (await world.fleet.get_robot("rover-ave-2")).available
 
 
 async def test_execute_trip_without_robot_fails_no_robot(world: World):
