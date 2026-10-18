@@ -36,6 +36,8 @@ generated/
 outputs/
 recordings/
 runs/steer_policy.json
+# SO-101 run videos are 7-14 MB each: keep them out of git (the originals are on arm/robot @ 0dbc9fd, PR #6)
+runs/**/*.mp4
 pitch/
 last_*.jpg
 
