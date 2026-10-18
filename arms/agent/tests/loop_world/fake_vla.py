@@ -7,7 +7,8 @@ place -> robot.place_in_basket · handoff -> robot.unload_basket. RobotError cod
 
 ``simulate_t1=True`` advertises a simulated T1 tier (same motions, policy-style chunk counters) so tier selection, the
 policy_unavailable fallback and the breaker can be demoed without vhagar. Faults (layer 'vla'): drop_after_lift,
-grasp_miss, wrong_item (2D overlay), place_miss, nav_blocked, vla_hang, policy_unavailable, disconnect.
+grasp_miss, wrong_item (2D overlay), place_miss, nav_blocked, vla_hang, policy_unavailable, disconnect, mislabel (the
+held unit's label reads ``params.text``, as the robot arm's T0 does).
 """
 
 import asyncio
@@ -25,7 +26,7 @@ T0_KINDS = ["navigate_to", "align", "grasp", "place", "handoff"]
 VLA_EFFECTS: dict[str, list[FaultEffect]] = {
     "navigate_to": ["nav_blocked", "disconnect", "vla_hang"],
     "align": ["disconnect", "vla_hang"],
-    "grasp": ["drop_after_lift", "grasp_miss", "wrong_item", "disconnect", "vla_hang"],
+    "grasp": ["drop_after_lift", "grasp_miss", "wrong_item", "mislabel", "disconnect", "vla_hang"],
     "place": ["place_miss", "disconnect", "vla_hang"],
     "handoff": ["vla_hang"],
 }
@@ -175,6 +176,14 @@ class FakeVla:
             await asyncio.sleep(ex.request.heartbeat_s)
             if not ex.silent:
                 await self._emit(ex, phase="running", stage=ex.stage, progress=ex.progress, message="heartbeat")
+
+    def _mislabel(self, held: Any, fault_id: str) -> None:
+        """The held unit's label reads the rule's ``params.text`` (the fake camera / truth read the overlay)."""
+        faults = getattr(self.s, "faults", None)
+        rule = faults.rule(fault_id) if faults is not None and hasattr(faults, "rule") else None
+        overlay = getattr(faults, "overlay", None)
+        if overlay is not None and held is not None:
+            overlay.mislabels[held.instance_id] = str((rule.params.get("text") if rule else None) or "UNKNOWN LABEL")
 
     async def _consult(self, ex: _Exec, tier: VlaTier, effects: list[FaultEffect]) -> dict[str, str]:
         faults = getattr(self.s, "faults", None)
@@ -441,7 +450,9 @@ class FakeVla:
                         return f"grasped {target.sku}"  # the CLAIM; it actually holds the neighbour
             if target.slot_id is None:
                 raise _Fail("unsupported_step", "T0 grasp needs a slot")
-            await robot.pick(rid, target.slot_id, target.sku, inst)
+            held = await robot.pick(rid, target.slot_id, target.sku, inst)
+            if "mislabel" in effects:
+                self._mislabel(held, effects["mislabel"])
             await self._stage(ex, "lifting", 0.9)
             return f"grasped {target.sku}"
         if step.kind == "place":

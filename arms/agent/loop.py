@@ -85,6 +85,7 @@ from contracts.plan import (
 from contracts.planogram import counter_spots
 from contracts.policy import (
     ACTION_INSERTS,
+    ACTION_PHRASES,
     ACTION_RERUNS_STEP,
     COMMIT_ON_VERIFIED,
     DEFAULT_RETRY_POLICY,
@@ -140,6 +141,13 @@ MAX_DROPOFFS = 3
 """Basket drop-offs per run (a full basket before a grasp: checkout, unload, back), as in the v0.2 brain."""
 _SET_ASIDE = "set_aside"  # photo check: wrong unit, no put-back -> basket for staff (uncounted) + grab another
 _ASIDE_NOTE = "set aside for staff, not charged"
+_RETURN_ACTIONS = ("return_item", "return_held")
+_ASIDE_PHRASES = {
+    "return_item": f"no put-back here: {_ASIDE_NOTE}, taking another one",
+    "return_held": f"no put-back here: the unit it is holding is {_ASIDE_NOTE}",
+}
+"""What a wrong-unit recovery says instead of ACTION_PHRASES['return_item' / 'return_held'] on a backend that cannot
+put a unit back on its shelf (Isaac T0 over the 0.2 sim wire): the unit goes in the basket for staff, uncharged."""
 
 
 class _AsideUnit(NamedTuple):
@@ -150,6 +158,23 @@ class _AsideUnit(NamedTuple):
     unit: int | None
     sku: str
     instance_id: str | None
+    name: str | None = None  # product words for the unit (it may be another SKU than its item's)
+
+
+def _unit_words(plan: StepPlan, sku: str, target: TargetSpec | None = None) -> str | None:
+    """Shopper words for a unit of ``sku`` ('Casa Verde Black Beans 15 oz'), never the raw SKU: the target's
+    description, else a plan item / grasp target of that SKU. None = nothing in the plan names it."""
+    if target is not None and target.sku == sku and target.description:
+        return target.description
+    described = next(
+        (
+            s.target.description
+            for s in plan.steps
+            if isinstance(s, GraspStep) and s.target.sku == sku and s.target.description
+        ),
+        None,
+    )
+    return described or next((it.name for it in plan.items if it.sku == sku and it.name), None)
 
 
 def _basket_capacity(robot_id: str) -> int:
@@ -247,6 +272,8 @@ class _Run:
         self.set_aside: set[str] = set()  # basket place steps carrying a unit the shopper marked wrong: never counted
         self.aside_units: list[_AsideUnit] = []  # set-aside units in the basket now (a drop-off hands them to staff)
         self.aside_groups: set[str] = set()  # 'unload:<n>' groups unloading a set-aside unit (never charged)
+        self.aside_names: dict[str, str] = {}  # aside 'unload:<n>' group -> product words of its unit
+        self.no_put_back = False  # a shelf put-back failed 'unsupported_step' here: set every later wrong unit aside
 
 
 class PlanLoop:
@@ -826,7 +853,14 @@ class PlanLoop:
             }
             if step.step_id in run.set_aside:  # in the basket for staff: the checkout unload puts it on the counter
                 run.aside_units.append(
-                    _AsideUnit(step.step_id, step.item_id, step.unit, step.sku, unit.instance_id if unit else None)
+                    _AsideUnit(
+                        step.step_id,
+                        step.item_id,
+                        step.unit,
+                        step.sku,
+                        unit.instance_id if unit else None,
+                        _unit_words(plan, step.sku) or await self._product_words(step.sku),
+                    )
                 )
             run.held = None
             await self._basket_event(run, pending_sku=step.sku)  # this unit's ledger record lands after we return
@@ -1021,6 +1055,39 @@ class PlanLoop:
         decision = decide_recovery(policy, rctx)
         if _unload_group(step):
             decision = await self._unload_decision(run, step, failure, decision)
+        # no put-back on this backend (Isaac T0 over the 0.2 sim wire): a wrong unit is never put back on its shelf.
+        # It goes in the basket for staff (never charged) and another unit is grabbed, as for a photo-check 'wrong'
+        # (#38), instead of a put-back step the robot cannot run ('Try again?' -> escalate, the trip stranded).
+        aside = run.mode == "plan" and decision.action in _RETURN_ACTIONS and not self._put_back_ok(run, caps)
+        convert = (
+            run.mode == "plan"
+            and isinstance(step, PlaceStep)
+            and step.destination == "shelf"
+            and failure.code == "unsupported_step"
+        )
+        if aside:
+            phrase = ACTION_PHRASES[decision.action]
+            decision = decision.model_copy(
+                update={"reason": decision.reason.replace(phrase, _ASIDE_PHRASES[decision.action])}
+            )
+        elif convert:  # a put-back was planned (the capability said yes) but the backend has no primitive for it
+            run.no_put_back = True
+            decision = decision.model_copy(
+                update={
+                    "action": "retry",
+                    "rule_id": "no_put_back",
+                    "insert": [],
+                    "rerun_failed_step": True,
+                    "next_tier": None,
+                    "open_breaker": None,
+                    "backoff_s": 0.0,
+                    "budget_exhausted": False,
+                    "next_attempt": None,
+                    "inner": True,
+                    "reason": f"{step.kind} failed: {failure.message or failure.code}; putting it in the basket "
+                    f"instead: {_ASIDE_NOTE}",
+                }
+            )
         rid = decision.rule_id or "_fallback"
         run.rule_failures[step.step_id][rid] = run.rule_failures[step.step_id].get(rid, 0) + 1
         att.decision = decision
@@ -1055,8 +1122,13 @@ class PlanLoop:
                 await asyncio.sleep(decision.backoff_s)
             if decision.next_tier:
                 run.next_tier[step.step_id] = decision.next_tier
-            held_unit = await self._held_unit(run) if action in ("return_item", "return_held") else None
-            inserts = self._inserts(run, i, decision.action, failure, held_unit)
+            held_unit = await self._held_unit(run) if action in _RETURN_ACTIONS or convert else None
+            if convert:
+                assert isinstance(step, PlaceStep)
+                self._to_aside_place(run, step)
+            inserts = self._inserts(run, i, decision.action, failure, held_unit, aside=aside)
+            if (convert or any(s.step_id in run.set_aside for s in inserts)) and held_unit is not None:
+                run.held = held_unit  # the set-aside place's record_pick books THIS unit (its own slot / lot)
             plan.steps[i:i] = inserts
             step.status = StepStatus.PENDING
             run.metrics.retries += 1
@@ -1244,8 +1316,18 @@ class PlanLoop:
         return "replanned"
 
     def _inserts(
-        self, run: _Run, i: int, action: str, failure: StepFailure, held_unit: ItemInstance | None = None
+        self,
+        run: _Run,
+        i: int,
+        action: str,
+        failure: StepFailure,
+        held_unit: ItemInstance | None = None,
+        *,
+        aside: bool = False,
     ) -> list[PlanStep]:
+        """Recovery steps for ``action`` (ACTION_INSERTS) before the failed step. ``aside`` (no put-back on this
+        backend): return_item / return_held put the HELD unit in the basket flagged set aside (record_pick only: never
+        item progress or a cart line) instead of on its shelf; nothing to set aside when the gripper is empty."""
         plan, step = run.plan, run.plan.steps[i]
         kinds = ACTION_INSERTS.get(action, ())
         if not kinds:
@@ -1365,7 +1447,12 @@ class PlanLoop:
                 label = (target.description if target is not None and target.sku == sku else None) or next(
                     (it.name for it in plan.items if it.sku == sku and it.name), None
                 )
-                if action in ("return_item", "return_held"):
+                if action in _RETURN_ACTIONS and aside:
+                    if held_unit is None:  # the gripper is empty after all: nothing to set aside
+                        continue
+                    out.append(PlaceStep(step_id=sid, sku=sku, **self._aside_place_fields(run, sku, target), **common))
+                    run.set_aside.add(sid)
+                elif action in _RETURN_ACTIONS:
                     # back to the HELD unit's own slot (ItemInstance.slot_id), else a planned slot of that SKU
                     slot = (held_unit.slot_id if held_unit is not None else None) or next(
                         (s.target.slot_id for s in plan.steps if isinstance(s, GraspStep) and s.target.sku == sku),
@@ -1396,6 +1483,35 @@ class PlanLoop:
                         )
                     )
         return out
+
+    def _put_back_ok(self, run: _Run, caps: list[VlaCapabilities]) -> bool:
+        """Can a held unit go back on its shelf here? No when T0 says so (Isaac: no place-back primitive over the 0.2
+        sim wire) or a put-back already failed 'unsupported_step' in this run."""
+        if run.no_put_back:
+            return False
+        t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
+        return t0 is None or t0.place_back
+
+    @staticmethod
+    def _aside_place_fields(run: _Run, sku: str, target: TargetSpec | None = None) -> dict[str, Any]:
+        """A place of the held (wrong) unit into the basket, set aside for staff: what replaces a put-back."""
+        label = _unit_words(run.plan, sku, target)
+        pre, post = default_conditions("place", sku=sku)
+        return {
+            "title": f"Put the {label or 'wrong item'} in the basket: {_ASIDE_NOTE}",
+            "instruction": f"put the {label or 'item'} in the basket",
+            "destination": "basket",
+            "slot_id": None,
+            "preconditions": pre,
+            "postconditions": post,
+        }
+
+    def _to_aside_place(self, run: _Run, step: PlaceStep) -> None:
+        """A planned put-back the backend cannot run becomes that set-aside place (same step id, re-run): the unit
+        rides in the basket uncounted (record_pick only) and the checkout unload hands it to staff on the counter."""
+        for field, value in self._aside_place_fields(run, step.sku).items():
+            setattr(step, field, value)
+        run.set_aside.add(step.step_id)
 
     async def _breaker(self, run: _Run, failure: StepFailure, decision: RecoveryDecision) -> None:
         tier = failure.tier
@@ -2101,14 +2217,13 @@ class PlanLoop:
         )
         if answer == VERIFY_WRONG:
             run.rejections[key] += 1
-            caps = await self._caps(run)
-            t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
+            put_back = self._put_back_ok(run, await self._caps(run))
             limit = int(setting("picky_verify_max_rejections", 1) or 1)
-            if t0 is not None and not t0.place_back and run.rejections[key] <= limit:
+            if not put_back and run.rejections[key] <= limit:
                 # no put-back (Isaac): the wrong unit rides in the basket uncounted (never charged), another is grabbed
                 await self._mirror(run, step, f"marked wrong: {_ASIDE_NOTE}")
                 return _SET_ASIDE
-            if run.rejections[key] > limit or (t0 is not None and not t0.place_back):
+            if run.rejections[key] > limit or not put_back:
                 await self._mirror(run, step, "marked wrong: keeping it for staff to swap at the counter")
                 return VERIFY_CORRECT
         else:
@@ -2168,13 +2283,12 @@ class PlanLoop:
         step = run.plan.steps[i]
         assert isinstance(step, GraspStep)
         chosen = step.target.instance_id
-        caps = await self._caps(run)
-        t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
+        put_back = self._put_back_ok(run, await self._caps(run))
         item = run.plan.item(step.item_id)
         name = (item.name if item is not None else None) or step.target.description or step.target.sku
         log.info("%s: grabbed %s, not the chosen %s", step.step_id, held.instance_id, chosen)
         await self._mirror(run, step, f"grabbed a different {name} than the one you chose", ok=False)
-        if t0 is not None and not t0.place_back and self._set_aside(run, i):
+        if not put_back and self._set_aside(run, i):
             for s in run.plan.steps:
                 if s.inserted_by == step.step_id and s.status == StepStatus.PENDING:
                     if isinstance(s, GraspStep | GroundTargetStep):
@@ -2208,7 +2322,7 @@ class PlanLoop:
             (st.target.sku for st in run.plan.steps if st.group_id == step.group_id and isinstance(st, GraspStep)), ""
         )
         item = run.plan.item(step.item_id)
-        name = (item.name if item is not None else None) or sku
+        name = run.aside_names.get(step.group_id or "") or (item.name if item is not None else None) or sku
         ref = await self._photo(run, att, ["front"])
         auto_s = max(1.0, float(setting("picky_verify_auto_accept_s", 20.0) or 20.0))
         aside = step.group_id in run.aside_groups  # flagged, never bought: its photo stays off the purchase rows
@@ -2326,7 +2440,9 @@ class PlanLoop:
             grasp = next(st for st in members[gid] if isinstance(st, GraspStep))
             sku = grasp.target.sku
             on_counter[sku] += 1
-            name = (plan.item(grasp.item_id).name if plan.item(grasp.item_id) else None) or sku
+            name = (
+                run.aside_names.get(gid) or (plan.item(grasp.item_id).name if plan.item(grasp.item_id) else None) or sku
+            )
             head = f"Unloading {n}/{total}: {name}" + (f" ({_ASIDE_NOTE})" if gid in run.aside_groups else "")
             first: PlanStep | None = None
             for st in members[gid]:
@@ -2411,7 +2527,8 @@ class PlanLoop:
             n += 1
             gid = f"unload:{n}"
             item = plan.item(a.item_id)
-            name = (item.name if item is not None else None) or a.sku
+            name = (item.name if item is not None and item.sku == a.sku else None) or a.name or a.sku
+            run.aside_names[gid] = name
             base = next(
                 (
                     st.target
@@ -2547,7 +2664,12 @@ class PlanLoop:
                 if st.group_id == gid and isinstance(st, GraspStep):
                     sku = st.target.sku
                     break
-        name = (run.plan.item(step.item_id).name if run.plan.item(step.item_id) else None) or sku or "item"
+        name = (
+            run.aside_names.get(gid)
+            or (run.plan.item(step.item_id).name if run.plan.item(step.item_id) else None)
+            or sku
+            or "item"
+        )
         spot = next(
             (
                 st.counter.index
@@ -2595,6 +2717,15 @@ class PlanLoop:
             except KeyError:
                 run.caps = []
         return run.caps
+
+    async def _product_words(self, sku: str) -> str | None:
+        """'Brand Name' of a SKU from the catalog (a set-aside unit no plan step names); None when unknown."""
+        catalog = getattr(self.s, "catalog", None)
+        try:
+            p = await catalog.get_product(sku) if catalog is not None else None
+        except Exception:  # noqa: BLE001 - a label only: the raw SKU is the fallback
+            return None
+        return f"{p.brand or ''} {p.name}".strip() if p is not None else None
 
     async def _held_unit(self, run: _Run) -> ItemInstance | None:
         truth = getattr(self.s, "truth", None)
