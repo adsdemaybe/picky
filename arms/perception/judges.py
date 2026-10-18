@@ -8,8 +8,10 @@ The vision model only reports what it sees (boxes, points, yes/no, text); CODE d
   in the jaws counts) and (2) the answer to "is the gripper empty?". Both agree -> confidence 0.9 (may override robot
   state), one cue -> 0.7 (never overrides state), cues disagree -> uncertain. The held box's ``mention`` names the
   product (``match_mention_to_sku``; ambiguous = unknown, never a match).
-- label_matches: OCR text contains ``expect_text`` (casefold) -> pass; text read but no match -> fail (evidence =
-  the text); nothing read -> uncertain.
+- label_matches: OCR text contains ``expect_text`` (casefold) -> pass; a substantial read that names ANOTHER product
+  sold in this store (``catalog_match`` over the store's catalog) -> fail (evidence = the text); a read that resembles
+  nothing sold here ('Nike Air Max 270' in a supermarket: a hallucination off a dark / blocked frame) or nothing read
+  -> uncertain, never a wrong-item fail.
 - basket_delta / basket_contains: per-SKU box counts on the basket frame (before-count from the baseline's basket
   frame, else the baseline's state counts at lower confidence). Occlusion-aware: fewer units than expected in a basket
   that already holds others (delta), or a subset of the expected units with nothing foreign (contains), is uncertain
@@ -67,6 +69,10 @@ LABEL_PASS_OVERLAP = 0.5
 """label_matches passes when at least this share of the expected name's significant words is read."""
 LABEL_FAIL_MIN_TOKENS = 2
 """label_matches fails only on a read with at least this many significant words and none of the expected ones."""
+CATALOG_MATCH_MIN = 0.5
+"""A read resembles a catalog product when at least this share of the product's significant words is read, or this
+share of the read's words is in the product's name."""
+OFF_CATALOG_CONFIDENCE = 0.3
 MIN_EMPTY_CONFIDENCE = 0.5
 GENERIC_HELD_CLASS = "other grocery item"
 
@@ -85,6 +91,9 @@ class CameraAnswers:
     before_frame: FrameRef | None = None
     tag: VisionAnswer | None = None
     names: dict[Sku, str] = field(default_factory=dict)
+    catalog: dict[Sku, str] = field(default_factory=dict)
+    """SKU -> label words of every product sold in this store (label_matches: is a mismatching read a real product?).
+    Empty = unknown: ``names`` stand in, and with neither a mismatching read fails as before."""
 
 
 def _av(
@@ -242,10 +251,29 @@ def label_overlap(expect: str, text: str) -> float:
     return len(want & _label_tokens(text)) / len(want)
 
 
+def catalog_match(text: str, catalog: Mapping[Sku, str]) -> tuple[Sku | None, float]:
+    """The store product an OCR read most resembles -> (sku, score); score = the larger of the share of the product's
+    significant words found in the read and the share of the read's words found in the product's name."""
+    read = _label_tokens(text)
+    best: tuple[Sku | None, float] = (None, 0.0)
+    if not read:
+        return best
+    for sku, name in catalog.items():
+        want = _label_tokens(name)
+        if not want:
+            continue
+        common = len(want & read)
+        score = max(common / len(want), common / len(read))
+        if score > best[1]:
+            best = (sku, score)
+    return best
+
+
 def judge_label(path: str, atom: LabelMatches, ans: CameraAnswers, method: VerifyMethod) -> AtomVerdict | None:
     """Pass when the expected name is in the text, or at least half of its significant words are; FAIL only on a
-    substantial read that shares none of them; anything in between (or a template-only / empty read) is uncertain.
-    A partial read ('MILD CHUNKY SALSA' without the size) or a cut-off label must not trigger a put-back."""
+    substantial read that shares none of them AND names a product sold in this store; anything in between (or a
+    template-only / empty read, or a read that resembles nothing in the store's catalog) is uncertain. A partial read
+    ('MILD CHUNKY SALSA' without the size), a cut-off label or a hallucinated one must not trigger a put-back."""
     if not answer_ok(ans.label) or ans.label is None:
         return None
     text = (ans.label.text or "").strip()
@@ -261,6 +289,24 @@ def judge_label(path: str, atom: LabelMatches, ans: CameraAnswers, method: Verif
     )
     if ok:
         return _av(path, atom, "pass", f"label reads {text!r}", TEXT_MATCH_CONFIDENCE, method, [ev], {"label": text})
+    catalog = {**ans.names, **ans.catalog}
+    read_sku, score = catalog_match(content, catalog) if catalog else (None, 1.0)
+    if catalog and (read_sku is None or score < CATALOG_MATCH_MIN):
+        # Nothing sold here looks like this read: the OCR saw no real label (dark / blocked frame, wrong camera) and
+        # made one up. Uncertain -> robot state / ground truth decide; never a put-back on a hallucination.
+        return _av(
+            path,
+            atom,
+            "uncertain",
+            f"label read {text!r} matches nothing sold in this store (unreliable read; expected {atom.expect_text!r})",
+            OFF_CATALOG_CONFIDENCE,
+            method,
+            [ev.model_copy(update={"matches_expectation": None})],
+            {"label": text, "off_catalog": True},
+        )
+    observed: dict[str, Any] = {"label": text}
+    if read_sku is not None:
+        observed["read_sku"] = read_sku
     return _av(
         path,
         atom,
@@ -269,7 +315,7 @@ def judge_label(path: str, atom: LabelMatches, ans: CameraAnswers, method: Verif
         TEXT_MISMATCH_CONFIDENCE,
         method,
         [ev],
-        {"label": text},
+        observed,
     )
 
 
@@ -445,6 +491,7 @@ def judge_shelf_tag(path: str, atom: ShelfTagReads, ans: CameraAnswers, method: 
 __all__ = [
     "GENERIC_HELD_CLASS",
     "CameraAnswers",
+    "catalog_match",
     "gripper_reading",
     "held_boxes",
     "judge_basket_contains",

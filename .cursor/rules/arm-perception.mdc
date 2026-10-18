@@ -58,6 +58,10 @@ Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_fac
       (mock-client tests + real-SDK tests over an in-process HTTP transport; not run live: no `PERCEPTRON_API_KEY` yet)
 - [x] **P1** Grounding: detect + point → box + grasp point → `instance_id` of the unit under the point (sim) (fake provider)
 - [x] **P1** `providers()` for `GET /api/verifier/providers` (calls, errors, p50, agreement with sim ground truth)
+- [x] **P0** Frame trust (`frame_trust.py`): vision never judges a frame from another camera / robot / store or one
+      reused from another step (treated as stale), nor a dark frame (>= 95 % black: ground truth / state decide); a
+      label read that resembles nothing sold in the store is 'uncertain', never a wrong item; the verdict reason names
+      the skipped frame and why (vhagar goal_bu7gy5gm: Nike read off a black wrist frame -> false put-back) (fake provider)
 - [ ] **P1** Calibrate `GRIPPER_ROI_WRIST` on the Isaac wrist camera, then flip Isaac stores to `decide` at >= 90 %
       agreement (needs a key + vhagar)
 - [ ] **P2** General-VLM fallback provider (`PICKY_VISION_PROVIDER=gemini|claude`): not built (raises → fake verifier)
@@ -126,8 +130,10 @@ undecodable frame becomes a placeholder card. `observe` sends only blurred frame
 - `truth.py` — `LocalTruth`: `TruthSnapshot` from v0.2 Protocols when the robot arm's `TruthSource` is not wired
 - `verifier_fake.py` — `VerifierBase` (frames, per-frame truth, faults, baseline, ground-truth grounding) + `FakeVerifier`
 - `verifier.py` — `PerceptionVerifier` (modes, fusion, deadline, fallbacks, breaker, grounding) + `create_verifier`
-- `judges.py` — pure code: provider answers → camera-atom verdicts (gripper ROI + cue agreement, label, basket, shelf,
-  tag)
+- `judges.py` — pure code: provider answers → camera-atom verdicts (gripper ROI + cue agreement, label (+ store catalog
+  match: off-catalog read = uncertain), basket, shelf, tag)
+- `frame_trust.py` — which frames vision may judge: `frame_mismatch` (camera / robot / store), `FrameReuse` (same
+  frame for another step / after its pre-check), `dark_fraction` / `dark_reason` (Pillow thumbnail, luma < 24)
 - `vision/perceptron.py` — `PerceptronVisionProvider` (SDK 0.4.0); `vision/sidecar.py` — `SidecarVisionProvider`
   (deterministic answers from sidecars); `vision/common.py` — blur guard, yes/no parsing, grid helpers, stats
 - `loop_config.py` — verifier env vars through `utils.config.settings`
@@ -201,6 +207,10 @@ Fallback flag: drop `perception` (and `cameras`) from `PICKY_REAL_ARMS`. `camera
 - `perceptron` 0.4.0 pins `Pillow<12`, so the lock moved Pillow 13.0 → 11.3 for everyone (all tests pass on 11.3).
 - `EvidenceRing` aims 'front' with `RobotService.scan` (a motion command, ~0.6 s on the fake) only while the robot is
   idle; otherwise it falls back to a plain capture that may not look at the slot.
+- Frame trust: the dark threshold (95 % of pixels with luma < 24) is measured on a handful of Isaac frames (bad frame
+  0.971; dark but readable close-ups 0.888-0.895). A label read that shares a word with the expected name (the
+  neighbouring salsa) stays 'uncertain' (partial read), so a wrong unit of a similar product is caught by the gripper
+  detect mention, not by the label. Reuse is detected per retained frame (same id + capture time), not by pixels.
 
 ## How to contribute (this arm)
 Full flow: CLAUDE.md §5. Short version: work on branch `arm/perception` (after merge: `feat/perception-<slug>` /
