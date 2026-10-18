@@ -214,13 +214,18 @@ gh repo clone adsdemaybe/picky && cd picky
 make setup               # uv sync --locked (base deps + dev tools)
 cp .env.example .env     # every key is optional; blank = fakes
 make check               # lint, format check, rules check, tests (what CI runs)
-make demo                # headless trip 1 → follow-up → trip 2, all arms fake; ends with "DEMO OK"
+make demo                # headless trip 1 → follow-up → trip 2, all arms fake; ends with "DEMO OK" + "LOOP OK"
 make dev                 # gateway on http://localhost:8000
 make web                 # the web app on :3000 (needs pnpm on PATH; or the npx commands in "The web app")
 ```
 
-Then open **http://localhost:8000/debug** (a built-in test page: fleet, cameras, stock alerts, a request box and the
-trip view; `/` redirects there) and **http://localhost:8000/docs** (interactive API docs). `make help` lists every
+`make demo` runs the shop goals through the planner → VLA → verifier loop (contracts 0.2.1) and injects one bad grasp
+(`drop_on_first_grasp`): the summary shows the verifier catching it and the retry succeeding.
+`make demo ARGS="--exec-mode direct"` is the v0.2 brain path (`PICKY_EXEC_MODE=direct` is the kill switch).
+
+Then open **http://localhost:8000/debug** (a built-in test page: fleet, the step plan + VLA progress, the verifier's
+verdicts with evidence, cameras, stock alerts, a request box and the trip view; `/` redirects there; `PICKY_DEV=1 make
+dev` adds the presenter's fault controls) and **http://localhost:8000/docs** (interactive API docs). `make help` lists every
 target.
 
 **Browser test (optional).** `uv sync --group e2e && uv run --group e2e playwright install chromium`, then

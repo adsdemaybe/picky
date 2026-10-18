@@ -40,7 +40,7 @@ test: ## Run pytest (base deps; extras are importorskip'd)
 dev: ## Run the gateway API with reload (GATEWAY_HOST/GATEWAY_PORT from .env, default 0.0.0.0:8000)
 	uv run python -m arms.gateway.app --reload
 
-demo: ## Run the demo trips through the pipeline (fakes unless PICKY_REAL_ARMS is set; `make demo ARGS=--allow-errors`)
+demo: ## Run the demo trips (fakes unless PICKY_REAL_ARMS; ARGS="--allow-errors | --exec-mode direct | --faults wrong_salsa")
 	uv run python -m arms.gateway.demo $(ARGS)
 
 seed: ## Seed the DB from data/ (planograms + products); needs `make db-up`

@@ -57,6 +57,24 @@ arms meet.
   brain-step log + talk-to-robot, store map with route + every robot, camera grid (snapshot polling + up to 3 live
   MJPEG tiles), stock alerts with restock, approvals, cart, recs, events
 - [x] **P1** `export_schemas` → OpenAPI + events (incl. fleet / brain / stock / camera events) + client messages
+- [x] **P0** Planner -> VLA -> verifier loop (contracts 0.2.1): the registry builds `LOOP_SERVICE_FACTORIES` too
+  (`planner` / `runner` agent, `vla` / `truth` / `faults` robot, `verifier` / `evidence` perception; real when the
+  field or its arm is in `PICKY_REAL_ARMS`, a raising real factory falls back to its fake, an arm without the factory
+  = "not wired"; `loop=False` for none). `PICKY_EXEC_MODE` blank = plan once the VLA + verifier are wired,
+  `direct` = kill switch; `/health` `details.exec_mode` (+ `fault_scenario`)
+- [x] **P0** Loop REST (`contracts/api.md`): `GET /api/goals/{id}/plan`, `/api/plans/{id}` (+ `/run`, `/attempts`),
+  `POST /api/plans/{id}/cancel` (goal plans via `fleet.cancel_goal`, dev plans via the runner),
+  `GET /api/evidence/{frame_id}.jpg` (blurred only, `w`) + `/annotations` (index fed by `step.verified` /
+  `target.grounded` / `camera.overlay`), `GET /api/fleet/robots/{id}/vla`, `/api/vla/execs/{id}` (+ cancel),
+  `/api/verifier` (+ `PUT /mode`, `/providers`), `POST /api/verify`; dev only (`PICKY_DEV=1`): `/api/dev/faults`
+  (GET / POST / DELETE), `/api/dev/faults/scenario`, `/api/dev/plans`
+- [x] **P0** Loop events on `/ws` with the same filters (`plan_envelope`); live-only `camera.overlay` on `/ws/frames`,
+  `/ws/cameras/{id}` and `/ws/cameras`; the runner's mirrored `brain.step` in the brain log
+- [x] **P0** `make demo` beat: plan mode + `drop_on_first_grasp`; the summary prints the injected fault, the
+  verifier's catch (reason + who verified) and the successful retry; fails if the catch or the retry is missing
+- [x] **P1** `/debug`: plan panel (steps grouped per item, state, tries, tier, check), VLA progress bar, verifier
+  panel (badge, mode switch, "check basket", verdicts with evidence thumbnail + reason + "verified by Perceptron /
+  sim ground truth / robot state", the "Verifier caught it" card), presenter fault controls (dev only)
 - [ ] **P1** `/api/trips/{id}/voice` Deepgram STT → agent → TTS (implemented over httpx, untested without a key)
 - [ ] **P2** Trip / approval persistence (in memory; a restart forgets them)
 
@@ -65,16 +83,19 @@ arms meet.
 | | |
 |---|---|
 | Implements | `TripController` (`TripOrchestrator`), `ApprovalBroker` (`GatewayApprovalBroker`), `EventPublisher` (`GatewayPublisher` over `utils.events.EventBus`), `SimLink` (`SimLinkHub`, multi-worker) — `contracts/services.py`, `contracts/sim.py` |
-| Serves | every endpoint + WebSocket in `contracts/api.md`; client→server `/ws` = `api.ClientMessage` **plus** `{"type":"login","user_id":...,"robot_id"?}` |
+| Serves | every endpoint + WebSocket in `contracts/api.md` (incl. the 0.2.1 loop routes, `loop_api.py`); client→server `/ws` = `api.ClientMessage` **plus** `{"type":"login","user_id":...,"robot_id"?}` |
 | Emits | trip flow (`trip.*`, `intent.received`, `list.ready`, `sourcing.split`, `recs.ready`, `route.planned`, `stop.updated`, `cart.updated`, `approval.*`, `mandate.decision`, `checkout.completed`, `followup.sent`, `feedback.received`, `profile.updated`), `robot.state`, live `camera.frame` / legacy `frame`, `error` |
-| Calls | `fleet.start/shutdown/submit_request/execute_trip/...` · `brain.status/recent_steps` · `cameras.*` · `agent.expand_intent/source_list/respond/interpret_reply/compose_followup` · `catalog.*` (incl. categories + stock) · `recommender.*` · `routing.plan_route/grid_spec` · `robot.state/states/list_robots` · `trust.evaluate/checkout/record_transparency/ledger` · `messaging.*` |
+| Calls | loop: `runner.current_plan/get_plan/run_state/attempts/cancel/run_plan` · `planner.plan` · `vla.capabilities/get_exec/cancel` · `verifier.*` (+ `providers()` extra) · `evidence.get_frame` · `faults.*` (+ `scenario` / `rules` extras) · `fleet.start/shutdown/submit_request/execute_trip/...` · `brain.status/recent_steps` · `cameras.*` · `agent.expand_intent/source_list/respond/interpret_reply/compose_followup` · `catalog.*` (incl. categories + stock) · `recommender.*` · `routing.plan_route/grid_spec` · `robot.state/states/list_robots` · `trust.evaluate/checkout/record_transparency/ledger` · `messaging.*` |
 
 Stop ids: mandatory `item:<sku>` (mid-trip duplicates `item:<sku>:<item_id>`), optional `rec:<rec_id>`.
 
 ## How to run
 
 ```bash
-make demo                                   # all fakes, ~8 s, exits non-zero on failure
+make demo                                   # all fakes, ~12 s, plan mode + one injected bad grasp; non-zero on failure
+make demo ARGS="--faults wrong_salsa"       # or slow_vla | verifier_down | foggy_basket | flaky_t1 | none
+make demo ARGS="--exec-mode direct"         # the v0.2 brain path (kill switch), no step plans
+PICKY_DEV=1 make dev                        # + presenter routes /api/dev/faults*, /api/dev/plans (fault panel on /debug)
 uv run python -m arms.gateway.demo --no-staff --quiet
 PICKY_REAL_ARMS=brain make demo             # real robot brain (needs GEMINI_API_KEY), everything else fake
 make dev                                    # API on :8000 → open http://localhost:8000/debug
@@ -113,9 +134,15 @@ Several workers may connect at once; `GET /api/sim/status` shows which stores / 
 ## Known limitations
 
 - Trips, approvals and the event ring (last 1000 events) live in memory.
+- Loop: evidence annotations are an in-memory index of the last 500 frames. `/api/verifier/providers` uses the
+  verifier's `providers()` extra (else one row from `capabilities`). The fake evidence frames are synthetic (flat
+  thumbnails); real frames come with `PICKY_REAL_ARMS=perception`. `vla.status` is throttled by the runner (its
+  producer), not by the gateway. With fakes the fault scenario is loaded by the demo; on `make dev` set
+  `PICKY_FAULTS` or use the presenter panel (`PICKY_DEV=1`).
 - `make demo` fails on any `error` event, failed stop, non-completed goal, skipped pipeline state, a trip paid over
-  budget without an approved over-budget ask, no stock alert after the staff scan, or a request 2 that keeps the same
-  salsa / recs. For a real arm expected to degrade use `make demo ARGS=--allow-errors`.
+  budget without an approved over-budget ask, no stock alert after the staff scan, a request 2 that keeps the same
+  salsa / recs, or (plan mode) a shop trip without a completed step plan / a grasp fault that was not caught and
+  retried successfully. For a real arm expected to degrade use `make demo ARGS=--allow-errors`.
 - Checkout-batch picks are added as in-store lines at the checkout counter (the robot does not drive back for them).
 - Approvals go to the trip owner only (batched trips).
 - `assign_robot` publishes no event of its own (the fleet's `goal.assigned` carries the trip envelope).
