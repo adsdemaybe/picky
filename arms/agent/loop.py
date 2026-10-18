@@ -96,7 +96,15 @@ from contracts.policy import (
 from contracts.services import exec_mode, run_vla_to_terminal
 from contracts.shopping import CartLine
 from contracts.sim import ItemInstance, RobotError
-from contracts.trust import ApprovalKind, ApprovalOption, ApprovalRequest, ApprovalResponse
+from contracts.trust import (
+    VERIFY_CORRECT,
+    VERIFY_WRONG,
+    ApprovalKind,
+    ApprovalOption,
+    ApprovalRequest,
+    ApprovalResponse,
+    ItemVerification,
+)
 from contracts.verify import (
     GroundingResult,
     GroundRequest,
@@ -129,6 +137,20 @@ def _basket_capacity(robot_id: str) -> int:
         return int(load_robot(robot_id).basket_capacity)
     except Exception:  # noqa: BLE001 - unknown robot / no fixtures: the default rover basket
         return DEFAULT_BASKET_CAPACITY
+
+
+def _ripeness(score: float) -> str:
+    """Shopper words for a freshness score (produce review labels)."""
+    if score >= 0.85:
+        return "ripe: eat today or tomorrow"
+    if score >= 0.7:
+        return "ready in 2-3 days"
+    return "firm: ripens in about 4 days"
+
+
+def _verify_items_on() -> bool:
+    """PICKY_VERIFY_ITEMS (default on): photo verification cards for every purchased unit."""
+    return bool(setting("picky_verify_items", True))
 
 
 def _unload_group(step: Any) -> bool:
@@ -199,6 +221,7 @@ class _Run:
         )
         self.unload_gate = False
         self.unload_numbers: dict[str, int] = {}  # 'unload:<n>' group -> unit number after the gate's re-layout
+        self.rejections: Counter[tuple[str | None, int | None]] = Counter()  # (item_id, unit) -> 'wrong' answers
 
 
 class PlanLoop:
@@ -214,8 +237,11 @@ class PlanLoop:
         heartbeat_s: float = DEFAULT_HEARTBEAT_S,
         plan_timeout_s: float = DEFAULT_PLAN_TIMEOUT_S,
         on_brain_step: BrainStepHook | None = None,
+        verify_items: bool | None = None,
     ) -> None:
         self.s = services
+        self.verify_items = verify_items
+        """0.2.4 photo verification cards (None = PICKY_VERIFY_ITEMS)."""
         self.on_brain_step = on_brain_step
         """Called with every mirrored ``brain.step`` (the brain keeps them in its per-robot ring for recent_steps)."""
         self.plan_timeout_s = plan_timeout_s
@@ -608,6 +634,21 @@ class PlanLoop:
                 )
                 assert f is not None
                 return await self._recover(run, i, f, att, baseline=baseline)
+        # 3b. 0.2.4: the shopper checks a photo of the unit in the gripper (correct / wrong; auto-accept on silence)
+        if isinstance(step, GraspStep) and from_shelf and run.mode == "plan" and self._verify_on():
+            answer = await self._verify_item(run, step, att)
+            if answer == VERIFY_WRONG:
+                f = StepFailure(
+                    plan_id=plan.plan_id,
+                    step_id=step.step_id,
+                    step_kind=step.kind,
+                    attempt=attempt,
+                    kind="postcondition",
+                    code="wrong_item_grasped",
+                    message="the shopper says it is the wrong item (photo check): putting it back",
+                    item_id=step.item_id,
+                )
+                return await self._recover(run, i, f, att, baseline=baseline)
         # 4. commit
         return await self._succeed(run, step, att)
 
@@ -626,6 +667,7 @@ class PlanLoop:
         await self._complete(run, step, att, effects, note=note)
         if isinstance(step, VerifyStep) and _unload_group(step):
             await self._unload_event(run, step, "verified", verdict=att.post)
+            await self._counter_card(run, step, att)
         elif isinstance(step, HandoffStep) and step.group_id == "checkout" and run.unload_gate and run.unload_total:
             await self._unload_event(run, step, "done")
         return "next"
@@ -1678,6 +1720,44 @@ class PlanLoop:
         run.answers[req.approval_id] = resp.approved
         return resp
 
+    @staticmethod
+    def _with_thumbnails(run: _Run, slot_id: str, choice: PickChoice) -> PickChoice:
+        """Produce review photos: candidates without a thumbnail get a crop of the last BLURRED scan frame of the
+        slot (the unit's pixel box), so the shopper sees the actual units ('Which avocados?')."""
+        frame = run.scan_frames.get(slot_id)
+        if frame is None or all(c.thumbnail_b64 for c in choice.candidates):
+            return choice
+        if not getattr(frame, "blurred", False):
+            return choice  # section 8: only blurred pixels leave the backend
+        boxes = {i.instance_id: i.bbox for i in getattr(frame, "instances", []) if i.bbox is not None}
+        try:
+            import base64
+            import io
+
+            from PIL import Image
+
+            img = Image.open(io.BytesIO(base64.b64decode(frame.jpeg_b64))).convert("RGB")
+        except Exception:  # noqa: BLE001 - no Pillow / bad JPEG: options without photos
+            return choice
+        out = []
+        for c in choice.candidates:
+            box = c.bbox or boxes.get(c.instance_id)
+            if c.thumbnail_b64 or box is None:
+                out.append(c)
+                continue
+            pad = 0.25
+            x0, y0 = max(0, int(box.x - box.w * pad)), max(0, int(box.y - box.h * pad))
+            x1, y1 = min(img.width, int(box.x + box.w * (1 + pad))), min(img.height, int(box.y + box.h * (1 + pad)))
+            if x1 - x0 < 4 or y1 - y0 < 4:
+                out.append(c)
+                continue
+            crop = img.crop((x0, y0, x1, y1))
+            crop.thumbnail((160, 160))
+            buf = io.BytesIO()
+            crop.save(buf, format="JPEG", quality=80)
+            out.append(c.model_copy(update={"thumbnail_b64": base64.b64encode(buf.getvalue()).decode()}))
+        return choice.model_copy(update={"candidates": out})
+
     async def _pick_choice(self, run: _Run, step: AskUserStep, item: Any) -> PickChoice:
         """Freshness top-k for produce: v0.2 ``perception.rank_freshness`` on the last blurred scan frame (thumbnails +
         reasons), else the sim ground truth ranking (deterministic)."""
@@ -1709,13 +1789,16 @@ class PlanLoop:
         multi = False
         on_request = None
         open_units: list[int] = []
+        choice: PickChoice | None = None
         if step.ask_kind == "pick_choice" and item is not None and item.slot_id and item.sku:
             choice = await self._pick_choice(run, step, item)
+            choice = self._with_thumbnails(run, item.slot_id, choice)
             options = [
                 ApprovalOption(
                     option_id=c.instance_id,
-                    label=f"#{c.rank} freshness {c.score:.2f}",
-                    detail=c.reason or None,
+                    label=f"#{c.rank} {_ripeness(c.score)}",
+                    detail=(c.reason if c.reason and c.reason != "sim ground truth" else None)
+                    or f"freshness {c.score:.2f} (sim ground truth)",
                     thumbnail_b64=c.thumbnail_b64,
                 )
                 for c in sorted(choice.candidates, key=lambda c: c.rank)
@@ -1736,9 +1819,16 @@ class PlanLoop:
         resp = await self._ask(
             run, step.ask_kind, step.question, options, item, step, multi=multi, on_request=on_request
         )
-        if step.ask_kind == "pick_choice" and resp.approved and resp.chosen():
+        picks = resp.chosen() if step.ask_kind == "pick_choice" and resp.approved else []
+        if step.ask_kind == "pick_choice" and not picks and choice is not None and choice.candidates:
+            # 0.2.4 produce review: no answer (timeout) -> the robot's best guess, labelled as such
+            best = [c.instance_id for c in sorted(choice.candidates, key=lambda c: c.rank)]
+            picks = best[: max(1, len(open_units))]
+            why = "no answer in time" if resp.decision == "timeout" else "no choice made"
+            await self._mirror(run, step, f"{why}: taking #1 freshness pick (robot's best guess)")
+        if step.ask_kind == "pick_choice" and picks:
             # chosen unit k -> the k-th remaining unit, on BOTH its ground_target and its grasp (a re-ground keeps it)
-            for unit, choice_id in zip(open_units, resp.chosen(), strict=False):
+            for unit, choice_id in zip(open_units, picks, strict=False):
                 for s in run.plan.steps:
                     if (
                         s.item_id == step.item_id
@@ -1823,6 +1913,164 @@ class PlanLoop:
     # =================================================================================================================
     # misc
     # =================================================================================================================
+    # =================================================================================================================
+    # 0.2.4 photo verification of every purchased unit
+    # =================================================================================================================
+    async def _photo(self, run: _Run, att: StepAttempt | None, cameras: list[str]) -> Any:
+        """A blurred, retained photo for a verification card: the step's own evidence frames first (already taken
+        for the verifier), else a fresh capture through ``services.evidence`` (face-blurred before it is kept)."""
+        frames = list(att.post.frames) if att is not None and att.post is not None else []
+        for cam in cameras:
+            ref = next((f for f in frames if f.camera_id.endswith(f".{cam}") and f.blurred), None)
+            if ref is not None:
+                return ref
+        evidence = getattr(self.s, "evidence", None)
+        if evidence is None:
+            return None
+        try:
+            refs = await asyncio.wait_for(
+                evidence.capture_refs(run.plan.robot_id, cameras[:1], context={"purpose": "verification_photo"}), 4.0
+            )
+        except Exception as exc:  # noqa: BLE001 - a card without a photo still asks
+            log.debug("verification photo failed: %s", exc)
+            return None
+        return next((r for r in refs if r.blurred), None)
+
+    async def _verify_item(self, run: _Run, step: GraspStep, att: StepAttempt) -> str:
+        """Send the shopper the wrist photo of the unit just grasped ('Is this the right Mild Chunky Salsa?') and wait
+        for correct / wrong; no answer within PICKY_VERIFY_AUTO_ACCEPT_S -> 'auto-accepted' (labelled). Beyond
+        PICKY_VERIFY_MAX_REJECTIONS 'wrong' answers for one unit, or on a backend without a put-back primitive, a
+        'wrong' is noted and the unit kept (staff swap it at the counter). Returns VERIFY_CORRECT / VERIFY_WRONG."""
+        plan = run.plan
+        item = plan.item(step.item_id)
+        name = (item.name if item is not None else None) or step.target.description or step.target.sku
+        key = (step.item_id, step.unit)
+        auto_s = max(1.0, float(setting("picky_verify_auto_accept_s", 20.0) or 20.0))
+        ref = await self._photo(run, att, ["wrist", "front"])
+        held = run.held
+        vid = f"ver-{plan.plan_id}-{step.step_id}-a{step.attempts}"
+        ver = ItemVerification(
+            verification_id=vid,
+            trip_id=plan.trip_id,
+            goal_id=None if plan.goal_id.startswith("adhoc-") else plan.goal_id,
+            robot_id=plan.robot_id,
+            store_id=plan.store_id,
+            user_id=plan.user_id or STAFF_USER_ID,
+            sku=step.target.sku,
+            name=name,
+            item_id=step.item_id,
+            unit=step.unit,
+            question=f"Is this the right {name}?",
+            photo_url=f"/api/evidence/{ref.frame_id}.jpg" if ref is not None else None,
+            frame_id=ref.frame_id if ref is not None else None,
+            camera_id=ref.camera_id if ref is not None else None,
+            auto_accept_s=auto_s,
+            attempt=run.rejections[key] + 1,
+        )
+        await self._pub(run, "item.verification", verification=ver)
+        req = ApprovalRequest(
+            approval_id=vid,
+            trip_id=plan.trip_id,
+            goal_id=ver.goal_id,
+            robot_id=plan.robot_id,
+            store_id=plan.store_id,
+            user_id=ver.user_id,
+            kind=ApprovalKind.VERIFY_ITEM,
+            title=ver.question,
+            sku=step.target.sku,
+            options=[
+                ApprovalOption(option_id=VERIFY_CORRECT, label="✓ Correct"),
+                ApprovalOption(option_id=VERIFY_WRONG, label="✗ Wrong item"),
+            ],
+            expires_s=auto_s,
+            payload={
+                "photo_url": ver.photo_url,
+                "frame_id": ver.frame_id,
+                "instance_id": held.instance_id if held is not None else None,
+                "verification": True,
+            },
+        )
+        resp = await self._ask_raw(run, req)
+        if resp.decision == "timeout":
+            status, by, answer = "auto_accepted", "auto", VERIFY_CORRECT
+        elif resp.approved and VERIFY_WRONG not in resp.chosen():
+            status, by, answer = "accepted", "user", VERIFY_CORRECT
+        else:
+            status, by, answer = "rejected", "user", VERIFY_WRONG
+        await self._pub(
+            run,
+            "item.verification",
+            verification=ver.model_copy(update={"status": status, "decided_by": by, "decided_at": utcnow()}),
+        )
+        if answer == VERIFY_WRONG:
+            run.rejections[key] += 1
+            caps = await self._caps(run)
+            t0 = next((c for c in caps if c.tier == "t0_scripted"), None)
+            limit = int(setting("picky_verify_max_rejections", 1) or 1)
+            if run.rejections[key] > limit or (t0 is not None and not t0.place_back):
+                await self._mirror(run, step, "marked wrong: keeping it for staff to swap at the counter")
+                return VERIFY_CORRECT
+        else:
+            await self._mirror(run, step, f"photo check {status.replace('_', '-')}")
+        return answer
+
+    async def _counter_card(self, run: _Run, step: PlanStep, att: StepAttempt) -> None:
+        """Unload: the photo of the unit on the counter as a verification card (non-blocking: it is bought already;
+        auto-accepted after PICKY_VERIFY_AUTO_ACCEPT_S unless the shopper flags it)."""
+        if not self._verify_on():
+            return
+        sku = next(
+            (st.target.sku for st in run.plan.steps if st.group_id == step.group_id and isinstance(st, GraspStep)), ""
+        )
+        item = run.plan.item(step.item_id)
+        name = (item.name if item is not None else None) or sku
+        ref = await self._photo(run, att, ["front"])
+        auto_s = max(1.0, float(setting("picky_verify_auto_accept_s", 20.0) or 20.0))
+        ver = ItemVerification(
+            verification_id=f"ver-{run.plan.plan_id}-{step.step_id}",
+            trip_id=run.plan.trip_id,
+            robot_id=run.plan.robot_id,
+            store_id=run.plan.store_id,
+            user_id=run.plan.user_id or STAFF_USER_ID,
+            sku=sku,
+            name=name,
+            item_id=step.item_id,
+            unit=step.unit,
+            question=f"{name} is on the counter — looks right?",
+            photo_url=f"/api/evidence/{ref.frame_id}.jpg" if ref is not None else None,
+            frame_id=ref.frame_id if ref is not None else None,
+            camera_id=ref.camera_id if ref is not None else None,
+            status="auto_accepted",
+            decided_by="auto",
+            auto_accept_s=auto_s,
+            decided_at=utcnow(),
+        )
+        await self._pub(run, "item.verification", verification=ver)
+
+    def _verify_on(self) -> bool:
+        return _verify_items_on() if self.verify_items is None else self.verify_items
+
+    async def _ask_raw(self, run: _Run, req: ApprovalRequest) -> ApprovalResponse:
+        """Ask through the trip flow (keeps ``expires_s`` for verify_item), the broker, or the injected answer."""
+        trips = getattr(self.s, "trips", None)
+        approvals = getattr(self.s, "approvals", None)
+        try:
+            if trips is not None and run.plan.trip_id:
+                resp = await trips.ask(run.plan.trip_id, req)
+            elif approvals is not None:
+                resp = await approvals.request(req)
+            else:
+                resp = await self.answer(req)
+        except asyncio.CancelledError:
+            if approvals is not None:
+                try:
+                    await asyncio.shield(approvals.cancel(req.approval_id, "plan cancelled"))
+                except Exception:  # noqa: BLE001
+                    pass
+            raise
+        run.answers[req.approval_id] = resp.approved
+        return resp
+
     # =================================================================================================================
     # 0.2.4 checkout unload by the arm
     # =================================================================================================================
