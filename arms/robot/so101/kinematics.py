@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 
 import numpy as np
 
@@ -14,13 +15,15 @@ class SO101Kinematics:
         import ikpy.chain
 
         self.cfg = cfg
-        chain = ikpy.chain.Chain.from_urdf_file(str(cfg.urdf_path), base_elements=["base_link"])
-        names = [link.name for link in chain.links]
-        # Only the 5 arm joints are active; fixed links and the gripper jaw stay passive.
-        mask = [any(j in n for j in cfg.joint_names) for n in names]
-        self.chain = ikpy.chain.Chain.from_urdf_file(
-            str(cfg.urdf_path), base_elements=["base_link"], active_links_mask=mask
-        )
+        with warnings.catch_warnings():  # the official URDF trips harmless ikpy "fixed link" warnings
+            warnings.simplefilter("ignore", UserWarning)
+            chain = ikpy.chain.Chain.from_urdf_file(str(cfg.urdf_path), base_elements=["base_link"])
+            names = [link.name for link in chain.links]
+            # Only the 5 arm joints are active; fixed links and the gripper jaw stay passive.
+            mask = [any(j in n for j in cfg.joint_names) for n in names]
+            self.chain = ikpy.chain.Chain.from_urdf_file(
+                str(cfg.urdf_path), base_elements=["base_link"], active_links_mask=mask
+            )
         self.active = [i for i, m in enumerate(mask) if m]
         self.active_names = [next(j for j in cfg.joint_names if j in names[i]) for i in self.active]
 
