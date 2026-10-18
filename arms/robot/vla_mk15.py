@@ -640,8 +640,9 @@ def _fmt_call(name: str, args: dict[str, Any]) -> str:
 
 # ---- navigation look-out --------------------------------------------------------------------------------------------
 LOOK_PROMPT = (
-    "This is the front camera of a store robot driving to a shelf. Is {target} visible in this image? Answer yes or "
-    "no first, then in at most 12 words where it is."
+    "This is the front camera of a store robot driving to a shelf (it may look down at a shelf from above, so products "
+    "can show only their tops). Is {target} visible in this image? Answer yes or no first, then in at most 12 words "
+    "where it is."
 )
 
 

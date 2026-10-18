@@ -437,10 +437,10 @@ class SimRobot:
 
         pushed = 0
         for f in frames:
-            kind = "front" if f.camera == "side" else "wrist"
+            kind = "wrist" if f.camera == "wrist" else "front"  # PolicyFrame 'side' / a streamed policy CameraFrame
             cid = robot_camera_id(robot_id, kind)
             frame = CameraFrame(
-                frame_id=f"{robot_id}-policy-{f.camera}-{time.monotonic_ns()}",
+                frame_id=f"{robot_id}-policy-{'wrist' if kind == 'wrist' else 'side'}-{time.monotonic_ns()}",
                 camera=kind,  # type: ignore[arg-type]
                 camera_id=cid,
                 robot_id=robot_id,
@@ -817,6 +817,9 @@ class SimRobot:
 
                 cid = robot_camera_id(msg.robot_id, msg.camera)
             if cid is None:
+                return
+            if msg.robot_id and cid.startswith(f"{msg.robot_id}.policy_"):  # a T1 picture taken while the arm moves
+                self.feed_policy_frames(msg.robot_id, [msg])
                 return
             # never trust a worker's blurred flag: only perception may set it, so every frame gets face-blurred (§8)
             frame = msg.model_copy(update={"camera_id": cid, "instances": [], "blurred": False})

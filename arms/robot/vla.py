@@ -31,11 +31,11 @@ refuses at accept -> T0 in the same exec), disconnect, mislabel (the held unit's
 Pictures while moving (every tier, every backend): while ``navigate_to`` / ``align`` drive, ``_nav_camera`` takes a
 front-camera picture every 1 / PICKY_VLA_NAV_CAPTURE_HZ s (default 2 Hz) through ``services.evidence`` (face-blurred
 + retained: each one is a ``FrameRef`` at /api/evidence/{id}.jpg; ``ex.nav_frames``) and reports it in a running
-status ('driving', ``message`` names the frame). On the approach (<= PICKY_VLA_NAV_LOOK_M of path left, at most
-NAV_LOOKS_PER_EXEC per drive, Isaac stores by default: PICKY_VLA_NAV_LOOK = isaac | always | off) one blurred
-picture goes to Perceptron Mk1.5 ("is <product> visible?", ``arms.robot.vla_mk15.look``, per-trip budget
-PICKY_PERCEPTRON_CALL_BUDGET) and the answer is a running status with stage 'observing' (the runner shows it; a
-brain.step mirror of 'observing' statuses belongs to the agent arm's runner).
+status ('driving', ``message`` names the frame). On the approach (<= PICKY_VLA_NAV_LOOK_M of path left) and once
+more on arrival with the head aimed at the slot (unless the first saw it; Isaac stores by default: PICKY_VLA_NAV_LOOK =
+isaac | always | off) one blurred picture goes to Perceptron Mk1.5 ("is <product> visible?",
+``arms.robot.vla_mk15.look``, per-trip budget PICKY_PERCEPTRON_CALL_BUDGET) and the answer is a running status
+with stage 'observing' (the runner shows it; a brain.step mirror of 'observing' statuses belongs to the agent arm).
 
 T1: ``arms.robot.t1.T1Adapter`` (unavailable unless configured, then T0 takes over). With a learned policy
 (PICKY_VLA_T1=perceptron|smolvla|scripted) a grasp resolved to T1 runs ``arms.robot.vla_t1.run_policy_grasp``: the
@@ -101,8 +101,9 @@ DEFAULT_SPEED_MPS = 0.8
 DEFAULT_NAV_CAPTURE_HZ = 2.0
 """Front-camera pictures per second while driving (PICKY_VLA_NAV_CAPTURE_HZ; 0 = off)."""
 NAV_LOOKS_PER_EXEC = 2
-"""Perceptron look-outs per drive (on the approach)."""
-NAV_LOOK_SPACING_S = 1.5
+"""Perceptron look-outs per drive: one while approaching, one on arrival (head aimed at the slot) unless the first
+already saw the product."""
+ARRIVAL_LOOK_TIMEOUT_S = 6.0
 DEFAULT_NAV_LOOK_M = 2.5
 NAV_FRAMES_KEPT = 240
 CAPTURE_TIMEOUT_S = 3.0
@@ -149,6 +150,8 @@ class _Exec:
         """Front-camera pictures taken while driving (blurred, retained evidence)."""
         self.observations: list[str] = []
         """Perceptron look-out answers while driving."""
+        self.nav_target: str | None = None
+        self.nav_looks = 0
 
 
 def _swallow(task: "asyncio.Task[Any]") -> None:
@@ -603,7 +606,32 @@ class T0Vla:
             cam.cancel()  # never awaited here: a cancel of this exec must reach the caller untouched
             cam.add_done_callback(_swallow)
         ex.ended_at = utcnow()
+        await self._arrival_look(ex)
         return final
+
+    async def _arrival_look(self, ex: _Exec) -> None:
+        """On arrival: one more picture with the head aimed at the slot + a look-out, unless one already saw it."""
+        evidence = self.services.evidence
+        slot = getattr(ex.request.step, "slot_id", None)
+        seen = any(o.lower().startswith("yes") for o in ex.observations)
+        if evidence is None or not ex.nav_target or not slot or seen or ex.nav_looks >= NAV_LOOKS_PER_EXEC:
+            return
+        ex.nav_looks += 1
+        try:
+            async with asyncio.timeout(ARRIVAL_LOOK_TIMEOUT_S):
+                refs = await evidence.capture_refs(
+                    ex.request.robot_id,
+                    ["front"],
+                    context={"exec_id": ex.request.exec_id, "step_kind": ex.request.step.kind, "purpose": "arrival"},
+                    aim_slot_id=slot,
+                )
+                if refs:
+                    ex.nav_frames.append(refs[0])
+                    await self._look(ex, evidence, refs[0], ex.nav_target, when="on arrival")
+        except TimeoutError:
+            log.info("arrival look-out for %s timed out", ex.request.exec_id)
+        except Exception as exc:  # noqa: BLE001 - advisory
+            log.debug("arrival look-out for %s failed: %s", ex.request.exec_id, exc)
 
     async def _nav_camera(self, ex: _Exec, robot: Any, st: RobotState) -> None:
         """Pictures while driving: front camera every 1/hz s -> blurred, retained evidence (FrameRef) + a running
@@ -624,6 +652,7 @@ class T0Vla:
             look_m = DEFAULT_NAV_LOOK_M
         want_look = look_mode == "always" or (look_mode == "isaac" and st.backend == "isaac")
         target = await self._nav_target_name(ex, st) if want_look else None
+        ex.nav_target = target
         context = {
             "plan_id": req.context.plan_id,
             "goal_id": req.context.goal_id,
@@ -633,7 +662,6 @@ class T0Vla:
             "exec_id": req.exec_id,
             "purpose": "nav_picture",
         }
-        looks, last_look = 0, -1e9
         while True:
             t0 = time.monotonic()
             try:
@@ -658,17 +686,12 @@ class T0Vla:
                     message=f"front camera picture {len(ex.nav_frames)} while driving ({ref.frame_id})",
                 )
                 remaining = path_progress(ex.path, ref.pose)[1] if ref.pose is not None and len(ex.path) > 1 else 0.0
-                if (
-                    target
-                    and looks < NAV_LOOKS_PER_EXEC
-                    and remaining <= look_m
-                    and time.monotonic() - last_look >= NAV_LOOK_SPACING_S
-                ):
-                    looks, last_look = looks + 1, time.monotonic()
-                    await self._look(ex, evidence, ref, target)
+                if target and ex.nav_looks < NAV_LOOKS_PER_EXEC - 1 and remaining <= look_m:
+                    ex.nav_looks += 1  # one while approaching; the last one is kept for the arrival
+                    await self._look(ex, evidence, ref, target, when="while driving")
             await asyncio.sleep(max(0.0, period - (time.monotonic() - t0)))
 
-    async def _look(self, ex: _Exec, evidence: Any, ref: FrameRef, target: str) -> None:
+    async def _look(self, ex: _Exec, evidence: Any, ref: FrameRef, target: str, when: str = "") -> None:
         """One Perceptron Mk1.5 look-out on a retained (blurred) picture -> a running 'observing' status."""
         from arms.robot.vla_mk15 import look
 
@@ -696,7 +719,7 @@ class T0Vla:
             stage="observing",
             progress=ex.progress,
             pose=ref.pose,
-            message=f"Perceptron Mk1.5 on {ref.frame_id}: is {target} visible? {answer}",
+            message=f"Perceptron Mk1.5 {when} ({ref.frame_id}): is {target} visible? {answer}",
         )
 
     async def _nav_target_name(self, ex: _Exec, st: RobotState) -> str | None:

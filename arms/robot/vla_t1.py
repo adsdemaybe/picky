@@ -150,7 +150,8 @@ class PolicyGraspResult:
     frames: int = 0
     """Policy-camera frames received (pictures taken while the arm moved + observations)."""
     moving_s: float = 0.0
-    """Seconds the arm spent playing rows (frames / moving_s = the picture rate while moving)."""
+    """Seconds the policy's chunks took to play (``moving_frames`` / 2 / moving_s = side + wrist pairs per second)."""
+    moving_frames: int = 0
 
 
 ChunkCallback = Callable[[int, CommandResult, Any], Awaitable[None]]
@@ -344,6 +345,7 @@ async def run_policy_grasp(
                 robot_id, rows, hz=hz, exec_id=exec_id, **({"capture_every": every} if every else {})
             )
             result.moving_s += time.monotonic() - t_move
+            result.moving_frames += len(res.policy_frames)
             _feed(robot, robot_id, res, result)
             result.chunks += 1
             result.steps += len(rows)
@@ -382,7 +384,7 @@ async def run_policy_grasp(
         if callable(end_feed):
             end_feed(robot_id)
     log.info(
-        "T1 %s %s: %s (%s; chunks %d, steps %d, frames %d = %.1f/s while moving, infer ms %s)",
+        "T1 %s %s: %s (%s; chunks %d, steps %d, frames %d, %.1f side+wrist pairs/s while the arm moved, infer ms %s)",
         robot_id,
         "ok" if result.ok else (result.code or "failed"),
         result.message,
@@ -390,19 +392,21 @@ async def run_policy_grasp(
         result.chunks,
         result.steps,
         result.frames,
-        result.frames / result.moving_s if result.moving_s > 0 else 0.0,
+        result.moving_frames / 2 / result.moving_s if result.moving_s > 0 else 0.0,
         result.infer_ms[:6],
     )
     return result
 
 
 def _feed(robot: Any, robot_id: RobotId, res: CommandResult, result: PolicyGraspResult) -> None:
-    """Every policy frame of a result -> the robot's live view (raw; CameraService blurs it on the way out)."""
+    """The observation (last frame per camera) of a result -> the robot's live view (raw; CameraService blurs it on
+    the way out). The pictures taken mid-chunk already went out live (the worker streams them as it renders)."""
     result.frames += len(res.policy_frames)
     feed = getattr(robot, "feed_policy_frames", None)
-    if callable(feed) and res.policy_frames:
+    last = list({f.camera: f for f in res.policy_frames}.values())
+    if callable(feed) and last:
         try:
-            feed(robot_id, list(res.policy_frames))
+            feed(robot_id, last)
         except Exception as exc:  # noqa: BLE001 - the live view is best effort
             log.debug("feed_policy_frames failed: %s", exc)
 

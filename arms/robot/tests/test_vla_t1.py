@@ -3,6 +3,7 @@ Isaac. ``FakeArm`` plays the worker's ArmJointsCmd / ArmIkCmd semantics on a toy
 = q[5], sticky grasp within 3 cm, policy frames every ``capture_every`` rows + after the last row); policies are a
 scripted stub or Mk1.5 behind an ``httpx.MockTransport`` (no network, no key leaves the test)."""
 
+import asyncio
 import base64
 import json
 import math
@@ -58,6 +59,7 @@ class FakeArm:
         self.fed: list[PolicyFrame] = []
         self.ended = False
         self.n = 0
+        self.returned: list[PolicyFrame] = []
         self.last_side: list[bytes] = []
         """Per arm_joints call: the side frame after its last row (what the next predict must see)."""
         self.has_ik = ik
@@ -128,6 +130,7 @@ class FakeArm:
                 frames += self._frames(i, capture)
         if capture:
             frames += self._frames(len(targets), capture)
+        self.returned += frames
         sides = [f for f in frames if f.camera == "side"]
         self.last_side.append(base64.b64decode(sides[-1].jpeg_b64) if sides else b"")
         t = self.tcp()
@@ -219,10 +222,15 @@ async def test_policy_grasp_takes_pictures_while_moving_and_feeds_fresh_frames()
     observed = [s[1] for s in policy.seen]
     assert observed == [arm.last_side[0], arm.last_side[1]] and observed[0] != observed[1]
     assert all(s[3] for s in policy.seen)
-    first_chunk = [f for f in arm.fed if f.camera == "side"][1:]  # after the observation of entering joint mode
+    first_chunk = [f for f in arm.returned if f.camera == "side"][1:]  # after the observation of entering joint mode
     assert [f.step for f in first_chunk][:4] == [8, 16, 24, moving[0]["rows"]]  # mid-chunk pictures, then the last
-    # pictures while the arm moved: more frames than observations, all on the live feed, the feed ended
-    assert res.frames == len(arm.fed) and res.frames > 2 * (res.chunks + 1) and arm.ended
+    # pictures while the arm moved: more frames than observations; the worker streams the mid-chunk ones live, the
+    # executor feeds each command's observation (last frame per camera) to the live view; the feed ended
+    assert res.frames == len(arm.returned) and res.frames > 2 * (res.chunks + 1) and arm.ended
+    assert len(arm.fed) == 2 * len([c for c in arm.calls if not c["end"]]) and {f.camera for f in arm.fed} == {
+        "side",
+        "wrist",
+    }
     assert arm.calls[-1]["end"]  # joint mode left (the scripted rig takes the arm back)
 
 
@@ -482,3 +490,41 @@ async def test_navigation_pictures_are_off_at_zero_hz_and_never_look_on_the_fake
     finally:
         reset_settings()
     assert terminal.phase == "succeeded" and not services.evidence.calls
+
+
+async def test_sim_robot_routes_live_policy_pictures_and_holds_the_worker_stream(services):
+    from arms.robot.tests.test_service import isaac
+    from contracts.sim import CameraFrame
+
+    robot, _ = await isaac(services)
+    it = robot.frames(camera_id=f"{R1}.front")
+    got: list[CameraFrame] = []
+
+    async def take(n: int) -> None:
+        async for f in it:
+            got.append(f)
+            if len(got) >= n:
+                return
+
+    def frame(fid: str, cid: str, camera: str) -> CameraFrame:
+        return CameraFrame(
+            frame_id=fid,
+            camera=camera,
+            camera_id=cid,
+            robot_id=R1,
+            store_id="store_test",
+            jpeg_b64="AA==",
+            w=640,
+            h=480,
+        )
+
+    task = asyncio.create_task(take(2))
+    await asyncio.sleep(0)
+    await robot._on_message(frame("p1", f"{R1}.policy_side", "front"))  # live T1 picture -> the front view
+    await robot._on_message(frame("w1", f"{R1}.front", "front"))  # the worker's own stream: held back meanwhile
+    robot.end_policy_feed(R1)
+    await robot._on_message(frame("w2", f"{R1}.front", "front"))  # feed over: the stream is back
+    await asyncio.wait_for(task, 2.0)
+    assert [f.frame_id for f in got] == [got[0].frame_id, "w2"] and "policy-side" in got[0].frame_id
+    assert all(not f.blurred and f.camera_id == f"{R1}.front" for f in got)
+    await it.aclose()
