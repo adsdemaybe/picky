@@ -159,6 +159,7 @@ class _BrainBase:
     model_name: str = SCRIPTED
 
     def __init__(self, services: Services) -> None:
+        self._chat: dict[str, deque] = {}
         self._services = services
         self._rt: dict[RobotId, BrainRuntime] = {}
 
@@ -514,7 +515,121 @@ class _BrainBase:
             seen = await self._look(rt, goal, _see_clause(text) if wants_status else text, store_id)
             if seen:
                 return f"{await self._status_text(rt, goal)} {seen}" if wants_status else seen
+        if not _STATUS_RE.search(text):
+            talk = await self._converse(rt, goal, text, store_id)
+            if talk:
+                return talk
         return await self._status_text(rt, goal)
+
+    async def _converse(self, rt: BrainRuntime, goal: Goal | None, text: str, store_id: str | None) -> str | None:
+        """Free conversation with a shopper at the robot (recipes, ideas, comparisons, small talk), answered by the
+        configured LLM as a friendly store helper, grounded with this store's catalog through tools. None when no
+        LLM is configured or it fails / is slow (the caller falls back to the scripted reply)."""
+        from utils import llm
+
+        if not llm.is_configured() or not store_id:
+            return None
+        catalog = self._services.catalog
+        name = rt.robot_id
+        store_name = store_id
+        with contextlib.suppress(Exception):
+            from utils.data import load_planogram, load_robot
+
+            name = load_robot(rt.robot_id).name
+            store_name = load_planogram(store_id).name
+        status = await self._status_text(rt, goal)
+
+        async def search_store(args: dict[str, Any]) -> Any:
+            from contracts.catalog import SearchQuery
+
+            q = SearchQuery(
+                text=str(args.get("query") or ""),
+                store_ids=[store_id],
+                in_stock_only=bool(args.get("in_stock_only", True)),
+                max_price_cents=args.get("max_price_cents"),
+                dietary=list(args.get("dietary") or []),
+                limit=8,
+            )
+            out = []
+            for h in await catalog.search(q):
+                o = h.offer_for(store_id)
+                info = _ingredients_of(h.product.sku) or {}
+                out.append(
+                    {
+                        "sku": h.product.sku,
+                        "name": _say(h.product.name),
+                        "price": _money(o.price_cents) if o else None,
+                        "on_shelf": o.qty if o else 0,
+                        "dietary": h.product.dietary,
+                        "allergens": sorted({*(h.product.allergens or []), *(info.get("allergens") or [])}),
+                        "ingredients": (info.get("ingredients") or [])[:10],
+                    }
+                )
+            return out
+
+        async def where_is(args: dict[str, Any]) -> Any:
+            sku = str(args.get("sku") or "")
+            locs = await catalog.get_locations(sku, store_id)
+            if not locs:
+                return {"error": "not stocked in this store"}
+            aisle, shelf = await self._shelf_words(locs[0], store_id)
+            return {"where": _aisle(aisle), "shelf": shelf}
+
+        tools = [
+            {
+                "name": "search_store",
+                "description": "Search THIS store's shelves. Returns products with price, units on the shelf, "
+                "dietary tags, allergens and ingredients. Use it before naming any product or price.",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "description": "What to look for, e.g. 'pasta sauce'."},
+                        "max_price_cents": {"type": "integer"},
+                        "dietary": {"type": "array", "items": {"type": "string"}},
+                        "in_stock_only": {"type": "boolean"},
+                    },
+                    "required": ["query"],
+                },
+            },
+            {
+                "name": "where_is",
+                "description": "Aisle and shelf of one product (sku from search_store) in this store.",
+                "input_schema": {"type": "object", "properties": {"sku": {"type": "string"}}, "required": ["sku"]},
+            },
+        ]
+        system = (
+            f"You are {name}, a friendly shopping-helper robot working in {store_name}, a grocery store. You're "
+            "talking out loud with a shopper standing at your screen, so sound like a warm, upbeat store associate: "
+            "natural and conversational, 1 to 3 short sentences, no lists, no markdown, no emoji. "
+            "Only mention products, prices and aisles you got from your tools; never invent them. If something isn't "
+            "in stock, say so kindly and suggest what is. Offer to walk them to the shelf or grab it for them "
+            "('Get it for me' on my screen). You can't take payment yourself; checkout is on my screen. "
+            f"Right now: {status}"
+        )
+        history = self._chat.setdefault(rt.robot_id, deque(maxlen=6))
+        messages = [*history, {"role": "user", "content": text}]
+        try:
+            res = await asyncio.wait_for(
+                llm.run_tool_loop(
+                    messages,
+                    tools,
+                    {"search_store": search_store, "where_is": where_is},
+                    system=system,
+                    kind="fast",
+                    max_iters=5,
+                    max_tokens=400,
+                ),
+                timeout=25,
+            )
+        except Exception as exc:  # noqa: BLE001 - scripted fallback
+            log.warning("robot chat via LLM failed (%s); using the scripted reply", exc)
+            return None
+        reply = (res.text or "").strip()
+        if not reply:
+            return None
+        history.append({"role": "user", "content": text})
+        history.append({"role": "assistant", "content": reply})
+        return reply
 
     def _queue_for_llm(self, rt: BrainRuntime, text: str) -> bool:
         return False
@@ -554,6 +669,11 @@ class _BrainBase:
         p = hit.product
         offer = hit.offer_for(store_id)
         exact = all(w.rstrip("s") in p.name.lower() for w in words)
+        if not exact:
+            from utils import llm
+
+            if llm.is_configured():
+                return None  # a fuzzy ask ('anything vegan under $3?') is a conversation: let the LLM handle it
         lead = "" if exact else f"I don't think we carry {query}, but the closest thing is "
         if cheaper:
             return await self._cheaper(p, offer, store_id, lead)
