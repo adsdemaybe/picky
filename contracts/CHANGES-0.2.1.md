@@ -106,10 +106,10 @@ plain alias shim of this table.
 | `verifier` | `VerifierService` (with a `VisionProvider` inside: Perceptron) | perception | `create_verifier` / `create_verifier_fake` |
 | `evidence` | `EvidenceCameras` | perception | `create_evidence` / `create_evidence_fake` |
 
-- `LOOP_SERVICE_FACTORIES` is kept apart from `SERVICE_FACTORIES` on purpose. The gateway registry builds every
-  `SERVICE_FACTORIES` entry, and the arms do not export the loop factories yet.
-- Gateway step: wire `{**SERVICE_FACTORIES, **LOOP_SERVICE_FACTORIES}`, and treat a missing loop factory as "not
-  wired" (`None`).
+- `LOOP_SERVICE_FACTORIES` is kept apart from `SERVICE_FACTORIES` on purpose: a v0.2 registry builds every
+  `SERVICE_FACTORIES` entry and must not fail on an arm that has no loop factory.
+- The 0.2.1 gateway wires `{**SERVICE_FACTORIES, **LOOP_SERVICE_FACTORIES}` and treats a missing loop factory as
+  "not wired" (`None`); agent, robot and perception export all of them on this branch.
 - Selecting the real implementation works like v0.2: `PICKY_REAL_ARMS` takes the field name (`planner`, `vla`,
   `verifier`) or the arm name.
 - `exec_mode(services, settings.picky_exec_mode)` returns `plan` or `tools` only when that mode is configured AND
@@ -162,7 +162,11 @@ Dev (`PICKY_DEV=1`):
 - `POST /api/dev/faults/scenario`
 - `POST /api/dev/plans`
 
-## What each arm builds next (each step keeps `make demo` green; detail in `docs/vla-loop/IMPLEMENTING.md`)
+## What each arm builds (each step keeps `make demo` green; detail in `docs/vla-loop/IMPLEMENTING.md`)
+
+Status on `contracts/vla-loop`: steps 1-5 landed (fakes in `make demo`; the Gemini and Perceptron clients are tested
+with mocked clients only, no keys yet). Step 6 (frontend) is open; the gateway's `/debug` page has the plan +
+verifier panels. `camera.overlay` is forwarded on the live sockets but nothing emits it yet (P1).
 
 1. **utils / pyproject** (shared PR):
    - Settings fields + `.env.example` lines for the `LOOP_ENV_VARS` keys, plus `PICKY_LLM_PROVIDER` and
@@ -192,8 +196,9 @@ Dev (`PICKY_DEV=1`):
 6. **frontend**: PlanPanel from `plan.*` / `step.*`, the moment card from `step.failed`, and the VLA bar from
    `vla.status`. Run `make gen-types` first: the event schema now includes the loop events.
 
-Demo switch: `PICKY_EXEC_MODE=plan PICKY_FAULTS=drop_on_first_grasp make demo`. That run shows the verifier catching
-the dropped jar and the robot retrying. `PICKY_EXEC_MODE=direct` is the kill switch at any time.
+Demo: `make demo` runs plan mode with `drop_on_first_grasp` injected (`ARGS="--faults <scenario>"` for another one).
+That run shows the verifier catching the dropped item and the robot retrying. `PICKY_EXEC_MODE=direct` (or
+`ARGS="--exec-mode direct"`) is the kill switch at any time.
 
 ## Tests
 
