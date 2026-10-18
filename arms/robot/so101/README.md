@@ -93,6 +93,24 @@ python -m arms.robot.so101.pick_place "pick up the oat milk and put it in the ba
 - If IK poses are mirrored or offset vs. the real arm, set `joint_sign` / `joint_offset_deg` per joint in `config.py`
   (the `so101_new_calib` URDF is meant to match LeRobot's calibration zero, but verify by commanding `home_deg`).
 
+## Camera-guided pick & place + learning from your labels (laptop rig)
+
+```bat
+:: one-time per camera placement (~2 min, the arm touches 8 spots; keep hands clear)
+..\.venv-robot\Scripts\python -m arms.robot.so101.calibrate_camera
+:: plan only, then for real
+..\.venv-robot\Scripts\python -m arms.robot.so101.pick_routine "pick up the gum and put it on the plate" --dry
+..\.venv-robot\Scripts\python -m arms.robot.so101.pick_routine "pick up the gum and put it on the plate"
+:: human-in-the-loop RL: Enter = run, type s / f + Enter (any time) = success / failure, q = quit
+armsobot\so101	rain.bat "pick up the gum and put it on the plate"
+```
+
+`train_loop` steers the frozen pick routine (DSRL-style: learn the *inputs* of a base policy, not the policy): a
+Gaussian over offsets to grasp x/y/depth, wrist roll and drop x/y, updated after every labelled run (success pulls
+the mean toward what worked and narrows the search; failure widens it). State: `~/picky_runs/steer_policy.json`;
+every episode (scene/after frames, plan, offsets, label, gripper-after-close) in `~/picky_runs/<timestamp>/` for later
+BC / DSRL on a learned policy. Config in `~/.config/picky/env` (SO101_PORT, SO101_CAMERA, PERCEPTRON_API_KEY).
+
 ## First successful pick (2026-10-17, team SO-101)
 
 Picked a gum pack standing on its long edge (2 cm thick) and set it back down, driven step-by-step with

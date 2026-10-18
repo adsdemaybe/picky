@@ -67,7 +67,12 @@ def plan(
     seed: dict[str, float],
     object_height: float = 0.05,
     frame: np.ndarray | None = None,
+    steer: dict[str, float] | None = None,
 ) -> ScenePlan:
+    """`steer` (metres / degrees) nudges the base plan; train_loop learns it from success/failure labels:
+    grasp_dx, grasp_dy, grasp_dz, roll, drop_dx, drop_dy."""
+    st = {"grasp_dx": 0.0, "grasp_dy": 0.0, "grasp_dz": 0.0, "roll": 0.0, "drop_dx": 0.0, "drop_dy": 0.0}
+    st.update(steer or {})
     target, dest = parse_command(command)
     p = ScenePlan(target, dest)
     frame = grab_frame(cfg) if frame is None else frame
@@ -100,6 +105,8 @@ def plan(
         toward_base = -dd[:2] / np.linalg.norm(dd[:2])
         dd = dd.copy()
         dd[:2] = dd[:2] + toward_base * (radius - 0.05)
+    t = t + np.array([st["grasp_dx"], st["grasp_dy"], 0.0])
+    dd = dd + np.array([st["drop_dx"], st["drop_dy"], 0.0])
     p.target_xy, p.dest_xy = (float(t[0]), float(t[1])), (float(dd[0]), float(dd[1]))
     jaw = box_long_axis_yaw(cam, dets[target].box_px, h / 2, size) + math.pi / 2  # close across the thin side
     p.jaw_yaw_deg = math.degrees(jaw)
@@ -110,12 +117,12 @@ def plan(
     except ValueError as e:
         p.error = f"{target} at ({t[0]:.2f}, {t[1]:.2f}) is out of reach: {e}"
         return p
-    p.roll = best_roll(kin, q_hover, jaw)
+    p.roll = max(-175.0, min(175.0, best_roll(kin, q_hover, jaw) + st["roll"]))
     carry_z = h + 0.03
     hang = h - 0.02  # the object hangs this far below the fingertip (gripped 2 cm below its top)
     p.waypoints = [
         Waypoint("hover over target", hover, GRIP_OPEN),
-        Waypoint("straddle", (t[0], t[1], h - 0.02), GRIP_OPEN),
+        Waypoint("straddle", (t[0], t[1], h - 0.02 + st["grasp_dz"]), GRIP_OPEN),
         Waypoint("close", None, GRIP_CLOSED),
         Waypoint("lift", (t[0], t[1], carry_z), GRIP_CLOSED),
         Waypoint("carry over destination", (dd[0], dd[1], carry_z), GRIP_CLOSED),
