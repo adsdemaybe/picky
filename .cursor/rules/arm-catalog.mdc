@@ -30,9 +30,9 @@ models in [`contracts/catalog.py`](../../contracts/catalog.py) and [`contracts/p
 - [x] P0 Categories API: `list_categories` (taxonomy from `data/categories.yaml` merged with what products use; product / in-stock / low / out counts + aisle labels per store, all physical stores, or online), `category_products` (category OR subcategory) (fake)
 - [x] P0 Stock management: `stock_levels` (status/category/q filters, worst first), `stock_alerts` (active low/out, raised at boot for SKUs that start low/out), `restock` (fill or qty, new lot, rejects over capacity), `adjust_stock` (delta / set_qty rules), `stock_history` (sku / before / reason / actor-prefix filters) (fake)
 - [x] P0 Events: `stock.updated` (one per movement) + `stock.alert` (raise / low↔out / clear) with envelope `store_id` (+ `robot_id` for robot-caused changes); best-effort `robot.sync_stock` after restock / adjust (fake)
-- [ ] P0 Real (Postgres) impl: `search`, `get_offers`, `apply_scan` (service.py TODO 1–3)
-- [ ] P1 Real `category_products`, `restock`, `adjust_stock` (TODO 7–8). Real `stock_levels` / `stock_alerts` / `stock_history` / `list_categories` / `record_pick` (+movement, alert) are written but not yet run against a live DB
-- [ ] P1 Real `merchant_dashboard` + persisted pick counts (TODO 4–5)
+- [x] P0 Real (Postgres) impl: `search`, `get_offers`, `apply_scan` (per-call database snapshots run the fake's rules; parity test `tests/test_catalog_db.py`). Ran in the vhagar loop test (2026-10-18, user-space Postgres 16 :5433)
+- [x] P1 Real `category_products`, `restock`, `adjust_stock`; `stock_levels` / `stock_alerts` / `stock_history` / `list_categories` / `record_pick` run against a live DB (parity test)
+- [x] P1 Real `merchant_dashboard` (scans table + pick movements = the persisted pick counts)
 - [ ] P1 pgvector product embeddings (`EMBED_DIM=384`) blended into search
 - [ ] P2 Open Food Facts enrichment (DuckDB over the parquet dump, never the live API)
 
@@ -90,7 +90,7 @@ Semantics other arms rely on:
 | `fake.py` | Complete in-memory catalog over `utils.data` (lazy load, `reset()` reloads), incl. categories + stock management + events. Base deps only |
 | `stock.py` | Pure stock helpers shared by fake + real: alert lifecycle (`next_alert`), messages, ordering, actor matching, history filter |
 | `taxonomy.py` | Pure taxonomy helpers: load / merge `categories.yaml` with product categories, display names, `category_matches`, natural aisle sort |
-| `service.py` | Postgres impl: list_stores, get_planogram (live overlay), get_product, get_locations, get_deals, get_near_expiry, record_pick (+ lots, movement, alert, events), stock_levels, stock_alerts, stock_history, list_categories. TODO 1–8 for the rest |
+| `service.py` | Postgres impl of every method: SQL reads (locations, stores, products, deals, near-expiry, stock levels / alerts / history, categories), `record_pick` in SQL, and per-call database snapshots (`_snapshot`) that run the fake's pricing / ranking / stock rules for search, offers, planogram, category products, dashboard, scans, restock and adjustments |
 | `seed.py` | `python -m arms.catalog.seed [--out f] [--schema] [--apply] [--no-users] [--data-dir d]` renders INSERT SQL for the catalog (incl. `categories`, slot `low_threshold`, initial `stock_alerts`) and demo-user tables |
 | `tests/` | `test_catalog_fake.py` (conformance + the taco scenario), `test_catalog_stock.py` (categories + stock management + events + sim sync), `test_catalog_seed.py`. `tests/data/` is a tiny contract-valid fixture with the same schema as `data/` (incl. `categories.yaml`) |
 
@@ -99,8 +99,18 @@ Semantics other arms rely on:
 **Run it real** (prerequisites, else the gateway boots the fake and `/health` says why):
 `uv sync --extra catalog && make db-up && make seed`, then `PICKY_REAL_ARMS=catalog make demo`. Note `make setup`
 (`uv sync --locked`) removes extras, so re-run `uv sync --extra catalog` after it. `create()` refuses to build without
-sqlalchemy; `search` / `get_offers` / `apply_scan` are still TODO in `service.py`, so the real trip fails until they land
-(`make demo ARGS=--allow-errors` shows how far it gets).
+sqlalchemy. Where every answer comes from: `service.py`'s docstring (slots / inventory / lots / deals rows, read per call).
+
+**No Docker (vhagar, laptops):** the pip `pgserver` package ships Postgres 16 + pgvector binaries that run as a normal
+user:
+```bash
+uv venv /tmp/pg && uv pip install --python /tmp/pg/bin/python pgserver
+B=$(/tmp/pg/bin/python -c 'import pgserver,os;print(os.path.dirname(pgserver.__file__))')/pginstall/bin
+$B/initdb -D ~/pgdata -U picky --auth=trust && $B/postgres -D ~/pgdata -p 5433 -c listen_addresses=localhost -k ''
+$B/createdb -h localhost -p 5433 -U picky picky
+export DATABASE_URL=postgresql+psycopg://picky@localhost:5433/picky && uv run python -m arms.catalog.seed --schema --apply
+PICKY_TEST_DATABASE_URL=$DATABASE_URL uv run pytest arms/catalog      # + the real-vs-fake parity test (re-seeds!)
+```
 
 ```bash
 uv run pytest arms/catalog                                   # base deps only
@@ -116,7 +126,7 @@ Fake: `create_fake(Services())` (gateway default). Pass `data_root=` / `today=` 
 
 ## Demo-ready checklist (CLAUDE.md §6)
 
-- [ ] `CatalogService` fully implemented in `service.py`, with no `NotImplementedError` on demo paths (search, offers, apply_scan, dashboard)
+- [x] `CatalogService` fully implemented in `service.py`, with no `NotImplementedError` on demo paths (search, offers, apply_scan, dashboard)
 - [ ] `PICKY_REAL_ARMS=catalog make demo` completes the taco trip: black beans OOS at `store_ave` → online; guac-kit near-expiry deal; hot-sauce deal
 - [ ] Produce scans update lot freshness, and the dashboard shows the OOS item, the mispricing and the heatmap after the trip
 - [ ] DB down → logged, and the gateway can fall back to the fake by env flag alone (unset `PICKY_REAL_ARMS`)
@@ -140,7 +150,8 @@ messages look like `catalog: <imperative>`.
   `merchant_dashboard` (`near_expiry`, `mispricings`) and `get_near_expiry`.
 - Stock events carry `trip_id=None` even for picks during a shop trip (envelope rule for store-level events); the
   trip id is in `movement.ref_id`.
-- Real stock writes (`restock`, `adjust_stock`) are TODO and the written real SQL hasn't been run against Postgres yet.
+- Real writes are serialized per gateway process (one asyncio lock); two gateways on one database could interleave a
+  snapshot write. Fine for the demo (one gateway).
 
 - The fake's state is per process and in memory. A gateway restart reloads `data/`, and scans and picks are lost.
 - Search is lexical (no synonyms or embeddings yet), so "chips" does not find "tortilla crisps". Name the products to match.

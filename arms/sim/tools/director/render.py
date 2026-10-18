@@ -35,6 +35,8 @@ BLUE = (110, 170, 250)
 ORANGE = (255, 140, 40)
 FONT_DIRS = ["/usr/share/fonts/dejavu-sans-fonts", "/usr/share/fonts/truetype/dejavu", "/Library/Fonts"]
 
+STALE_S = 12.0
+"""A side camera picture older than this is not shown (the camera only takes pictures while the robot works)."""
 TIER_LABEL = {
     "t1_pretrained": "T1 learned policy",
     "t0_scripted": "T0 scripted",
@@ -103,19 +105,32 @@ class LoopState:
 
 
 def _loc_of(step: dict[str, Any]) -> dict[str, Any] | None:
-    for key in ("location",):
-        if step.get(key):
-            return step[key]
-    target = step.get("target") or {}
-    return target.get("location")
+    if isinstance(step.get("location"), dict):
+        return step["location"]
+    target = step.get("target")
+    return target.get("location") if isinstance(target, dict) else None
 
 
 class Timeline:
-    def __init__(self, events: list[dict[str, Any]], robot: str) -> None:
+    def __init__(self, events: list[dict[str, Any]], robot: str, plan: dict[str, Any] | None = None) -> None:
         self.events = sorted(events, key=lambda r: r["t"])
         self.robot = robot
         self.i = 0
         self.s = LoopState()
+        self.items: dict[str, dict[str, Any]] = {}
+        self.slots: dict[str, dict[str, Any]] = {sl["slot_id"]: sl for sl in (plan or {}).get("slots", [])}
+        self.aisles = {a["aisle_id"]: a.get("label") for a in (plan or {}).get("aisles", [])}
+
+    def _slot_loc(self, slot_id: str | None) -> dict[str, Any] | None:
+        sl = self.slots.get(slot_id or "")
+        if sl is None:
+            return None
+        return {
+            "slot_id": sl["slot_id"],
+            "aisle_label": self.aisles.get(sl.get("aisle_id") or "", sl.get("aisle_id")),
+            "level": sl.get("level"),
+            "item_position": sl.get("item_position"),
+        }
 
     def advance(self, t: float) -> LoopState:
         s = self.s
@@ -141,11 +156,11 @@ class Timeline:
                 why = str(pl.get("fallback_reason") or "")
                 why = "quota 429" if "429" in why else (why[:40] or "no LLM")
                 s.planner = f"scripted planner (LLM fallback: {why})"
-            for st in plan.get("steps", []):
-                tgt = st.get("target") or {}
-                loc = _loc_of(st)
-                if st.get("kind") == "grasp" and tgt.get("sku") and loc:
-                    s.stops.setdefault(tgt["sku"], {"pos": loc.get("item_position"), "slot": loc.get("slot_id")})
+            for it in plan.get("items", []):
+                self.items[it.get("item_id", "")] = it
+                loc = self._slot_loc(it.get("slot_id"))
+                if it.get("sku") and loc:
+                    s.stops.setdefault(it["sku"], {"pos": loc.get("item_position"), "slot": it.get("slot_id")})
             if plan.get("budget_cents"):
                 s.budget = plan["budget_cents"]
         elif k == "step.started":
@@ -155,8 +170,10 @@ class Timeline:
             s.tier = e.get("tier")
             s.chunk = None
             s.stage = None
-            loc = _loc_of(st)
-            sku = (st.get("target") or {}).get("sku") or st.get("sku")
+            item = self.items.get(st.get("item_id") or "", {})
+            tgt = st.get("target") if isinstance(st.get("target"), dict) else {}
+            sku = item.get("sku") or tgt.get("sku") or st.get("expected_sku")
+            loc = _loc_of(st) or self._slot_loc(item.get("slot_id") or st.get("slot_id"))
             if loc:
                 s.location, s.loc_sku = loc, sku or s.loc_sku
             if st.get("kind") == "grasp" and s.tier == "t1_pretrained":
@@ -185,7 +202,7 @@ class Timeline:
                 if s.tier == "t1_pretrained":
                     s.t1_ok += 1
             if st.get("kind") == "place" and e.get("status") == "succeeded":
-                sku = (st.get("target") or {}).get("sku") or st.get("sku")
+                sku = self.items.get(st.get("item_id") or "", {}).get("sku")
                 if sku:
                     s.done_skus.add(sku)
         elif k == "item.picked":
@@ -209,6 +226,15 @@ def fit(img: Image.Image, w: int, h: int) -> Image.Image:
 
 def box(d: ImageDraw.ImageDraw, xy: tuple[int, int, int, int], alpha: int = 170) -> None:
     d.rounded_rectangle(xy, radius=8, fill=(10, 12, 16, alpha))
+
+
+def clip(d: ImageDraw.ImageDraw, text: str, f: ImageFont.ImageFont, max_w: float) -> str:
+    """``text`` cut (with an ellipsis) to fit ``max_w`` pixels."""
+    if d.textlength(text, font=f) <= max_w:
+        return text
+    while text and d.textlength(text + "...", font=f) > max_w:
+        text = text[:-1]
+    return text + "..."
 
 
 def money(c: int) -> str:
@@ -318,8 +344,10 @@ def compose(
     ):
         y = TOP + k * SIDE_H
         im, a = cams[name].at(t)
-        if im is not None:
+        if im is not None and a <= STALE_S:
             canvas.paste(fit(im, SIDE_W, SIDE_H), (DIR_W, y))
+        else:
+            d.text((DIR_W + 120, y + SIDE_H // 2), "(no picture right now)", font=F_M, fill=DIM)
         box(d, (DIR_W + 6, y + 6, DIR_W + 12 + int(d.textlength(label, font=F_S)) + 8, y + 28), 160)
         d.text((DIR_W + 12, y + 9), label, font=F_S, fill=FG)
         if a < 0.6:
@@ -347,7 +375,11 @@ def compose(
         font=F_B,
         fill=FG,
     )
-    tier = s.tier or "-"
+    tier = s.tier or (
+        "(no motion: verifier / catalog step)"
+        if st.get("kind") in ("ground_target", "scan_shelf", "ask_user", "verify")
+        else "-"
+    )
     tl_label = TIER_LABEL.get(tier, tier)
     if tier == "t1_pretrained":
         tl_label += f" · {model}"
@@ -364,15 +396,23 @@ def compose(
         prov = v.get("provider") or {}
         by = v.get("decided_by") or ""
         who = f"verified by Perceptron {prov.get('model') or ''}".strip() if by == "provider" else f"decided by {by}"
-        d.text((22, y0 + 58), f"VERIFIER  {out}", font=F_B, fill=col)
-        d.text((140, y0 + 58), f"{(v.get('reason') or '')[:70]}  · {who}", font=F_M, fill=FG)
+        head = f"VERIFIER {out}"
+        d.text((22, y0 + 58), head, font=F_B, fill=col)
+        x = 22 + d.textlength(head, font=F_B) + 12
+        d.text((x, y0 + 58), clip(d, f"{who}: {v.get('reason') or ''}", F_M, DIR_W - 30 - x), font=F_M, fill=FG)
     loc = s.location
     if loc:
         p = loc.get("item_position") or {}
         d.text(
             (22, y0 + 82),
-            f"WHERE (catalog DB)  {s.loc_sku or ''} -> slot {loc.get('slot_id')} · {loc.get('aisle_label') or ''}"
-            f" · level {loc.get('level')} · ({p.get('x', 0):.2f}, {p.get('y', 0):.2f}, {p.get('z', 0):.2f}) m",
+            clip(
+                d,
+                f"WHERE (catalog DB)  {s.loc_sku or ''} -> slot {loc.get('slot_id')} · "
+                f"{(loc.get('aisle_label') or '').split(' - ')[0]} · level {loc.get('level')} · "
+                f"({p.get('x', 0):.2f}, {p.get('y', 0):.2f}, {p.get('z', 0):.2f}) m",
+                F_S,
+                DIR_W - 52,
+            ),
             font=F_S,
             fill=DIM,
         )
@@ -435,7 +475,7 @@ def main() -> int:
         "front": FrameSeq(root / "front", root / "policy_side", live / f"{args.robot}.front"),
         "wrist": FrameSeq(root / "wrist", root / "policy_wrist", live / f"{args.robot}.wrist"),
     }
-    tl = Timeline(events, args.robot)
+    tl = Timeline(events, args.robot, plan)
     st_ts, st_poses = load_states(run, args.robot)
     mm = Minimap(plan)
     out = av.open(args.out, "w")

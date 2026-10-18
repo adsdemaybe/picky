@@ -203,3 +203,33 @@ grasp attached a unit of the target slot 0.0 cm from the jaw center, ~4-5 s from
 side + wrist pairs/s while the arm moved (all 22 policy pictures of a grasp reached `/ws/frames`). Navigation: 2.0
 front pictures/s while driving (26-33 per drive); the Perceptron look-out answered on every approach / arrival (the
 products are seen from above there, so it mostly says "not visible": advisory only). Extra worker GPU: ~3.3 GB.
+
+## 9. The whole loop on the test stack: real catalog database + director video (2026-10-18)
+
+Same separate stack as §8, now with every loop service real: `PICKY_REAL_ARMS=robot,evidence,cameras,verifier,agent,catalog`
+(Gemini planner + request interpreter, Perceptron Mk1.5 verifier, Mk1.5 T1 grasps, and the catalog on a real Postgres).
+Everything runs on vhagar's own tmux socket, so the default socket (live demo) is never touched:
+
+```bash
+tmux -L picky-pvla ls        # picky-pvla-db (Postgres :5433), picky-pvla-gw (:8101), picky-pvla-sim (worker)
+```
+
+- **Catalog database, no Docker:** `/data/$USER/picky-pg` holds a pip `pgserver` venv (Postgres 16 + pgvector
+  binaries) and `run_db.sh` (`postgres -D pgdata -p 5433`, localhost only). Seed it from the planogram after every
+  rsync: `cd repo-pvla && DATABASE_URL=postgresql+psycopg://picky@localhost:5433/picky uv run --frozen --no-sync python -m arms.catalog.seed --schema --apply`.
+  Every slot location the robot drives to (aisle, fixture, level, item xyz, approach pose) and every stock count comes
+  from the `slots` / `inventory` / `lots` tables per call; the gateway log prints `catalog db: <SKU> @ store_ave -> slot ...`
+  for each lookup.
+- **Deps:** the gateway venv needs `uv sync --frozen --extra catalog --extra perception --extra agent` (psycopg +
+  greenlet, the perceptron SDK, google-genai) and must start with `uv run --frozen --no-sync` (a plain `uv run` re-syncs
+  to base deps and drops them).
+- **Request:** `POST /api/requests {"text": "tacos for 6, under $40, one vegetarian", "user_id": "maya", "store_id": "store_ave"}`.
+  Without `store_id` the fleet picks store_hill (cheaper, on the 2D fake), not the Isaac store.
+- **Director video:** `PICKY_SIM_DIRECTOR=rover-ave-1` (+ `_DIR`, `_FPS`, `_VIEW`) in `sim-pvla.env` turns on the chase
+  camera and the frame tee (`arms/sim/director.py`). Record a run with
+  `uv run --frozen --no-sync python arms/sim/tools/director/record.py --store store_ave --text "..." --out RUN`
+  (events, approvals answered like the web app, store planogram) and composite it with the SmolVLA venv's PyAV:
+  `$V arms/sim/tools/director/render.py RUN --director $PICKY_SIM_DIRECTOR_DIR/rover-ave-1 --out run.mp4 --speed 4 --gif run.gif`.
+- **Shared GPU:** when other jobs load vhagar (a SmolVLA fine-tune at ~90 % GPU and load ~28 on 16 cores during this
+  test) the worker's replicator steps go from ~15-30 ms to 150-560 ms. Keep live streams off (`record.py` does not ask
+  for `/ws/frames` unless `--live-frames`): every streamed camera is one more render product in every step.

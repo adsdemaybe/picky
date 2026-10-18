@@ -39,16 +39,17 @@ log = get_logger(__name__)
 DIRECTOR_ENV = "PICKY_SIM_DIRECTOR"
 DIRECTOR_DIR_ENV = "PICKY_SIM_DIRECTOR_DIR"
 DIRECTOR_FPS_ENV = "PICKY_SIM_DIRECTOR_FPS"
+DIRECTOR_VIEW_ENV = "PICKY_SIM_DIRECTOR_VIEW"
 CAMERA_SUFFIX = "director"
-BACK_M = 1.55
+BACK_M = 1.15
 """Eye distance behind the rover (along its smoothed heading)."""
-SIDE_M = 0.75
+SIDE_M = 0.5
 """Eye offset to the rover's right (a 3/4 view: the arm and the shelf it faces are both in frame)."""
-EYE_Z_M = 2.35
-"""Above the 1.8 m gondolas, below the 3.0 m ceiling."""
-LOOK_AHEAD_M = 0.45
-LOOK_Z_M = 0.65
-HFOV_DEG = 78.0
+EYE_Z_M = 2.1
+"""Above the 1.8 m gondolas, below the 3.0 m ceiling. PICKY_SIM_DIRECTOR_VIEW='back,side,z' overrides all three."""
+LOOK_AHEAD_M = 0.35
+LOOK_Z_M = 0.75
+HFOV_DEG = 74.0
 HEADING_SMOOTH_S = 0.9
 """Time constant of the heading filter (s)."""
 WALL_MARGIN_M = 0.35
@@ -65,22 +66,24 @@ def chase_pose(
     bounds: tuple[float, float, float, float] | None = None,
     w: int = 640,
     h: int = 480,
+    view: tuple[float, float, float] | None = None,
 ) -> CameraPose:
     """Chase camera for a rover at ``pose`` with the (smoothed) ``heading``; ``bounds`` = (x0, y0, x1, y1) of the
     store floor in the store frame (the eye is clamped inside the walls)."""
+    back, side, eye_z = view or (BACK_M, SIDE_M, EYE_Z_M)
     c, s = math.cos(heading), math.sin(heading)
-    ex = pose.x - BACK_M * c + SIDE_M * s
-    ey = pose.y - BACK_M * s - SIDE_M * c
+    ex = pose.x - back * c + side * s
+    ey = pose.y - back * s - side * c
     if bounds is not None:
         x0, y0, x1, y1 = bounds
         ex = min(max(ex, x0 + WALL_MARGIN_M), x1 - WALL_MARGIN_M)
         ey = min(max(ey, y0 + WALL_MARGIN_M), y1 - WALL_MARGIN_M)
     tx = pose.x + LOOK_AHEAD_M * math.cos(pose.theta)
     ty = pose.y + LOOK_AHEAD_M * math.sin(pose.theta)
-    dx, dy, dz = tx - ex, ty - ey, LOOK_Z_M - EYE_Z_M
+    dx, dy, dz = tx - ex, ty - ey, LOOK_Z_M - eye_z
     yaw = math.atan2(dy, dx)
     pitch = math.atan2(dz, max(1e-6, math.hypot(dx, dy)))
-    return CameraPose(x=ex, y=ey, z=EYE_Z_M, yaw=yaw, pitch=pitch, hfov=math.radians(HFOV_DEG), w=w, h=h)
+    return CameraPose(x=ex, y=ey, z=eye_z, yaw=yaw, pitch=pitch, hfov=math.radians(HFOV_DEG), w=w, h=h)
 
 
 @dataclass
@@ -95,6 +98,7 @@ class Director:
     robot_ids: list[str]
     out_dir: Path
     fps: float = 4.0
+    view: tuple[float, float, float] | None = None
     _next_t: float = 0.0
     _follow: dict[str, _Follow] = field(default_factory=dict)
     _warned: set[str] = field(default_factory=set)
@@ -110,10 +114,16 @@ class Director:
         except ValueError:
             fps = 4.0
         out = Path(env.get(DIRECTOR_DIR_ENV, "") or "director")
+        view = None
+        try:
+            parts = [float(v) for v in env.get(DIRECTOR_VIEW_ENV, "").split(",") if v.strip()]
+            view = (parts[0], parts[1], parts[2]) if len(parts) == 3 else None
+        except ValueError:
+            view = None
         for rid in ids:
             (out / rid / CAMERA_SUFFIX).mkdir(parents=True, exist_ok=True)
         log.info("director camera: following %s at %.1f fps -> %s", ", ".join(ids), fps, out)
-        return cls(robot_ids=ids, out_dir=out, fps=fps)
+        return cls(robot_ids=ids, out_dir=out, fps=fps, view=view)
 
     def tee(self, msg: Any) -> None:
         """Copy a frame the worker sends (CameraFrame, or a result carrying ``frame``) for a followed robot to disk."""
@@ -166,7 +176,7 @@ class Director:
                 alpha = 1.0 - math.exp(-max(0.0, now - f.last_t) / HEADING_SMOOTH_S)
                 f.heading = _wrap(f.heading + alpha * _wrap(theta - f.heading))
             f.last_t = now
-            cam = chase_pose(rover.pose, f.heading, bounds=self._bounds(core, rover.store_id))
+            cam = chase_pose(rover.pose, f.heading, bounds=self._bounds(core, rover.store_id), view=self.view)
             out.append((self.camera_id(rid), rover.store_id, cam))
         return out
 
