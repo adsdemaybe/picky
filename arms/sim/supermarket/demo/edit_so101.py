@@ -19,10 +19,15 @@ import json
 from functools import lru_cache
 from pathlib import Path
 
+import edit_video
 import numpy as np
 from edit_video import GREEN, MiniMap, font, panel, wrap_text
 from PIL import Image, ImageDraw, ImageFilter
 
+# a font with ✓ / → on macOS too (DejaVu on Linux has them)
+for _p in ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", "/Library/Fonts/Arial Unicode.ttf"):
+    if _p not in edit_video.FONT_PATHS:
+        edit_video.FONT_PATHS.insert(2, _p)
 W, H, FPS = 1920, 1080, 30
 ORANGE = (255, 150, 40)
 BLUE = (80, 170, 255)
@@ -30,6 +35,7 @@ YELLOW = (255, 214, 90)
 WHITE = (255, 255, 255)
 GREY = (200, 204, 212)
 PICK_PHASES = ("reach", "grasp", "lift", "basket")
+BADGE = [""]  # e.g. "offline preview" for runs without Isaac
 
 
 class Run:
@@ -272,6 +278,11 @@ class Editor:
         cap = caption if caption is not None else self.caption(fr, t)
         if cap and cap[0]:
             self.caption_bar(img, *cap)
+        if BADGE[0]:
+            d = ImageDraw.Draw(img)
+            tw = d.textlength(BADGE[0], font=font(22, True))
+            panel(img, (W / 2 - tw / 2 - 16, 20, W / 2 + tw / 2 + 16, 58), 200, 10)
+            d.text((W / 2, 39), BADGE[0], font=font(22, True), fill=YELLOW, anchor="mm")
         return img.convert("RGB")
 
     # ---- cards
@@ -456,7 +467,7 @@ def main_frames(run: Run, m0: int, m1: int, mode="full", windows=None):
         if windows is not None:
             t = fr["t"]
             if not any(a <= t <= b for a, b in windows):
-                sp = max(sp, 8.0)
+                sp = max(sp, 30.0)
         yield fi
         f += sp
 
@@ -533,7 +544,7 @@ def highlight(ed: Editor):
             continue
         secs.add(sec)
         t_in = next((x["t"] for x in r.events if x["kind"] == "in_basket" and x["item"] == e["item"]), e["t"] + 10)
-        wins.append((e["t"] - 7.0, t_in + 1.0))
+        wins.append((e["t"] - 5.0, t_in + 0.8))
         if len(wins) == 3:
             break
     un = next((e for e in r.events if e["kind"] == "unload_attached"), None)
@@ -554,7 +565,9 @@ def main():
     ap.add_argument("--only", choices=["full", "highlight", "early"], default=None)
     ap.add_argument("--tag", default="")
     ap.add_argument("--stills", type=int, default=0, help="only write N composed stills (+ the cards) to OUT/stills")
+    ap.add_argument("--badge", default="", help="small label at the top of every main frame")
     a = ap.parse_args()
+    BADGE[0] = a.badge
     a.out.mkdir(parents=True, exist_ok=True)
     ed = Editor(Run(a.run))
     if a.stills:
