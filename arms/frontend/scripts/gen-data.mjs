@@ -91,6 +91,7 @@ write("wireless.json", {
   upcoming_promos: wireless.upcoming_promos ?? [],
   line_promos: wireless.line_promos ?? [],
   online_sale_prices: wireless.online_sale_prices ?? [],
+  purchases: load("data/fixtures/users.yaml").users.find((u) => u.user_id === "maya").purchases.filter((p) => p.store_id === "store_tmobile"),
   sources: wireless.sources ?? [],
 });
 
@@ -193,7 +194,8 @@ while (t < Date.parse("2026-10-15T00:00:00Z")) {
   }
   t += (6 + Math.floor(rand() * 4)) * DAY;
 }
-for (const p of maya.purchases) purchases.push({ ...p, rating: p.rating ?? null, synthetic: false });
+// T-Mobile purchases belong to the separate T-Mobile site (wireless.json), not the grocery history
+for (const p of maya.purchases.filter((q) => q.store_id !== "store_tmobile")) purchases.push({ ...p, rating: p.rating ?? null, synthetic: false });
 purchases.sort((a, b) => a.ts.localeCompare(b.ts));
 
 write("maya.json", { profile: maya.profile, mandate: maya.mandate, purchases });
