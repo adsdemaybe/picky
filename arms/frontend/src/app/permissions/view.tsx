@@ -1,5 +1,6 @@
 "use client";
 import { Check, ShieldCheck, X } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { Money, Panel, SectionTitle } from "@/components/picky";
 import { Badge } from "@/components/ui/badge";
@@ -76,6 +77,11 @@ export default function RulesPage() {
         </section>
 
         <div className="flex flex-col gap-8 lg:col-span-5">
+          <Panel className="p-5">
+            <h2 className="text-[17px] font-semibold">Your saved information</h2>
+            <p className="mt-2 text-[14px] text-muted-foreground">Review, edit or delete the preferences and notes you saved by voice or text. They provide context for Ask Picky; spending rules still apply separately.</p>
+            <Link href="/voice" className="mt-3 inline-flex min-h-10 items-center text-[14px] font-semibold text-leaf">Manage Voice & memory</Link>
+          </Panel>
           <section>
             <SectionTitle>What Picky has learned</SectionTitle>
             <Panel className="p-5">

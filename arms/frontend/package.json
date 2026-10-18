@@ -10,7 +10,10 @@
     "gen-data": "node scripts/gen-data.mjs",
     "typecheck": "tsc --noEmit",
     "predev": "node scripts/gen-data.mjs",
-    "prebuild": "node scripts/gen-data.mjs"
+    "prebuild": "node scripts/gen-data.mjs",
+    "check:grocery": "node scripts/check-grocery-trips.mjs",
+    "check:memory": "node scripts/check-memory.mjs",
+    "check:trip-guide": "node scripts/check-trip-guide.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",

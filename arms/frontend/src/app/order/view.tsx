@@ -2,7 +2,10 @@
 import { Ban, Bot, Check, Clock, Info, PackageCheck, Sparkles, Store, UserRound } from "lucide-react";
 import { motion } from "motion/react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useState, useTransition } from "react";
+import { GroceryTrips } from "@/components/GroceryTrips";
+import { TripRoutePreview } from "@/components/TripRoutePreview";
+import { groupFoodLines } from "@/lib/grocery-trips";
 import { StoreThumb } from "@/components/art";
 import { ImageSlot } from "@/components/media";
 import { CountUp } from "@/components/motion";
@@ -29,27 +32,26 @@ export default function OrderPage() {
 function OrderBuilder() {
   const params = useSearchParams();
   const add = params.get("add");
-  const [storeId, setStoreId] = useState<StoreId>(params.get("store") === "store_tmobile" ? "store_tmobile" : "store_ave");
-  const initial = params.get("preset") === "basics" ? PRESETS.store_ave[1].text : PRESETS[storeId][0].text;
+  const initialStoreId: StoreId = params.get("store") === "store_tmobile" ? "store_tmobile" : "store_ave";
+  const initial = params.get("intent")?.slice(0, 2000) || (PRESETS[initialStoreId].find((preset) => preset.id === params.get("preset"))?.text ?? PRESETS[initialStoreId][0].text);
   const [text, setText] = useState<string>(initial);
-  const [draft, setDraft] = useState<Draft>(() => expandIntent(initial, storeId, add));
+  const [draft, setDraft] = useState<Draft>(() => expandIntent(initial, initialStoreId, add));
+  const storeId = draft.store_id;
   const store = STORES[storeId];
   const slotBySku = slotsOf(storeId);
   const [accepted, setAccepted] = useState<Set<string>>(() => defaultAccepted(draft));
   const [mode, setMode] = useState<Mode>("with_me");
-  const [thinking, setThinking] = useState(false);
+  const [thinking, startTransition] = useTransition();
   const placeOrder = useTrip((s) => s.placeOrder);
   const router = useRouter();
 
   const submit = (t: string, sid: StoreId = storeId) => {
     setText(t);
-    setThinking(true);
-    setTimeout(() => {
+    startTransition(() => {
       const d = expandIntent(t, sid);
       setDraft(d);
       setAccepted(defaultAccepted(d));
-      setThinking(false);
-    }, 650);
+    });
   };
 
   const detours = useMemo(() => {
@@ -82,7 +84,7 @@ function OrderBuilder() {
     <div className="flex flex-col gap-8">
       <section className="animate-rise">
         <h1 className="text-[36px] leading-[1.05] font-bold md:text-[46px]">Send the robot shopping</h1>
-        <p className="mt-2 text-[16px] text-muted-foreground">Pick a store, say what you need, and it plans the shortest route past everything.</p>
+        <p className="mt-2 text-[16px] text-muted-foreground">Choose a trip or write your list. See what it needs, where it lives, and the path the robot will take.</p>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Store">
           {(Object.keys(STORES) as StoreId[]).map((id) => {
@@ -96,7 +98,6 @@ function OrderBuilder() {
                 whileTap={{ scale: 0.985 }}
                 onClick={() => {
                   if (on) return;
-                  setStoreId(id);
                   submit(PRESETS[id][0].text, id);
                 }}
                 className={cn(
@@ -135,6 +136,8 @@ function OrderBuilder() {
           })}
         </div>
 
+        {store.kind === "grocery" && <GroceryTrips selected={draft.trip_type} onSelect={(text) => submit(text)} />}
+
         <form
           className="mt-4"
           onSubmit={(e) => {
@@ -156,7 +159,7 @@ function OrderBuilder() {
             </Button>
           </div>
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {PRESETS[storeId].map((p) => (
+            {store.kind !== "grocery" && PRESETS[storeId].map((p) => (
               <button
                 key={p.id}
                 type="button"
@@ -173,45 +176,45 @@ function OrderBuilder() {
 
       <div className={cn("grid gap-8 transition-opacity lg:grid-cols-12", thinking && "pointer-events-none opacity-40")}>
         <div className="flex flex-col gap-8 lg:col-span-8">
+          <TripRoutePreview draft={draft} accepted={accepted} mode={mode} />
           <section>
             <SectionTitle>
               {draft.title} <span className="font-sans text-[15px] font-medium text-muted-foreground">for {maya.profile.display_name}</span>
             </SectionTitle>
-            <Panel className="p-2">
-              {draft.lines.map((l) => {
-                const p = productBySku[l.sku];
-                return (
-                  <div key={l.line_id} className="flex items-center gap-3 rounded-xl p-3">
-                    <ProductTile color={p.label_color} category={p.category} name={p.name} size={44} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-semibold">
-                          <span className="tabular text-muted-foreground">{l.qty} × </span>
-                          {p.name}
-                        </span>
-                        {l.vegetarian && <Badge variant="leaf">Vegetarian</Badge>}
-                      </div>
-                      {l.note && <div className="text-[13px] text-muted-foreground">{l.note}</div>}
-                      {l.sourcing === "online" && (
-                        <Badge variant="grape" className="mt-1 sm:hidden">
-                          <PackageCheck /> Online, 2 h
-                        </Badge>
-                      )}
-                    </div>
-                    {l.sourcing === "in_store" ? (
-                      <Badge variant="leaf" className="hidden sm:inline-flex">
-                        <Store /> In store
-                      </Badge>
-                    ) : (
-                      <Badge variant="grape" className="hidden sm:inline-flex">
-                        <PackageCheck /> Online, 2 h
-                      </Badge>
-                    )}
-                    <Money cents={l.qty * l.unit_cents} className="w-[72px] text-right font-heading text-[16px] font-semibold" />
+            <div className="flex flex-col gap-3">
+              {(store.kind === "grocery" ? groupFoodLines(draft.lines) : [{ id: "wireless", label: "Phones & accessories", lines: draft.lines }]).map((department) => (
+                <Panel key={department.id} className="overflow-hidden">
+                  <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-4 py-3">
+                    <h3 className="text-[14px] font-semibold">{department.label} <span className="ml-1 font-normal text-muted-foreground">({department.lines.length})</span></h3>
+                    <Money cents={department.lines.reduce((sum, line) => sum + line.qty * line.unit_cents, 0)} className="text-[14px] font-semibold" />
                   </div>
-                );
-              })}
-            </Panel>
+                  <div className="p-2">
+                    {department.lines.map((line) => {
+                      const product = productBySku[line.sku];
+                      const slot = slotBySku[line.sku];
+                      const aisle = store.aisles.find((aisle) => aisle.aisle_id === slot?.aisle_id);
+                      return (
+                        <div key={line.line_id} className="flex items-center gap-3 rounded-xl p-3">
+                          <ProductTile color={product.label_color} category={product.category} name={product.name} size={44} />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-semibold"><span className="tabular text-muted-foreground">{line.qty} × </span>{product.name}</span>
+                              {line.vegetarian && <Badge variant="leaf">Vegetarian</Badge>}
+                            </div>
+                            <div className="text-[12.5px] text-muted-foreground">{line.sourcing === "online" ? line.note : aisle?.label ?? "In store"}</div>
+                            {line.note && line.sourcing !== "online" && <div className="text-[13px] text-muted-foreground">{line.note}</div>}
+                          </div>
+                          <Badge variant={line.sourcing === "in_store" ? "leaf" : "grape"} className="hidden sm:inline-flex">
+                            {line.sourcing === "in_store" ? <><Store /> In store</> : <><PackageCheck /> Online</>}
+                          </Badge>
+                          <Money cents={line.qty * line.unit_cents} className="w-[72px] text-right font-heading text-[16px] font-semibold" />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </Panel>
+              ))}
+            </div>
           </section>
 
           {draft.advice.length > 0 && (

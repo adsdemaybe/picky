@@ -6,7 +6,8 @@
 import { create } from "zustand";
 import { STORES, maya, online, productBySku, slotsOf, type Pose, type Purchase, type StoreId } from "./data";
 import { draftTotal, mandateCheck, type Draft } from "./order";
-import { planRoute, type PlannedRoute } from "./routing";
+import type { PlannedRoute } from "./routing";
+import { buildTripPlan } from "./trip-plan";
 
 export type Mode = "with_me" | "pickup";
 export type StopKind = "start" | "list" | "optional" | "end";
@@ -310,71 +311,20 @@ export const useTrip = create<TripStore>((set, get) => {
       runToken++;
       resolveApproval = null;
       seq = 0;
-      const acc = new Set(accepted);
       const store = STORES[draft.store_id];
-      const slotBySku = slotsOf(draft.store_id);
-      const stops: Record<string, Stop> = {
-        start: { id: "start", kind: "start", label: "Robot dock", pose: store.robot_home },
-        end: { id: "end", kind: "end", label: mode === "pickup" ? "Pickup counter" : store.kind === "wireless" ? "Counter" : "Checkout", pose: store.checkout },
-      };
-      for (const l of draft.lines.filter((l) => l.sourcing === "in_store")) {
-        const slot = slotBySku[l.sku];
-        stops[`s_${l.sku}`] = {
-          id: `s_${l.sku}`,
-          kind: "list",
-          label: productBySku[l.sku].name,
-          pose: slot.approach_pose,
-          sku: l.sku,
-          qty: l.qty,
-          slot_id: slot.slot_id,
-          unit_cents: l.unit_cents,
-        };
-      }
-      for (const r of draft.recs.filter((r) => acc.has(r.rec_id))) {
-        const slot = slotBySku[r.sku];
-        stops[`o_${r.sku}`] = {
-          id: `o_${r.sku}`,
-          kind: "optional",
-          label: productBySku[r.sku].name,
-          pose: slot.approach_pose,
-          sku: r.sku,
-          qty: 1,
-          slot_id: slot.slot_id,
-          rec_id: r.rec_id,
-          reason: r.reason,
-          unit_cents: r.unit_cents,
-        };
-      }
-      const mid = Object.values(stops).filter((s) => s.kind === "list" || s.kind === "optional");
-      const route = planRoute(store, stops.start, mid, stops.end);
-      const base = planRoute(
-        store,
-        stops.start,
-        mid.filter((s) => s.kind === "list"),
-        stops.end,
-      );
-      const offRoute = mid
-        .filter((s) => s.kind === "optional")
-        .filter((o) => route.total_m - planRoute(store, stops.start, mid.filter((s) => s.id !== o.id), stops.end).total_m > 0.5)
-        .map((o) => o.id);
+      const plan = buildTripPlan(draft, accepted, mode);
+      const { route, baseline_m } = plan;
       const onlineLines: CartLine[] = draft.lines
         .filter((l) => l.sourcing === "online")
         .map((l) => ({ sku: l.sku, qty: l.qty, unit_cents: l.unit_cents, source: "online", verified: null }));
       set({
         ...initial,
-        storeId: draft.store_id,
-        robot: { ...store.robot_home, status: "idle", speed: 0 },
         phase: mode === "with_me" ? "waiting_login" : "shopping",
         mode,
         draft,
         accepted,
         loginCode: "482 913",
-        stops,
-        route,
-        baseline_m: base.total_m,
-        baselinePath: base.legs.flatMap((l) => l.path),
-        offRoute,
-        stopStatus: Object.fromEntries(Object.keys(stops).map((k) => [k, k === "start" ? "done" : "pending"])),
+        ...plan,
         cart: onlineLines,
         startedAt: Date.now(),
       });
@@ -383,7 +333,7 @@ export const useTrip = create<TripStore>((set, get) => {
       const nOnline = onlineLines.length;
       emit("sourcing.split", `${draft.lines.length - nOnline} in store at ${store.name}, ${nOnline} online (${online.name})`);
       emit("recs.ready", `${draft.recs.length} suggestions, ${accepted.length} kept, 0 sponsored`);
-      emit("route.planned", `${route.order.length - 2} stops, ${route.total_m.toFixed(1)} m (list-only ${base.total_m.toFixed(1)} m)`);
+      emit("route.planned", `${route.order.length - 2} stops, ${route.total_m.toFixed(1)} m (list-only ${baseline_m.toFixed(1)} m)`);
       if (mode === "pickup") {
         const t = runToken;
         run(t).catch(() => {});
