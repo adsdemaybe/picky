@@ -115,7 +115,7 @@ export default function TmoTrack() {
       </section>
 
       <section>
-        <SectionTitle>The five directions, and the example to open for each</SectionTitle>
+        <SectionTitle>One agent, five skills: open each skill's engine and its worked examples</SectionTitle>
         <div className="grid gap-2 md:grid-cols-5">
           {DIRECTIONS.map((d, i) => (
             <Link key={d.href} href={d.href} className="rounded-xl bg-card p-3 ring-1 ring-foreground/[0.07] hover:ring-magenta">

@@ -5,7 +5,10 @@ export type GrokMsg = { role: "system" | "user" | "assistant" | "tool"; content:
 export type GrokCall = { id: string; type?: "function"; function: { name: string; arguments: string } };
 export type GrokTool = { name: string; description: string; parameters: Record<string, unknown> };
 
-export const hasGrok = () => !!process.env.XAI_API_KEY;
+// once xAI rejects the key, stop calling it for this server process (every answer would just fall back anyway)
+let rejected = false;
+export const hasGrok = () => !!process.env.XAI_API_KEY && !rejected;
+export const grokStatus = (): "ready" | "rejected" | "missing" => (!process.env.XAI_API_KEY ? "missing" : rejected ? "rejected" : "ready");
 export const grokModel = () => process.env.PICKY_GROK_MODEL || "grok-4.20-0309-non-reasoning";
 
 export async function grok(messages: GrokMsg[], opts: { tools?: GrokTool[]; maxTokens?: number; timeoutMs?: number; json?: boolean } = {}) {
@@ -22,6 +25,10 @@ export async function grok(messages: GrokMsg[], opts: { tools?: GrokTool[]; maxT
       ...(opts.json ? { response_format: { type: "json_object" } } : {}),
     }),
   });
-  if (!r.ok) throw new Error(`grok ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 300);
+    if (r.status === 400 || r.status === 401 || r.status === 403) if (/api key/i.test(body)) rejected = true;
+    throw new Error(`grok ${r.status}: ${body}`);
+  }
   return ((await r.json()) as { choices: { message: GrokMsg }[] }).choices[0].message;
 }

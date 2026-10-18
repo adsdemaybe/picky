@@ -1,10 +1,13 @@
 "use client";
-// In store: the robot as the store's sales associate. The shopper walks up and talks to Magenta (mic or typing);
+// Magenta: one agent with five skills (Cart Whisperer, Matchmaker, Next Best Moment, Timekeeper, Household Mix), here
+// on the robot on the store floor (the same agent and basket as the website). Checking in as a customer lets her open
+// with what matters for them (Next Best Moment); answers come with cards from the same engines.
+// The shopper walks up and talks to Magenta (mic or typing);
 // Magenta answers out loud, walks them to the right fixture, fetches boxed phones from the back room, checks fit,
 // says "skip it" / "wait" when that's the honest answer, pages a human for account work, and rings them up at the
 // counter. Brain: /api/associate (Grok + deterministic tools when XAI_API_KEY is set, else the offline brain); if
 // that route is unreachable the same offline brain runs here in the browser. The basket is shared with the Shop page.
-import { Bell, BellOff, Check, Footprints, Keyboard, Mic, MicOff, PackageOpen, Send, ShoppingBag, UserRound, UserRoundCheck, Volume2, VolumeX, X } from "lucide-react";
+import { Bell, BellOff, CalendarClock, Check, ChevronDown, Footprints, HeartHandshake, Keyboard, MessagesSquare, Mic, MicOff, PackageOpen, Send, ShoppingBag, ShoppingCart, UserRound, UserRoundCheck, Users, Volume2, VolumeX, X } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -12,9 +15,11 @@ import { toast } from "sonner";
 import { Money, Panel, ProductTile } from "@/components/picky";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { tmobileStore } from "@/data/stores/tmobile";
-import { approachOf, applyActions, backStock, chipsFor, dealOf, deviceOf, displaySlot, fixtureName, productOf, respond, stockOf, type AssocAction, type AssocReply } from "@/lib/associate";
+import { approachOf, applyActions, backStock, chipsFor, dealOf, deviceOf, displaySlot, fixtureName, opener, productOf, respond, stockOf, type AgentCard, type AssocAction, type AssocReply } from "@/lib/associate";
+import { CUSTOMERS, customerOf } from "@/lib/customers";
 import type { Pose } from "@/lib/data";
 import { fmt } from "@/lib/money";
 import { astar } from "@/lib/routing";
@@ -25,10 +30,20 @@ import { applySuggestion, cartTotal, shortName, suggest, unitPrice, type Suggest
 import { useWhisper } from "@/lib/whisperStore";
 import { niceDate, WhisperList } from "../bits";
 import { usePhrasing } from "../phrasing";
+import { AgentCards } from "./cards";
 import { Face, type FaceMode } from "./face";
 import { StoreFloor } from "./map";
 
-type Msg = { id: string; role: "you" | "magenta" | "system"; text: string; skus?: string[] };
+type Msg = { id: string; role: "you" | "magenta" | "system"; text: string; skus?: string[]; cards?: AgentCard[] };
+
+// the five skills, as things a shopper would actually say
+const SKILLS = [
+  { label: "Find me the right phone", skill: "Matchmaker", Icon: MessagesSquare },
+  { label: "Should I upgrade?", skill: "Timekeeper", Icon: CalendarClock },
+  { label: "Am I on the right plan?", skill: "Household Mix", Icon: Users },
+  { label: "Anything I should know?", skill: "Next Best Moment", Icon: HeartHandshake },
+  { label: "What's in my basket?", skill: "Cart Whisperer", Icon: ShoppingCart },
+];
 type Task = { kind: "guide" | "fetch" | "counter"; label: string; fixture: string; sku?: string } | null;
 
 const SPEED = 1.5; // m/s on screen (a little brisker than the real rover)
@@ -105,7 +120,9 @@ function useWalker() {
 
 export default function InStore() {
   const [started, setStarted] = useState(false);
-  const [known, setKnown] = useState(false);
+  const [customer, setCustomer] = useState<string | null>(null);
+  const known = customer === "maya";
+  const who = customerOf(customer);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [chips, setChips] = useState<string[]>(chipsFor({ cart: [], budget_cents: 10000, known: false }));
   const [busy, setBusy] = useState(false);
@@ -113,7 +130,7 @@ export default function InStore() {
   const [typing, setTyping] = useState(false);
   const [voiceOn, setVoiceOn] = useState(true);
   const [handsFree, setHandsFree] = useState(true);
-  const [brain, setBrain] = useState<"grok" | "offline">("offline");
+  const [brain, setBrain] = useState<{ brain: "grok" | "offline"; grok: "ready" | "rejected" | "missing" }>({ brain: "offline", grok: "missing" });
   const [task, setTask] = useState<Task>(null);
   const [expert, setExpert] = useState<{ reason: string; at: number } | null>(null);
   const [checkout, setCheckout] = useState(false);
@@ -141,7 +158,7 @@ export default function InStore() {
     });
     fetch("/api/associate")
       .then((r) => r.json())
-      .then((j: { brain: "grok" | "offline" }) => setBrain(j.brain))
+      .then((j: { brain: "grok" | "offline"; grok: "ready" | "rejected" | "missing" }) => setBrain(j))
       .catch(() => {});
   }, []);
   useEffect(() => {
@@ -214,7 +231,7 @@ export default function InStore() {
       setText("");
       post({ role: "you", text: opts.shown ?? t });
       setBusy(true);
-      const ctx = { cart: useTmoCart.getState().cart, budget_cents: useTmoCart.getState().budget_cents, focus: opts.focus ?? focus.current, device, known, declined: useWhisper.getState().declined };
+      const ctx = { cart: useTmoCart.getState().cart, budget_cents: useTmoCart.getState().budget_cents, focus: opts.focus ?? focus.current, device, known, customer, declined: useWhisper.getState().declined };
       let r: AssocReply;
       if (opts.local) {
         await new Promise((res) => setTimeout(res, 250));
@@ -234,44 +251,52 @@ export default function InStore() {
       setDevice(r.device ?? device);
       const shown = r.actions.filter((a): a is Extract<AssocAction, { type: "show" }> => a.type === "show").flatMap((a) => a.skus);
       const added = r.actions.filter((a) => a.type === "add").map((a) => (a as { sku: string }).sku);
-      post({ role: "magenta", text: r.text, skus: [...new Set([...shown, ...added])].slice(0, 4) });
+      post({ role: "magenta", text: r.text, skus: [...new Set([...shown, ...added])].slice(0, 4), cards: r.cards ?? [] });
       setChips(r.chips?.length ? r.chips : chipsFor({ ...ctx, cart: applyActions(ctx.cart, r.actions), focus: focus.current }));
       void say(r.text);
       void run(r.actions);
     },
-    [busy, known, device, msgs, mic, post, say, run],
+    [busy, known, customer, device, msgs, mic, post, say, run],
   );
   useEffect(() => {
     askRef.current = (t) => void ask(t);
   }, [ask]);
 
   // ---- start / check in
+  const greet = (id: string | null) => {
+    const ctx = { cart: useTmoCart.getState().cart, budget_cents: budget, known: id === "maya", customer: id, declined: useWhisper.getState().declined };
+    const r = opener(ctx);
+    const web = fromWeb ? ` I see you started a basket on the website with ${fromWeb} item${fromWeb > 1 ? "s" : ""}, so we can pick up from there.` : "";
+    const text = id ? `${r.text}${web}` : fromWeb ? `${r.text.replace(/ What are you looking for( today)?\?$/, "")}${web}` : r.text;
+    post({ role: "magenta", text, cards: r.cards });
+    setChips(r.chips);
+    void say(text);
+  };
   const begin = () => {
     setStarted(true);
     live.current.started = true;
-    const r = respond("hi", { cart, budget_cents: budget, known });
-    const hello = fromWeb ? `${r.text.replace(/ What are you looking for( today)?\?$/, "")} I see you started a basket on the website with ${fromWeb} item${fromWeb > 1 ? "s" : ""}, so we can pick up from there.` : r.text;
-    post({ role: "magenta", text: hello });
-    void say(hello);
+    greet(customer);
   };
-  const toggleKnown = (v: boolean) => {
-    setKnown(v);
-    const line = v
-      ? "Thanks for checking in, Maya. I can see your Pixel 7 and what you already own, so I'll tell you when something is a repeat or worth waiting for."
-      : "You're checked out. I won't use your account for the rest of this visit.";
-    post({ role: "system", text: v ? "Checked in with the Picky app as Maya. Magenta can now see her phone, payments and what she owns." : "Checked out. Account details hidden." });
-    if (started) {
+  const checkIn = (id: string | null) => {
+    if (id === customer) return;
+    setCustomer(id);
+    const c = customerOf(id);
+    post({ role: "system", text: c ? `Checked in with the Picky app as ${c.name} (${c.blurb}). Magenta can now see this account.` : "Checked out. Magenta won't use account details for the rest of this visit." });
+    if (!started) return;
+    if (c) greet(id);
+    else {
+      const line = "You're checked out. I won't use your account for the rest of this visit.";
       post({ role: "magenta", text: line });
       void say(line);
+      setChips(chipsFor({ cart, budget_cents: budget, known: false, focus: focus.current }));
     }
-    setChips(chipsFor({ cart, budget_cents: budget, known: v, focus: focus.current }));
   };
   const endVisit = () => {
     stopSpeaking();
     if (mic.listening) mic.stop();
     setStarted(false);
     // privacy: a visit's check-in ends with the visit
-    setKnown(false);
+    setCustomer(null);
     setMsgs([]);
     setTask(null);
     setExpert(null);
@@ -308,7 +333,7 @@ export default function InStore() {
     setCheckout(false);
     setReceipt({ total, items });
     useTmoCart.getState().set({ cart: [] }, "store");
-    const line = `You're all set, ${known ? "Maya" : "thanks"}. Your receipt is in the Picky app. Follow me to the counter and I'll hand everything over.`;
+    const line = `You're all set${who ? `, ${who.first}` : ""}. Your receipt is in the Picky app. Follow me to the counter and I'll hand everything over.`;
     post({ role: "magenta", text: line });
     void say(line);
     setTask({ kind: "counter", label: "Walking you to the counter for pickup", fixture: "COUNTER" });
@@ -324,16 +349,26 @@ export default function InStore() {
     <div className="flex flex-col gap-5 pb-16">
       <section className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[14px] font-semibold text-magenta">In store · robot associate</p>
-          <h1 className="mt-1 text-[30px] leading-tight font-bold md:text-[38px]">Talk to Magenta, right on the floor</h1>
-          <p className="mt-1 max-w-[680px] text-[15px] text-muted-foreground">
-            The robot greets you, answers out loud, walks you to the right wall, brings boxed phones out from the back, and tells you when to skip or wait. It gets a person for anything account-related.
+          <p className="text-[14px] font-semibold text-magenta">One agent · in the store and on the website</p>
+          <h1 className="mt-1 text-[30px] leading-tight font-bold md:text-[38px]">Magenta handles all of it</h1>
+          <p className="mt-1 max-w-[720px] text-[15px] text-muted-foreground">
+            Picking a phone, deciding whether to upgrade, fixing the family plan, keeping the basket honest, and noticing what&apos;s bugging you before you have to ask. One conversation, out loud, with the robot walking you around the store.
           </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {SKILLS.map((k) => (
+              <span key={k.skill} className="inline-flex items-center gap-1 rounded-full bg-magenta-wash px-2.5 py-1 text-[12px] font-semibold text-magenta-deep">
+                <k.Icon className="size-3.5" aria-hidden /> {k.skill}
+              </span>
+            ))}
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <CheckIn known={known} onChange={toggleKnown} />
-          <span className="rounded-full bg-muted px-3 py-1.5 text-[12px] font-medium text-muted-foreground" title={brain === "grok" ? "Grok picks the tools and phrases replies; every price is checked against the store data" : "Built-in answer engine over the store data (add XAI_API_KEY for Grok)"}>
-            Brain: {brain === "grok" ? "Grok + store tools" : "built-in (offline)"}
+          <CheckIn customer={customer} onChange={checkIn} />
+          <span
+            className="rounded-full bg-muted px-3 py-1.5 text-[12px] font-medium text-muted-foreground"
+            title={brain.brain === "grok" ? "Grok picks the skills and phrases replies; every price is checked against the store data" : brain.grok === "rejected" ? "xAI rejected the XAI_API_KEY; answering with the built-in engine" : "Built-in engine over the same skills (add XAI_API_KEY for Grok)"}
+          >
+            Brain: {brain.brain === "grok" ? "Grok + 5 skills" : brain.grok === "rejected" ? "built-in (Grok key rejected)" : "built-in (offline)"}
           </span>
         </div>
       </section>
@@ -387,6 +422,7 @@ export default function InStore() {
                         ) : (
                           <div className={cn("max-w-[86%] rounded-2xl px-4 py-2.5 text-[15.5px] leading-snug", m.role === "you" ? "rounded-br-md bg-foreground text-background" : "rounded-bl-md bg-magenta-wash text-foreground")}>{m.text}</div>
                         )}
+                        {m.cards?.length ? <AgentCards cards={m.cards} /> : null}
                         {m.skus?.length ? (
                           <div className="grid w-full max-w-[640px] gap-2 sm:grid-cols-2">
                             {m.skus.map((s) => (
@@ -632,16 +668,32 @@ function fitsLabel(sku: string, device: string, deviceName: string): { ok: boole
   return c.includes(device) ? { ok: true, text: `fits your ${deviceName}` } : { ok: false, text: `won't fit your ${deviceName}` };
 }
 
-function CheckIn({ known, onChange }: { known: boolean; onChange: (v: boolean) => void }) {
+function CheckIn({ customer, onChange }: { customer: string | null; onChange: (id: string | null) => void }) {
+  const c = customerOf(customer);
   return (
-    <button
-      onClick={() => onChange(!known)}
-      className={cn("flex cursor-pointer items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-semibold ring-1 transition-colors", known ? "bg-leaf-wash text-leaf-deep ring-leaf/30" : "bg-card ring-foreground/15 hover:bg-muted")}
-      aria-pressed={known}
-    >
-      {known ? <UserRoundCheck className="size-4" aria-hidden /> : <UserRound className="size-4" aria-hidden />}
-      {known ? "Checked in as Maya · check out" : "Guest · check in with the Picky app"}
-    </button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button className={cn("flex cursor-pointer items-center gap-2 rounded-full px-3.5 py-1.5 text-[13px] font-semibold ring-1 transition-colors", c ? "bg-leaf-wash text-leaf-deep ring-leaf/30" : "bg-card ring-foreground/15 hover:bg-muted")}>
+          {c ? <UserRoundCheck className="size-4" aria-hidden /> : <UserRound className="size-4" aria-hidden />}
+          {c ? `Checked in: ${c.name}` : "Guest · check in with the Picky app"}
+          <ChevronDown className="size-3.5" aria-hidden />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-[300px]">
+        <DropdownMenuLabel>Who&apos;s at the robot? (demo customers)</DropdownMenuLabel>
+        {CUSTOMERS.map((x) => (
+          <DropdownMenuItem key={x.id} onSelect={() => onChange(x.id)} className="flex flex-col items-start gap-0">
+            <span className="font-semibold">
+              {x.name}
+              {x.prospect && <span className="ml-1.5 text-[11px] font-medium text-muted-foreground">not a customer yet</span>}
+            </span>
+            <span className="text-[12px] text-muted-foreground">{x.blurb}</span>
+          </DropdownMenuItem>
+        ))}
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onSelect={() => onChange(null)}>{c ? "Check out (guest)" : "Stay a guest"}</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

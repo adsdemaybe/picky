@@ -84,9 +84,9 @@ export default function TmoHome() {
       <Panel className="flex flex-col items-start gap-4 overflow-hidden bg-[#17141a] p-5 text-white sm:flex-row sm:items-center">
         <Face mode="idle" size={110} />
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-semibold text-magenta">In the store</div>
-          <div className="text-[20px] leading-tight font-semibold">Magenta meets you at the door</div>
-          <p className="mt-1 text-[14px] text-white/75">Talk to the robot like a store rep: it walks you to the right wall, brings a sealed phone from the back, and tells you when to skip or wait. Your basket from here comes with you.</p>
+          <div className="text-[13px] font-semibold text-magenta">One agent for everything</div>
+          <div className="text-[20px] leading-tight font-semibold">Ask Magenta: phone, plan, upgrade, basket</div>
+          <p className="mt-1 text-[14px] text-white/75">She picks the right phone, tells you honestly whether to upgrade, fixes the family plan, keeps your basket honest, and in the store walks you to things and brings sealed phones from the back.</p>
         </div>
         <Button asChild size="lg" className="shrink-0 bg-magenta text-white hover:bg-magenta-deep">
           <Link href="/tmobile/store">

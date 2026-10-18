@@ -1,11 +1,14 @@
-// Magenta, the in-store associate (T-Mobile "In store" tab). The robot stands on the floor, talks with the shopper,
-// walks them to a fixture, fetches boxed stock from the back and keeps their basket honest with Cart Whisperer.
+// Magenta: ONE agent for the T-Mobile store, on the website and on the robot on the floor. Five skills behind one
+// conversation: Cart Whisperer (basket), The Matchmaker (right phone + plan), Next Best Moment (what to raise before a
+// customer walks: her opener at check-in), The Timekeeper (upgrade now / wait / keep), Household Mix (whole-family
+// plan). On the floor she also walks shoppers to fixtures and fetches boxed stock from the back.
 // Every fact it says comes from these deterministic tools over data/ (generated JSON). /api/associate lets Grok pick
 // the tools and phrase the answer when XAI_API_KEY is set; `respond()` below is the offline brain over the SAME tools,
 // so the demo works with no key, no network and no backend. Pure module: runs on the server and in the browser.
 import { linePromoFor, mayaDevices, tmobileProducts, tmobileStore, tmobileUpcoming, wireless, type WirelessProduct } from "@/data/stores/tmobile";
 import type { Pose } from "./data";
-import { DATA as PLANS, household, match, upgrade, type Priority } from "./directions";
+import { customerOf, householdResult, matchFor, momentFor, presetFor, upgradesFor, type Customer } from "./customers";
+import { accountOf, match, messageFor, planOf, tradeModel, type Advice, type Answers, type Priority, type Usage } from "./directions";
 import { cartTotal, shortName, suggest, targetDevice, unitPrice, type WLine } from "./whisperer";
 
 export type AssocAction =
@@ -24,12 +27,20 @@ export type AssocCtx = {
   focus?: string | null;
   /** the phone this conversation is about ("a case for my Pixel 9"), so fit checks use it */
   device?: string | null;
-  /** the shopper checked in with the app, so Magenta may use their account (phone, installments, what they own) */
+  /** Maya's device-level data is available (owned items, installments): drives Cart Whisperer's SKIP / WAIT */
   known: boolean;
+  /** who checked in with the app (lib/customers.ts); null = guest. Unlocks account, upgrade and plan answers */
+  customer?: string | null;
   declined?: string[];
 };
-export type ToolResult = { summary: string; actions?: AssocAction[]; focus?: string | null };
-export type AssocReply = { text: string; actions: AssocAction[]; chips: string[]; focus: string | null; device: string | null; source: "grok" | "offline" };
+/** Rich results shown under a reply (rendered from the same engines on the client). */
+export type AgentCard =
+  | { kind: "bundles"; answers: Answers }
+  | { kind: "upgrade"; case_id: string }
+  | { kind: "household"; customer_id: string }
+  | { kind: "basket" };
+export type ToolResult = { summary: string; actions?: AssocAction[]; focus?: string | null; cards?: AgentCard[] };
+export type AssocReply = { text: string; actions: AssocAction[]; cards: AgentCard[]; chips: string[]; focus: string | null; device: string | null; source: "grok" | "offline" };
 
 const P: Record<string, WirelessProduct> = Object.fromEntries(tmobileProducts.map((p) => [p.sku, p]));
 export const productOf = (sku: string) => P[sku] ?? null;
@@ -306,31 +317,61 @@ export const tools = {
     return { summary: `Removed ${nice(P[sku].name)}.`, actions: [{ type: "remove", sku }] };
   },
 
-  upgrade_advice(ctx: AssocCtx): ToolResult {
-    if (!ctx.known) return { summary: "Not checked in: can't see their phone, payments or trade-in. Ask about camera / battery / price instead, or suggest checking in." };
-    const a = upgrade(PLANS.upgrade_cases.find((c) => c.id === "maya")!);
+  upgrade_advice(ctx: AssocCtx, person?: string): ToolResult {
+    const c = customerOf(ctx.customer);
+    if (!c) return { summary: "Not checked in: can't see their phone, payments or trade-in. Ask what matters to them (phone_match) or suggest checking in with the app." };
+    const all = upgradesFor(c).filter((a) => !person || a.c.name.toLowerCase().includes(person.toLowerCase()));
+    if (!all.length) return { summary: `No phone on file for ${c.name}${c.prospect ? " (not a customer yet)" : ""}. Use phone_match instead.` };
     return {
-      summary: [`Timekeeper verdict: ${a.headline}.`, ...a.reasons, `Upgrade today out of pocket: ${money(a.now.cost_cents)}.`, a.later ? `${a.later.label}: ${money(a.later.cost_cents)}.` : ""].filter(Boolean).join("\n"),
-      focus: a.c.target_sku,
+      summary: all.map((a) => [`Timekeeper for ${a.c.name}'s ${tradeModel(a.c.device_model_id)?.name}: ${a.headline}.`, ...a.reasons, `Upgrade today to the ${nice(P[a.c.target_sku]?.name ?? "")}: ${money(a.now.cost_cents)} out of pocket after trade-in.`, a.later ? `${a.later.label}: ${money(a.later.cost_cents)}.` : ""].filter(Boolean).join("\n")).join("\n\n"),
+      cards: all.map((a) => ({ kind: "upgrade" as const, case_id: a.c.id })),
+      focus: all[0].c.target_sku,
     };
   },
 
   plan_check(ctx: AssocCtx): ToolResult {
-    if (!ctx.known) return { summary: "Not checked in: can't see their lines or plan. Offer the Household Mix check after they check in." };
-    const r = household({ id: "maya", name: "Maya", account_ids: ["acct_maya"], streaming: [], note: "" });
+    const c = customerOf(ctx.customer);
+    if (!c) return { summary: "Not checked in: can't see their lines or plan. Offer the whole-household check after they check in." };
+    const r = householdResult(c);
+    if (!r) return { summary: `No lines on file for ${c.name}. Use phone_match to build a plan from scratch.` };
     return {
-      summary: `Household Mix: today ${r.current_label}, ${money(r.current_total_cents)}/mo for ${r.lines.map((l) => `${l.label} (${l.usage_gb_month} GB)`).join(", ")}. Best fit: ${r.best.summary}, ${money(r.best.monthly_cents)}/mo. ${r.saves_cents > 0 ? `Saves ${money(r.saves_cents)}/mo.` : "Already the cheapest setup that fits; no change needed."} Checked ${r.combos_checked} combinations.`,
+      summary: `Household Mix for ${c.name}: today ${r.current_label}, ${money(r.current_total_cents)}/mo for ${r.lines.map((l) => `${l.label} (${l.usage_gb_month} GB, ${l.hotspot_gb_month} GB hotspot)`).join(", ")}${r.current_misfits.length ? `; doesn't fit: ${r.current_misfits.join("; ")}` : ""}. Best fit: ${r.best.summary}, ${money(r.best.monthly_cents)}/mo${r.best.streaming_paid_cents ? ` incl. ${money(r.best.streaming_paid_cents)} streaming paid separately` : ""}. ${r.saves_cents > 0 ? `Saves ${money(r.saves_cents)}/mo.` : r.saves_cents < 0 ? `Costs ${money(-r.saves_cents)}/mo more but it's the cheapest that fits.` : "Already the cheapest setup that fits; no change needed."} Checked ${r.combos_checked} combinations.`,
+      cards: [{ kind: "household", customer_id: c.id }],
     };
   },
 
-  phone_match(priorities: string[], budget_cents: number, lines = 1): ToolResult {
-    const pr = priorities.filter((p): p is Priority => ["price", "camera", "battery", "performance", "size"].includes(p));
-    const r = match({ lines, budget_monthly_cents: budget_cents, priorities: pr.length ? pr : ["price"], usage: "medium", keep_phone: false });
-    const top = r.bundles.slice(0, 2);
+  phone_match(ctx: AssocCtx, o: { priorities?: string[]; budget_cents?: number; lines?: number; usage?: string; keep_phone?: boolean } = {}): ToolResult {
+    const c = customerOf(ctx.customer);
+    const preset = c ? presetFor(c) : null;
+    const pr = (o.priorities ?? []).filter((p): p is Priority => ["price", "camera", "battery", "performance", "size"].includes(p));
+    const answers: Answers = {
+      lines: o.lines ?? preset?.lines ?? 1,
+      budget_monthly_cents: o.budget_cents ?? preset?.budget_monthly_cents ?? 10000,
+      priorities: pr.length ? pr : (preset?.priorities ?? ["price"]),
+      usage: (["light", "medium", "heavy"].includes(o.usage ?? "") ? o.usage : (preset?.usage ?? "medium")) as Usage,
+      keep_phone: o.keep_phone ?? preset?.keep_phone ?? false,
+      keep_second_phone: preset?.keep_second_phone,
+      switching: preset?.switching,
+      age_55: preset?.age_55,
+      trade_in: preset?.trade_in,
+    };
+    const r = match(answers);
+    const top = r.bundles;
     return {
-      summary: top.map((b) => `${b.badge}: ${b.title}, ${money(b.monthly_cents)}/mo (plan ${money(b.plan_cents)} + phone ${money(b.device_cents)}). Why: ${b.why.join("; ")}. Trade-offs: ${b.tradeoffs.join("; ")}.`).join("\n"),
-      actions: [{ type: "show", skus: top.map((b) => b.phone_sku).filter((x): x is string => !!x) }],
-      focus: top[0]?.phone_sku ?? null,
+      summary: [...r.notes, ...top.map((b) => `${b.badge}: ${b.title}, ${money(b.monthly_cents)}/mo (plan ${money(b.plan_cents)} + phone ${money(b.device_cents)}${b.trade_credit_cents ? ` − trade-in ${money(b.trade_credit_cents)}` : ""}). Why: ${b.why.join("; ")}. Trade-offs: ${b.tradeoffs.join("; ")}.`)].join("\n"),
+      actions: [],
+      cards: [{ kind: "bundles", answers }],
+      focus: top.find((b) => b.phone_sku)?.phone_sku ?? null,
+    };
+  },
+
+  account_check(ctx: AssocCtx): ToolResult {
+    const c = customerOf(ctx.customer);
+    if (!c) return { summary: "Not checked in." };
+    const m = momentFor(c);
+    if (!m) return { summary: `${c.name} isn't a T-Mobile customer yet (${c.blurb}). Nothing to fix on an account; help them choose (phone_match, plan_check).` };
+    return {
+      summary: `Next Best Moment for ${c.name}: risk ${Math.round(m.risk * 100)}% (${m.level}). Signals: ${m.drivers.map((d) => `${d.id} (${d.text})`).join("; ") || "none"}. Recommended: ${m.plan.map((p) => `${p.label}: ${p.detail}`).join(" | ")}. ${m.verdict} Customer-facing message: ${messageFor(m) || "(none: leave them alone, no offer)"}`,
     };
   },
 
@@ -351,7 +392,7 @@ const ACCOUNT = /\b(bill|billing|port|transfer (my )?number|activat\w*|sim swap|
 const pick = <T,>(xs: T[], seed: string) => xs[[...seed].reduce((n, c) => n + c.charCodeAt(0), 0) % xs.length];
 
 function reply(text: string, r: ToolResult[] = [], focus?: string | null): Omit<AssocReply, "source" | "chips" | "device"> {
-  return { text, actions: r.flatMap((x) => x.actions ?? []), focus: focus ?? [...r].reverse().find((x) => x.focus)?.focus ?? null };
+  return { text, actions: r.flatMap((x) => x.actions ?? []), cards: r.flatMap((x) => x.cards ?? []), focus: focus ?? [...r].reverse().find((x) => x.focus)?.focus ?? null };
 }
 
 /** Naming a phone sets the conversation's device. "Does the Pixel 7 case fit a Pixel 9" / "case for my Pixel 9": the
@@ -370,8 +411,8 @@ export function respond(input: string, ctx: AssocCtx): AssocReply {
   const t = input.toLowerCase().trim();
   const device = conversationDevice(t, ctx);
   ctx = { ...ctx, device };
-  const r = respondInner(t, ctx);
-  return { ...r, device, chips: chipsFor({ ...ctx, cart: applyActions(ctx.cart, r.actions), focus: r.focus ?? ctx.focus }, r.actions), source: "offline" };
+  const r = respondInner(t, ctx) as ReturnType<typeof respondInner> & { chips?: string[] };
+  return { ...r, device, chips: r.chips ?? chipsFor({ ...ctx, cart: applyActions(ctx.cart, r.actions), focus: r.focus ?? ctx.focus }, r.actions), source: "offline" };
 }
 
 /** The basket after a reply's add / remove actions (what the client will hold once it applies them). */
@@ -385,12 +426,14 @@ export function applyActions(cart: WLine[], actions: AssocAction[]): WLine[] {
 }
 
 function respondInner(t: string, ctx: AssocCtx): Omit<AssocReply, "source" | "chips" | "device"> {
+  const c = customerOf(ctx.customer);
   const it = /\b(it|that|this|that one|this one|them)\b/.test(t) ? (ctx.focus ?? null) : null;
   const named = searchSkus(t, 3);
   const phones = phonesIn(t).filter((s) => P[s]);
   const subject = (phones.length && !CATEGORY_WORDS.some(([re]) => re.test(t)) ? phones[0] : null) ?? (named[0] && !it ? named[0] : null) ?? it ?? named[0] ?? null;
   const dev = deviceFor(t, ctx);
 
+  if ((!t || (/^(hi|hello|hey|yo|good (morning|afternoon|evening)|howdy)\b/.test(t) && t.split(" ").length < 4)) && c) return openerInner(c, ctx);
   if (!t || /^(hi|hello|hey|yo|good (morning|afternoon|evening)|howdy)\b/.test(t) && t.split(" ").length < 4)
     return reply(
       ctx.known
@@ -401,8 +444,14 @@ function respondInner(t: string, ctx: AssocCtx): Omit<AssocReply, "source" | "ch
   if (/\b(thank|thanks|that's all|thats all|bye|goodbye|all set)\b/.test(t))
     return reply(ctx.cart.length ? `Happy to help. When you're ready, say "check out" and I'll ring you up at the counter.` : `Anytime. I'll be right here by the door if you need me.`);
 
-  if (/\b(what can you do|help me|how does this work|who are you)\b/.test(t))
-    return reply(`I'm the store's robot helper. Ask me where something is and I'll walk you there, ask if a case fits your phone, compare phones, or say "I'll take it" and I'll bring a boxed one from the back. I'll also tell you when to skip something or wait for a better price.`);
+  if (/\b(what can you do|how does this work|who are you)\b/.test(t))
+    return reply(`I'm Magenta. I can find you the right phone and plan, tell you honestly whether to upgrade now or wait, check whether your whole household is on the right plan, and keep your basket honest at checkout. In the store I'll also walk you to things and bring sealed phones from the back.`);
+
+  // Next Best Moment, asked directly
+  if (/\b(anything i should know|check my account|how'?s my account|am i (ok|okay|good)|my account)\b/.test(t)) {
+    if (!c) return reply(`Check in with the Picky app and I'll look over your account: your plan, your phones, anything that's about to change on your bill.`);
+    return openerInner(c, ctx, true);
+  }
 
   if (ACCOUNT.test(t) || (HUMAN.test(t) && /\b(talk|speak|get|need|want|call)\b/.test(t))) {
     const reason = ACCOUNT.exec(t)?.[0] ?? "asked for a person";
@@ -454,46 +503,45 @@ function respondInner(t: string, ctx: AssocCtx): Omit<AssocReply, "source" | "ch
     const own = mayaDevices.owns.find((o) => o.sku === "CHG-20W")!;
     return reply(`Honestly, skip it. You bought the ${nice(P[own.sku]?.name ?? own.sku)} on ${day(own.bought)}, and it's USB-C PD, so it charges any of these phones. That's ${money(unitPrice("CHG-20W"))} you keep.`);
   }
-  if (/\b(upgrade|should i (get|buy) a new phone|is it worth|new phone|time for a new)\b/.test(t) && !/\b(add|i'?ll take|buy it)\b/.test(t)) {
-    const target = phones[0] ?? "PX9-128";
-    const up = tmobileUpcoming[target];
-    if (!ctx.known)
-      return reply(`Happy to help you choose. If you check in with the Picky app I can factor in your current phone and payments. Otherwise, tell me what matters most: camera, battery, size or price?`, [tools.search_products("phone")]);
-    const ph = mayaDevices.phone;
-    if (target === "PX9-128") {
-      const a = upgrade(PLANS.upgrade_cases.find((c) => c.id === "maya")!);
-      return reply(
-        `Honest answer: not yet. Your ${ph.name} still has ${ph.installments_left} payments left, ${money(ph.payoff_cents)}, and the Pixel 9 is expected to drop to ${money(a.c.expected_promo!.price_cents)} on ${day(a.c.expected_promo!.starts)}. Upgrading today costs ${money(a.now.cost_cents)} after your trade-in; waiting costs ${money(a.later!.cost_cents)}, so you save ${money(a.saves_cents)}. Your phone's battery and storage are fine. Want to try the Pixel 9 on the table anyway?`,
-        [tools.product_details(target, ctx), tools.where_is(target)],
-        target,
-      );
+  if (/\b(upgrade|should i (get|buy) a new phone|is it worth|time for a new)\b/.test(t) && !/\b(add|i'?ll take|buy it)\b/.test(t)) {
+    if (!c)
+      return reply(`Happy to help with that. If you check in with the Picky app I can look at your phone's health, what you still owe and your trade-in value, and tell you honestly whether to upgrade now or wait. Or tell me what matters most to you in a phone.`);
+    const ups = upgradesFor(c);
+    if (!ups.length) {
+      const line = c.account_id ? accountOf(c.account_id)?.lines[0] : null;
+      if (!c.prospect && line) {
+        const hh = householdResult(c);
+        const planIssue = hh && hh.saves_cents < 0;
+        return reply(`Your ${line.device_name} is about ${Math.round((line.device_age_months ?? 24) / 12)} years old and nothing on file says it's struggling, so I'd keep it.${planIssue ? ` If things feel slow, that's your plan, not the phone: ${hh!.best.summary} fixes it for ${money(-hh!.saves_cents)} more a month.` : ""}`, planIssue ? [tools.plan_check(ctx)] : []);
+      }
+      const x = tools.phone_match(ctx);
+      return reply(`You're not on T-Mobile yet, so there's nothing to pay off. Here's what I'd pick for you, with the trade-offs.`, [x]);
     }
-    return reply(
-      `Honest answer: your ${ph.name} has ${ph.installments_left} payments left, ${money(ph.payoff_cents)}. ${up ? `And the ${shortName(target)} is expected to drop to ${money(up.price_cents)} on ${day(up.starts)}, so waiting saves about ${money(unitPrice(target) - up.price_cents)}. ` : ""}If it's still working for you, I'd wait. Want to try the ${shortName(target)} on the table anyway?`,
-      [tools.product_details(target, ctx), tools.where_is(target)],
-      target,
-    );
+    const x = tools.upgrade_advice(ctx);
+    return reply(ups.map((a) => upgradeLine(a, ups.length > 1)).join(" "), [x, ...(ups.length === 1 ? [tools.product_details(ups[0].c.target_sku, ctx)] : [])], ups[0].c.target_sku);
   }
 
   // Household Mix: is my plan right?
-  if (/\b(right plan|my plan|overpay\w*|paying too much|save on (my )?(bill|plan)|cheaper plan|family plan|best plan|which plan)\b/.test(t)) {
-    if (!ctx.known) return reply(`I can check that for your whole household, every line and every plan, once you check in with the Picky app. Or try the Household Mix page on the website.`);
-    const r = household({ id: "maya", name: "Maya", account_ids: ["acct_maya"], streaming: [], note: "" });
-    return reply(
-      r.saves_cents > 0
-        ? `You could save ${money(r.saves_cents)} a month: ${r.best.summary} instead of ${r.current_label}. Want me to have an expert switch it?`
-        : `Good news: you're already on the best setup. ${r.current_label} is ${money(r.current_total_cents)} a month for ${r.lines.map((l) => l.label).join(" and ")}, and I checked all ${r.combos_checked} combinations; nothing cheaper fits how you both use data.`,
-    );
+  if (/\b(right plan|my plan|overpay\w*|paying too much|save on (my )?(bill|plan)|save money|cheaper plan|family plan|best plan|which plan|lower (my )?bill)\b/.test(t)) {
+    if (!c) return reply(`I can check your whole household, every line against every plan, once you check in with the Picky app.`);
+    const r = householdResult(c);
+    if (!r) return reply(`You don't have lines with us yet, so let's build it from scratch.`, [tools.phone_match(ctx)]);
+    return reply(householdLine(c, r), [tools.plan_check(ctx)]);
   }
 
   // Matchmaker: which phone?
-  if (/\b(which phone|what phone|best phone|recommend a phone|help me (choose|pick)|phone for me)\b/.test(t)) {
-    const pr = (["camera", "battery", "price", "performance"] as const).filter((k) => t.includes(k) || (k === "price" && /\b(cheap|budget|afford)/.test(t)) || (k === "performance" && /\b(fast|gaming)\b/.test(t)));
-    if (!pr.length) return reply(`Happy to help you pick. What matters most to you: camera, battery, speed, or price? And roughly what monthly budget?`);
-    const budget = Number(t.match(/\$\s?(\d+)/)?.[1] ?? 100) * 100;
-    const x = tools.phone_match([...pr], budget);
-    const b = match({ lines: 1, budget_monthly_cents: budget, priorities: [...pr], usage: "medium", keep_phone: false }).bundles[0];
-    return reply(`For ${pr.join(" and ")} at about ${money(budget)} a month, I'd go with the ${b.phone_sku ? nice(P[b.phone_sku]?.name ?? "") : "phone"} on ${b.plan.name}: ${money(b.monthly_cents)} a month all in. ${b.why[1] ?? ""}. Want to hold one? It's on ${fixtureName(displaySlot(b.phone_sku ?? "")?.fixture_id ?? "")}.`, [x]);
+  if (/\b(which phone|what phone|best phone|right phone|find me a phone|recommend a phone|help me (choose|pick)|phone for me|cheapest good phone|fastest phone)\b/.test(t)) {
+    const pr = (["camera", "battery", "price", "performance"] as const).filter((k) => t.includes(k) || (k === "price" && /\b(cheap\w*|budget|afford)/.test(t)) || (k === "performance" && /\b(fast\w*|gaming)\b/.test(t)));
+    const preset = c ? presetFor(c) : null;
+    if (!pr.length && !preset) return { ...reply(`Happy to help you pick. What matters most to you: camera, battery, speed, or price? And roughly what monthly budget?`), chips: MATCH_CHIPS } as ReturnType<typeof reply>;
+    const budget = t.match(/\$\s?(\d+)/) ? Number(t.match(/\$\s?(\d+)/)![1]) * 100 : undefined;
+    const x = tools.phone_match(ctx, { priorities: pr.length ? [...pr] : undefined, budget_cents: budget });
+    const b = match((x.cards![0] as { answers: Answers }).answers).bundles[0];
+    const where = b.phone_sku ? displaySlot(b.phone_sku)?.fixture_id : null;
+    return reply(
+      `${preset && !pr.length ? `Based on what you told me, ` : `For ${pr.join(" and ")}${budget ? ` at about ${money(budget)} a month` : ""}, `}I'd go with ${b.phone_sku ? `the ${nice(P[b.phone_sku]?.name ?? "")}` : "keeping your phone"} on ${b.plan.name}: ${money(b.monthly_cents)} a month all in. I put the other options and what you'd give up on screen.${where ? ` Want to hold one? It's on ${fixtureName(where)}.` : ""}`,
+      [x],
+    );
   }
 
   // compare two phones
@@ -605,6 +653,80 @@ function respondInner(t: string, ctx: AssocCtx): Omit<AssocReply, "source" | "ch
   return reply(`I'm not sure I caught that. I can find a product and walk you to it, check if something fits your phone, compare phones, or get you a T-Mobile expert. What would help?`);
 }
 
+const MATCH_CHIPS = ["Best camera under $100/mo", "Best battery under $75/mo", "Cheapest good phone", "Fastest phone under $150/mo"];
+
+/** One spoken sentence or two for a Timekeeper verdict. */
+function upgradeLine(a: Advice, named: boolean) {
+  const model = tradeModel(a.c.device_model_id)?.name ?? "phone";
+  const who = named ? `${a.c.name.replace(/ \(.*\)$/, "")}'s ${model}: ` : "";
+  const target = nice(P[a.c.target_sku]?.name ?? "");
+  const issues = a.c.issues.map((i) => i.split(":")[0]);
+  const issueText = issues.length ? `${issues.map((x, i) => (i ? x.charAt(0).toLowerCase() + x.slice(1) : x)).join(" and ")}.` : "";
+  if (a.verdict === "upgrade_now")
+    return `${who}${named ? issueText.charAt(0).toLowerCase() + issueText.slice(1) : `Honestly, your ${model} is due. ${issueText}`} The ${target} is ${money(a.now.cost_cents)} after the trade-in, and waiting doesn't save anything.`;
+  if (a.verdict === "wait")
+    return `${who}${named ? "" : "Honest answer: not yet. "}${a.line?.installments_left ? `Your ${model} still has ${a.line.installments_left} payments left, and ` : ""}${a.c.expected_promo ? `the ${target} is expected to drop to ${money(a.c.expected_promo.price_cents)} on ${day(a.c.expected_promo.starts)}. ` : ""}Upgrading today costs ${money(a.now.cost_cents)}; waiting costs ${money(a.later!.cost_cents)}, so you save ${money(a.saves_cents)}.`;
+  return `${who}${named ? "keep it" : `Keep your ${model}`}: battery ${a.c.battery_health_pct}%, updates until ${new Date(`${a.c.os_support_until}-15T12:00:00Z`).toLocaleDateString("en-US", { month: "long", year: "numeric" })}. A new ${target} would cost ${money(a.now.cost_cents)} for no real gain.`;
+}
+
+function householdLine(c: Customer, r: NonNullable<ReturnType<typeof householdResult>>) {
+  if (r.saves_cents > 0)
+    return `${c.prospect ? `Bringing ${r.lines.length > 1 ? "your lines" : "your line"} over` : `You could save ${money(r.saves_cents)} a month`}: ${r.best.summary} covers ${r.lines.length > 1 ? "everyone" : "you"} for ${money(r.best.monthly_cents)} a month${r.best.streaming_paid_cents ? " including the streaming you pay for" : r.best.streaming_covered.length ? " with your streaming included as a perk" : ""}${c.prospect ? `, ${money(r.saves_cents)} less than you pay now` : `, instead of ${money(r.current_total_cents)}`}. I checked ${r.combos_checked} combinations.`;
+  if (r.saves_cents < 0)
+    return `Your plan doesn't fit how you use it: ${r.current_misfits.map((m) => (r.lines.length === 1 ? m.replace(/^[^:]+: /, "") : m)).join("; ")}. ${r.best.summary} fixes that for ${money(-r.saves_cents)} more a month. Nothing cheaper actually fits.`;
+  return `Good news: you're already on the best setup. ${r.current_label} is ${money(r.current_total_cents)} a month, and I checked all ${r.combos_checked} combinations; nothing cheaper fits how ${r.lines.length > 2 ? "you all" : r.lines.length === 2 ? "you both" : "you"} use data.`;
+}
+
+/** What Magenta raises first when someone checks in: Next Best Moment, said to the customer. Low-risk customers just
+ * get a hello (no offer); prospects get a head start on choosing. */
+function openerInner(c: Customer, ctx: AssocCtx, asked = false): Omit<AssocReply, "source" | "chips" | "device"> {
+  const m = momentFor(c);
+  const hh = householdResult(c);
+  const ups = upgradesFor(c);
+  const lines: string[] = [];
+  const res: ToolResult[] = [];
+  if (m && m.level !== "low") {
+    for (const p of m.plan) {
+      if ((p.id === "right_size" || p.id === "fit_up") && hh) {
+        const l0 = hh.lines[0];
+        lines.push(
+          p.id === "right_size"
+            ? `Before anything else, you're paying for more plan than you use. ${householdLine(c, hh)}`
+            : `I noticed your data has been slowing down. That's your plan, not your phone: you use about ${l0.usage_gb_month} GB a month and ${l0.hotspot_gb_month} GB of hotspot, and ${planOf(l0.current_plan_id)?.name ?? "your plan"} has ${planOf(l0.current_plan_id)?.priority_data_gb ? `${planOf(l0.current_plan_id)!.priority_data_gb} GB of` : "no"} priority data and ${planOf(l0.current_plan_id)?.hotspot_gb ?? 0} GB of hotspot. ${hh.best.summary} fixes both for ${money(-hh.saves_cents)} more a month, and the first month is on us.`,
+        );
+        res.push(tools.plan_check(ctx));
+      }
+      if (p.id === "trade_in_offer" && ups[0]) {
+        lines.push(upgradeLine(ups[0], false));
+        res.push(tools.upgrade_advice(ctx));
+      }
+      if (p.id === "tech_visit") lines.push("And about coverage at home: I can have an engineer check your address and send a signal booster if it's weak, at no cost.");
+      if (p.id === "bill_explainer") lines.push(messageFor(m).replace(/^Hi \w+, /, "").replace(/^./, (x) => x.toUpperCase()));
+    }
+  } else if (m && m.plan[0]?.id === "right_size" && hh && hh.saves_cents > 0) {
+    lines.push(`Quick thing while you're here: ${hh.best.summary} would cover how you use your phone for ${money(hh.best.monthly_cents)} a month instead of ${money(hh.current_total_cents)}, so ${money(hh.saves_cents)} less. Want me to set that up?`);
+    res.push(tools.plan_check(ctx));
+  } else if (c.prospect && hh && hh.saves_cents > 0) {
+    lines.push(householdLine(c, hh));
+    res.push(tools.plan_check(ctx));
+  } else if (c.prospect && matchFor(c)) {
+    const b = matchFor(c)!.bundles[0];
+    lines.push(`From what you told the app, I'd start with the ${b.title}, ${money(b.monthly_cents)} a month all in. Your options and the trade-offs are on screen.`);
+    res.push(tools.phone_match(ctx));
+  } else if (asked) {
+    lines.push(`Everything looks good on your account: no changes coming to your bill and your plan fits how you use it. Nothing I'd change today.`);
+  } else lines.push("What can I help with today? Your basket, the right phone, whether to upgrade, or your plan.");
+  return reply(`${asked ? "" : c.prospect ? `Hi ${c.first}, welcome to T-Mobile. ` : `Hi ${c.first}, good to see you. `}${lines.join(" ")}`, res);
+}
+
+/** Magenta's opener when someone checks in (deterministic, instant). */
+export function opener(ctx: AssocCtx): AssocReply {
+  const c = customerOf(ctx.customer);
+  if (!c) return respond("hi", ctx);
+  const r = openerInner(c, ctx);
+  return { ...r, device: ctx.device ?? null, chips: chipsFor({ ...ctx, focus: r.focus }, r.actions), source: "offline" };
+}
+
 /** Follow-ups that make sense right now (shown as tap targets under the conversation). */
 export function chipsFor(ctx: AssocCtx, actions: AssocAction[] = []): string[] {
   const f = ctx.focus && P[ctx.focus] ? ctx.focus : null;
@@ -617,7 +739,7 @@ export function chipsFor(ctx: AssocCtx, actions: AssocAction[] = []): string[] {
     else if (p.compatible_with?.length) out.push("Does it fit my phone?");
   }
   if (ctx.cart.length) out.push("What's in my basket?", "Check out");
-  if (!f && !ctx.cart.length) out.push("Case for my phone", "Should I upgrade?", ctx.known ? "Am I on the right plan?" : "Best phone for camera under $100", "Any deals today?");
+  if (!f && !ctx.cart.length) out.push(...(ctx.customer ? ["Should I upgrade?", "Am I on the right plan?", "Find me the right phone", "Anything I should know?"] : ["Find me the right phone", "Should I upgrade?", "Case for my phone", "Any deals today?"]));
   out.push("Talk to a person");
   return [...new Set(out)].slice(0, 5);
 }
