@@ -27,6 +27,8 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 - [x] **P1** Readable label textures (`labels.py`): brand, name, size, price and a real EAN-13 barcode as a PNG mapped on a label quad on each unit's -y face (Isaac)
 - [x] **P1** Pillow `SketchBackend` (`sketch.py`): flat-shaded 3D raster of the same specs with label text, so frames look like a store without Isaac
 - [x] **P0** Isaac backend run on vhagar (`IsaacBackend`, Isaac Sim 6.0.0-rc.59, RTX 5090): both stores + 3 rovers + all 12 cameras render (labelled products, shelves, rovers); the taco request ran end to end on Isaac. Synchronous `rep.orchestrator.step` per changed capture (plain `app.update()` gave stale frames). Steps + measured timings are in `DEPLOY.md`
+- [ ] **P1** Per-item grocery models (`PICKY_ASSET_ROOT`, `data/sim/sku_assets.yaml`, `assets.py`, `ASSETS.md`). Every stocked unit is its own kinematic prim that references its model (117 of 125 SKUs; gap and missing SKUs fall back to the primitive), sized to the model, with our label decal and shelf tags for loose produce. It renders on vhagar in a standalone Isaac check of store_ave, but the live worker has not been switched yet
+- [ ] **P1** LeKiwi + SO-101 + lift rover USD as a kinematic puppet (`PICKY_ROVER_USD`, `rover_puppet.py`): IK puts the jaws on the held unit, and the primitive rover is the fallback. It renders on vhagar in the same standalone check, but the live worker has not been switched yet
 - [ ] **P1** Real SO-101 URDF on the lift (`--so101-urdf`, experimental importer path; joints stay at zero)
 - [ ] **P2** Physics grasp (FixedJoint), animated SO-101 joints, VLA (LeRobot / LeIsaac) later, per CLAUDE.md "Later"
 
@@ -52,10 +54,14 @@ robot brain → `RobotService` (robot arm, real) → gateway `SimLink` → **`ws
 | `navigation.py` | `PurePursuit` diff-drive follower (lookahead 0.45 m, rotate-in-place, slow-down, final yaw) |
 | `worker.py` | Isaac-free `WorkerCore` (stores, rovers, actions, cameras, streams, resets, set_slot_stock), the `SimBackend` seam, `NullBackend` |
 | `sketch.py` | `SketchBackend`: Pillow 3D raster (no Isaac) |
+| `assets.py` | PURE: `SkuAssets` (SKU -> per-item model plan + why it falls back), label decal geometry, `PICKY_ROVER_USD` lookup |
+| `rover_puppet.py` | PURE (stdlib): forward kinematics + DLS IK + reach table that pose the LeKiwi/SO-101 USD kinematically |
+| `ASSETS.md` | Asset sources, licenses + credit line, exact rebuild commands for vhagar, fallbacks |
+| `tools/` | Asset pipeline scripts (download, normalize, SKU map generator / validator, rover overlay composer); not imported |
 | `labels.py` | EAN-13 modules + label PNG (Pillow) |
 | `app.py` | `GatewayLink` (WS thread), `IsaacBackend` (pxr/replicator), `run()` main loop, CLI |
 | `DEPLOY.md` | exact vhagar steps |
-| `tests/` | scene spec (multi-store, rovers), pure pursuit + cameras + labels, worker protocol (two stores, three robots), WS round-trip, sketch frames |
+| `tests/` | scene spec (multi-store, rovers), pure pursuit + cameras + labels, worker protocol (two stores, three robots), WS round-trip, sketch frames, asset mapping / fallbacks / rover puppet (`test_assets.py`) |
 
 ## How to run
 
@@ -68,7 +74,13 @@ uv run pytest arms/sim                                                  # tests 
 ```
 Flags / env: `--stores` / `PICKY_SIM_STORES` (comma list, default all planograms), `--worker-id` / `PICKY_SIM_WORKER_ID`,
 `--label-dir` / `PICKY_SIM_LABEL_DIR`, `--so101-urdf` / `PICKY_SO101_URDF`, `--backend isaac|sketch|null`,
-`--max-seconds`. `PICKY_GATEWAY_URL` and `PICKY_SIM_TOKEN` come from `utils.config`.
+`--max-seconds`. `PICKY_GATEWAY_URL` and `PICKY_SIM_TOKEN` come from `utils.config`. Optional visuals (ASSETS.md):
+`--asset-root` / `PICKY_ASSET_ROOT` (per-item models; unset = primitives), `--sku-assets` / `PICKY_SKU_ASSETS`,
+`--no-assets` / `PICKY_SIM_ASSETS=off`, `--rover-usd` / `PICKY_ROVER_USD` (Isaac backend only).
+
+**Credits (CC BY 4.0, required wherever the models are shown):** Product 3D models: NVIDIA SimReady Assets (CC BY
+4.0), RoboCasa (Nasiriany et al., RSS 2024; CC BY 4.0), Lightwheel/NVIDIA PhysicalAI Kitchen objects (CC BY 4.0);
+modified by the Picky team. Robot model: LeIsaac LeKiwi + SO-101 (LightwheelAI, Apache-2.0).
 
 **In the pipeline:** start the gateway with `robot` real (`PICKY_REAL_ARMS=robot`), then start the worker. Stores whose hash
 matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop the worker and they continue on the 2D fake.
@@ -101,8 +113,11 @@ matches move to the worker (`GET /api/sim/status` → `isaac_store_ids`). Stop t
   exact.
 - When disconnected, outgoing messages are dropped. The gateway resyncs from the per-robot `RobotState` + `InstanceInfo` sent on
   every welcome. In-flight actions abort silently, and the gateway has already failed them with `disconnected`.
-- New env vars (`PICKY_SIM_STORES`, `PICKY_SIM_WORKER_ID`, `PICKY_SIM_LABEL_DIR`, `PICKY_SO101_URDF`) are read with
-  `os.environ` in `app.py` (worker-host only). They still need lines in `.env.example`, which another PR owns.
+- Worker-host env vars (`PICKY_SIM_*`, `PICKY_SO101_URDF`, `PICKY_ASSET_ROOT`, `PICKY_SKU_ASSETS`, `PICKY_ROVER_USD`)
+  are read with `os.environ` in `app.py`, not from `.env` (`.env.example` lists them, commented).
+- Per-item models: the folded SO-101 can't reach units on the lowest shelf while the lift is at its bottom, so a held
+  unit can float up to ~10 cm ahead of the jaws there. Clear film and clamshell wrappers are not drawn. The 2D fake
+  still uses `products.yaml` dims for the 18 SKUs whose models changed size. See `ASSETS.md`.
 
 ## Contributing to this arm
 
