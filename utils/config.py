@@ -82,6 +82,20 @@ class Settings(BaseSettings):
     """Isaac worker side: the T1 policy server, e.g. ws://127.0.0.1:8000 (openpi wire)."""
     picky_vla_policy_protocol: str = ""
     """openpi_ws (blank = default) | perceptron_tool (T1 grasps the verifier's grounding) | lerobot_grpc (later)."""
+    picky_vla_t1: str = ""
+    """Learned T1 grasp policy driven joint by joint on the Isaac worker (contracts 0.2.2 ArmJointsCmd): perceptron |
+    smolvla | scripted | off. Blank = the PICKY_VLA_TIERS / PICKY_VLA_POLICY_PROTOCOL rules (T1 off by default)."""
+    picky_vla_t1_timeout_s: float = 25.0
+    """Policy-loop budget of one T1 grasp (also capped by the step's deadline); exceeded -> policy_timeout."""
+    picky_vla_t1_max_chunks: int = 12
+    """Most action chunks one T1 grasp predicts before giving up (grasp_missed / policy_timeout)."""
+    picky_vla_t1_exec_steps: int = 25
+    """Rows of each predicted chunk executed (at the chunk's action_hz) before the next observation (<= 50)."""
+    picky_vla_t1_home_deg: str = "0,-100,90,50,45,7"
+    """6 USD joint degrees the arm moves to before the policy starts (the recorded demos' start pose: LeIsaac rest,
+    wrist roll + gripper at the recorder's mean); blank = start from the scripted stow pose."""
+    picky_vla_t1_instruction: str = "pick up the {name} and put it in the basket"
+    """T1 policy instruction; {name} = the product name (lower case), {sku}. Default = the recorded dataset's task."""
     gateway_host: str = "0.0.0.0"
     gateway_port: int = 8000
     picky_gateway_url: str = "http://localhost:8000"
