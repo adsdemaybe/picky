@@ -37,7 +37,6 @@ function OrderBuilder() {
   const [text, setText] = useState<string>(initial);
   const [draft, setDraft] = useState<Draft>(() => expandIntent(initial, storeId, add));
   const store = STORES[storeId];
-  const slotBySku = slotsOf(storeId);
   const [accepted, setAccepted] = useState<Set<string>>(() => defaultAccepted(draft));
   const [mode, setMode] = useState<Mode>("with_me");
   const [thinking, setThinking] = useState(false);
@@ -89,14 +88,22 @@ function OrderBuilder() {
   };
 
   const detours = useMemo(() => {
-    const start = { id: "start", pose: store.robot_home };
-    const end = { id: "end", pose: store.checkout };
-    const list = draft.lines.filter((l) => l.sourcing === "in_store").map((l) => ({ id: l.sku, pose: slotBySku[l.sku].approach_pose }));
-    const base = planRoute(store, start, list, end).total_m;
+    // plan against the draft's own store: right after a store switch the old draft is still on screen for a beat
+    const dStore = STORES[draft.store_id];
+    const dSlots = slotsOf(draft.store_id);
+    const start = { id: "start", pose: dStore.robot_home };
+    const end = { id: "end", pose: dStore.checkout };
+    const list = draft.lines
+      .filter((l) => l.sourcing === "in_store" && dSlots[l.sku])
+      .map((l) => ({ id: l.sku, pose: dSlots[l.sku].approach_pose }));
+    const base = planRoute(dStore, start, list, end).total_m;
     const out: Record<string, number> = { __base: base };
-    for (const r of draft.recs) out[r.rec_id] = planRoute(store, start, [...list, { id: r.sku, pose: slotBySku[r.sku].approach_pose }], end).total_m - base;
+    for (const r of draft.recs) {
+      if (!dSlots[r.sku]) continue;
+      out[r.rec_id] = planRoute(dStore, start, [...list, { id: r.sku, pose: dSlots[r.sku].approach_pose }], end).total_m - base;
+    }
     return out;
-  }, [draft, store, slotBySku]);
+  }, [draft]);
 
   const totals = draftTotal(draft, accepted);
   const lines = [

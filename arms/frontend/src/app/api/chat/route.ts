@@ -84,10 +84,15 @@ export async function POST(req: Request) {
   ];
 
   if (!hasCreds) {
-    // Gemini, then Grok (xAI), then the offline answerer
+    // Grok (xAI) first when XAI_API_KEY is set (PICKY_CHAT_LLM=gemini flips it, same knob as the robot chat), then the
+    // other one, then the offline answerer
     const engines: [string, () => Promise<string>][] = [];
-    if (hasGemini) engines.push(["gemini", () => geminiAnswer(body.messages.slice(-12), tools as unknown as ToolLike[])]);
-    if (hasGrok) engines.push(["grok", () => grokAnswer(body.messages.slice(-12), tools as unknown as ToolLike[])]);
+    const gemini: [string, () => Promise<string>] = ["gemini", () => geminiAnswer(body.messages.slice(-12), tools as unknown as ToolLike[])];
+    const grok: [string, () => Promise<string>] = ["grok", () => grokAnswer(body.messages.slice(-12), tools as unknown as ToolLike[])];
+    const grokFirst = (process.env.PICKY_CHAT_LLM || "grok").toLowerCase() === "grok";
+    if (hasGrok && grokFirst) engines.push(grok);
+    if (hasGemini) engines.push(gemini);
+    if (hasGrok && !grokFirst) engines.push(grok);
     for (const [source, run] of engines) {
       try {
         const text = await run();
