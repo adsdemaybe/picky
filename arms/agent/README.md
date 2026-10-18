@@ -6,13 +6,17 @@ charge", "scan dairy at Hill") into a `RequestDraft`, expands lists, splits sour
 replies and writes the follow-up. The brain takes one fleet `Goal` and executes it on one rover with the eleven brain
 tools (locate → route → navigate → look → scan → pick → place → ask → add item → progress → finish), emitting a
 `brain.step` for every thought / tool call / result / observation / message so the web app shows what each robot thinks.
+Since contracts 0.2.1 the arm also owns the **planner -> VLA -> verifier loop**'s planner (`PlannerService`: NL / Goal ->
+typed `StepPlan`, the LLM proposes a `PlanDraft`, deterministic code compiles it) and runner (`LoopRunner`: per step
+pre-check -> VLA -> post-verify -> recovery policy -> effects once, only after verification). In plan mode the brain hands
+shop / fetch goals to the runner and finishes them with `bridge.goal_update_from_outcome`.
 **Pipeline position:** REQUEST (`interpret_request`), PLAN (`expand_intent` → `source_list`), IN-STORE EXECUTION (brain
 `run_goal` for shop / fetch / shelf_scan / return_to_dock goals, called by the fleet), SHOP chat (`respond`,
 `interpret_reply`), AFTER (`compose_followup`), fleet view chat with one robot (`handle_message`).
 
 ## Scope (CLAUDE.md §3)
 
-`[x]` = works in `make demo` / `PICKY_REAL_ARMS=agent make demo` (no `ANTHROPIC_API_KEY`: the real classes degrade to
+`[x]` = works in `make demo` / `PICKY_REAL_ARMS=agent make demo` (no `GEMINI_API_KEY`: the real classes degrade to
 the same rules / scripted executor). Claude paths are unit-tested with a mocked client only.
 
 - [x] **P0** `interpret_request`: NL → `RequestDraft` (shop list = `expand_intent`'s; shelf_scan categories / aisles;
@@ -38,6 +42,29 @@ the same rules / scripted executor). Claude paths are unit-tested with a mocked 
   turns with a front-camera summary (video input) + the `look` tool, user messages injected between turns; any LLM
   failure (no key, API error, refusal, max_tokens, malformed output, turn cap) → error event + `brain.step(kind=error)`
   and the scripted executor finishes from the current goal state (mocked-client tests; untested against the API)
+- [x] **P0** Loop planner, scripted (`create_planner_fake` = `ScriptedPlanner`): taco demo draft (same list as
+  `expand_intent`) + generic comma / "and" catalog-driven fallback; goal path keeps the trip route order; deterministic
+  compiler (`normalize_draft` -> navigate / align / scan / ground / grasp / place per unit, optional -> ask first,
+  produce -> pick_choice, audit + checkout handoff); scripted `replan` keeps closed steps (never over-picks);
+  `expand_tool_call` for tools mode; `validate` + unknown-slot store check (fake)
+- [x] **P0** Loop planner, LLM (`create_planner` = `LlmPlanner`): `utils.llm.complete_json(prompt, PlanDraft,
+  kind="brain", effort="low")` (Gemini by default) inside `wait_for(PICKY_PLAN_TIMEOUT_S)`; no key / timeout / API
+  error / invalid draft / draft that does not compile -> scripted draft + `fallback_reason` + `error(llm_fallback)`
+  (mocked-call tests only; never run against the API)
+- [x] **P0** Loop runner (`create_runner` / `create_runner_fake` = `PlanLoop`): pre-check -> VLA stream
+  (`run_vla_to_terminal`) -> post-verify (VLA frames, baseline, `not_before`) -> `decide_recovery` (retry / re-ground /
+  realign / tier fallback + breaker / reverify / provisional + audit / ask / substitute / replan / skip / online /
+  escalate); `record_pick` + cart line + goal item only after verification, once per effect key; mandate check before
+  the first unit; v0.2 events (`robot.arrived`, `scan.result`, `pick.choices`, `item.picked`, `basket.verified`) + the
+  loop events + one mirrored `brain.step(status)` per step; stop status mirrored onto the trip route; degrade to
+  state-only checks when the verifier is down / slow; cancel-safe commits; tools-mode `run_tool_step` (fake: over the
+  test stubs; the gateway does not wire the loop services yet)
+- [x] **P0** Brain plan-mode hook: `loop.resolve_exec_mode` (PICKY_EXEC_MODE=plan, default when `Services.vla` +
+  `Services.verifier` are wired; `direct` = exact v0.2) -> `runner.run_goal` -> `fleet.update_goal(goal_update_from_
+  outcome)`; RobotError propagates (fleet reassigns); a planner / runner crash falls back to the v0.2 executor; cancel
+  withdraws questions; mirrored steps land in `recent_steps` / `status`; "status?" mid-plan reports plan progress (fake)
+- [ ] **P1** Tools mode in the brain executor (`PICKY_EXEC_MODE=tools`: the LLM brain's motion tools through
+  `runner.run_tool_step`); the runner side exists and is tested, the executor still runs direct
 - [ ] **P0** LLM shopper chat with tools `query_inventory`, `plan_route`, `recommend`, `add_to_cart`, `request_approval`, `checkout` (`respond`; code exists, needs a key)
 - [x] **P0** Reply interpretation for approvals and follow-up ratings (`interpret_reply`)
 - [x] **P0** Follow-up "how was the salsa?" with `about_skus` (`compose_followup`)
@@ -52,6 +79,14 @@ the same rules / scripted executor). Claude paths are unit-tested with a mocked 
 - **Implements** `contracts.services.AgentService` (`interpret_request`, `expand_intent`, `source_list`, `respond`,
   `interpret_reply`, `compose_followup`) and `contracts.services.RobotBrainService` (`run_goal`, `handle_message`,
   `status`, `recent_steps`); factories `create` / `create_fake` / `create_brain` / `create_brain_fake`.
+- **Implements (0.2.1 loop)** `PlannerService` (`plan`, `compile`, `replan`, `expand_tool_call`, `validate`) and
+  `LoopRunner` (`run_goal`, `run_plan`, `run_tool_step`, `cancel`, `get_plan`, `current_plan`, `run_state`,
+  `attempts`); factories `create_planner` / `create_planner_fake` / `create_runner` / `create_runner_fake`
+  (`contracts.services.LOOP_SERVICE_FACTORIES`). The runner uses `vla`, `verifier`, `truth`, `faults` (robot /
+  perception) only through their Protocols; everything optional degrades.
+- **Loop events** (producer: the runner): `plan.created`, `plan.revised`, `step.started`, `vla.status` (<= 2 Hz per exec,
+  phase changes always), `step.verified`, `step.failed`, `step.completed`, `plan.completed`, `target.grounded`,
+  `vla.tier_changed` (envelope `events.plan_envelope`). `demo.fault` is the robot arm's.
 - **Brain tools** follow the executor mapping in `contracts/tools.py` (`brain_exec.py`, one method per tool). Results:
   `LocateItemsResult`, `RouteSummary`, `RobotState`, `VisionObservation`, `ScanShelfResult`, `PickResult`,
   `PlaceResult`, `AskUserResult`, `GoalItem`, `Goal`; failures `BrainToolError` (`retryable` from
@@ -79,7 +114,10 @@ the same rules / scripted executor). Claude paths are unit-tested with a mocked 
   prompt (SO-101 rover + rules) and tools (`brain_tool_definitions(strict=True)`: 6 strict tools, within the strict
   limits), tools run sequentially (one robot), ≤ 25 turns. Vision = `CameraService.observe` (`claude-haiku-5-5` in the
   perception arm) via the `look` tool and the checkpoint summaries.
-- **Fallback:** the rule-based path in `logic.py` / `fake.py`, used automatically when `ANTHROPIC_API_KEY` is missing
+- **Loop planner:** the utils.llm `brain` model (Gemini `gemini-3.8-flash` by default; `PICKY_LLM_PROVIDER=anthropic`
+  for Claude), one structured-output call per goal, `effort="low"`, bounded by `PICKY_PLAN_TIMEOUT_S` (20 s). Only the
+  draft is the LLM's; compile / replan / recovery / effects are deterministic code (`normalize_draft` repairs any draft).
+- **Fallback:** the rule-based path in `logic.py` / `fake.py`, used automatically when `GEMINI_API_KEY` is missing
   or the LLM fails. You can also swap models by env var. Voice falls back to the browser Web Speech API.
 - **Gotchas (docs/research.md §9.6):** use `anthropic` 1.15; `output_config`, not `output_format`; strict tools allow no
   numeric bounds (`tool_definitions(strict=True)` moves them into descriptions); changing `output_config.format`
@@ -99,16 +137,27 @@ the same rules / scripted executor). Claude paths are unit-tested with a mocked 
 | `logic.py` | deterministic core: intent regex + recipes, personalized SKU ranking, split sourcing, reply regex, follow-up |
 | `fake.py` | `FakeAgent`: rules + canned replies (budget, where-is, recs, route, checkout) |
 | `service.py` | `ClaudeAgent` + `ToolExecutor` (explicit handler for each of the six tools) + numbered TODOs |
-| `tests/` | `stubs.py` / `brain_stubs.py` (in-memory store world), `test_agent.py`, `test_interpret.py`, `test_brain.py` (scripted goals, failures, cancellation, messages, mocked Claude loop) |
+| `planner_fake.py` | `ScriptedPlanner` (PlannerService): taco / generic NL rules, catalog resolution, the deterministic compiler, scripted replan, tools-mode expansion |
+| `planner.py` | `LlmPlanner(ScriptedPlanner)`: overrides only `draft()` (utils.llm structured output + scripted fallback) |
+| `loop.py` | `PlanLoop` (LoopRunner, THE orchestrator), settings helpers, `resolve_exec_mode` (the kill switch), `build_runner` |
+| `tests/` | `stubs.py` / `brain_stubs.py` (in-memory store world), `test_agent.py`, `test_interpret.py`, `test_brain.py` (scripted goals, failures, cancellation, messages, mocked Claude loop); loop: `loop_world/` (contract-level stubs: mini store, T0 VLA, verifier, evidence cameras, faults, bus), `test_loop_*.py` (e2e taco + injected faults, cancel / timeout, degrade, scenarios, review regressions, tools mode), `test_planner.py`, `test_brain_plan_mode.py` |
 
 ## How to run
 
 ```bash
 uv run pytest arms/agent                       # tests (base deps, no network)
 make demo                                      # all fakes
-PICKY_REAL_ARMS=agent make demo                # real agent + real brain (needs ANTHROPIC_API_KEY; else rules / scripted)
+PICKY_REAL_ARMS=agent make demo                # real agent + real brain (needs GEMINI_API_KEY; else rules / scripted)
 PICKY_REAL_ARMS=brain make demo                # real robot brain only (Claude tool loop), fake shopper agent
+# planner -> VLA -> verifier loop (needs the gateway to wire the loop services; robot + perception loop fakes):
+PICKY_EXEC_MODE=plan PICKY_FAULTS=drop_on_first_grasp make demo   # "Verifier caught it" + retry
+PICKY_REAL_ARMS=planner PICKY_EXEC_MODE=plan make demo            # LLM planner (GEMINI_API_KEY; else scripted draft)
+PICKY_EXEC_MODE=direct make demo                                  # kill switch: exact v0.2 brain path
 ```
+
+Loop env vars (read at call time): `PICKY_EXEC_MODE` (direct | plan | tools; unset = plan when the VLA + verifier are
+wired), `PICKY_PLAN_TIMEOUT_S` (20), `PICKY_VERIFY_TIMEOUT_S` (8; the verifier gets 1 s less). Until the utils PR adds
+them to `Settings`, `loop.setting()` falls back to the process env var of the same name, so the kill switch always works.
 
 ## Demo-ready checklist (CLAUDE.md §6)
 
@@ -121,6 +170,14 @@ PICKY_REAL_ARMS=brain make demo                # real robot brain only (Claude t
 - [ ] Switching back to the fake by env flag alone works; README is current
 
 ## Known limitations
+
+- Loop: plan mode covers shop / fetch goals with items; shelf_scan and return_to_dock goals stay on the v0.2 executor.
+  `PICKY_EXEC_MODE=tools` is not wired into the brain executor yet (it runs direct). While a plan runs, "add X" /
+  "skip X" messages are declined (the runner has no mid-plan list edit); "status?" reports plan progress.
+- Loop: the LLM planner has never run against the API (no key this weekend; mocked-call tests). `replan` is always
+  scripted (mid-trip latency). An end_at='dock' plan drives to the robot's dock from robots.yaml.
+- Loop tests run over contract-level stubs in `tests/loop_world/` (copies of the API draft's fakes), not the robot /
+  perception arms' fakes (arms never import each other); the pipeline wiring is the gateway's job.
 
 - Robot brain (real) has never run against the API (no key this weekend); it is tested with a mocked client. Each
   goal costs up to 25 Sonnet turns plus a Haiku `observe` per checkpoint; the scripted executor takes over on any

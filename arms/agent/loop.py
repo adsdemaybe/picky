@@ -1,0 +1,1886 @@
+"""PlanLoop: THE orchestrator (``contracts.services.LoopRunner``, agent arm). Deterministic code, so the real runner
+and its "fake" are the same class (``create_runner`` / ``create_runner_fake``); what changes is what it is wired to.
+
+Per step:  pre-check (verifier) -> act (VLA via run_vla_to_terminal | verifier ground / verify | v0.2 scan | ask)
+           -> post-check (verifier, frames from the VLA, baseline, not_before = VlaOutcome.ended_at)
+           -> commit COMMIT_ON_VERIFIED effects once per effect key -> next
+On failure: failure_from_vla / failure_from_verdict -> decide_recovery(RetryPolicy) -> apply (insert recovery steps
+and rerun, rerun on the next tier, reverify, accept provisionally, ask, replan, skip / mark unavailable, fail, or
+escalate by raising RobotError so the fleet reassigns). Verifier down / slow -> RetryPolicy.degrade (state-only
+checks by code).
+
+It talks to the v0.2 services only through their Protocols (robot, catalog, perception, trips, approvals, fleet,
+events) and to the 0.2.1 loop services through the same ``Services`` container (planner, vla, verifier, truth,
+faults). Everything optional degrades: no trips -> a local cart + budget check; no approvals -> ``answer`` callback
+(default: approve / first option); no perception -> ground-truth scan reports; no events -> silent.
+
+Stock (catalog.record_pick / apply_scan) and cart (trips.add_line) effects happen ONLY after a step is verified, and
+each effect key at most once (``EffectRecord`` ledger). The runner patches goal ITEMS / progress (fleet.update_goal)
+and mirrors item status onto trip route stops; it never sets the goal's status (the brain does, with
+``bridge.goal_update_from_outcome``). Ported from the API draft (docs/vla-loop, ``fakes/loop.py``).
+"""
+
+import asyncio
+import time
+from collections import Counter, defaultdict
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
+
+from contracts.bridge import ITEM_TO_STOP_STATUS, ExecMode, ToolStepOutcome, brain_tool_error, mirror_brain_step
+from contracts.common import STAFF_USER_ID, utcnow
+from contracts.events import make_event, plan_envelope
+from contracts.evidence import SlotTruth
+from contracts.fleet import BrainStep, Goal, GoalItemUpdate, GoalUpdate
+from contracts.grounding import GroundedTarget, ProviderCall
+from contracts.perception import PICK_CHOICE_MAX, BasketCheck, Detection, FreshnessCandidate, PickChoice, ScanReport
+from contracts.plan import (
+    CLOSED_STEP_STATUSES,
+    DEFAULT_HEARTBEAT_S,
+    DEFAULT_PLAN_TIMEOUT_S,
+    VLA_STEP_KINDS,
+    AlignStep,
+    AskUserStep,
+    BasketContains,
+    Condition,
+    ExecContext,
+    GraspStep,
+    GripperEmpty,
+    GripperHolding,
+    GroundTargetStep,
+    NavigateToStep,
+    PlaceStep,
+    PlannerInfo,
+    PlanRequest,
+    PlanStatus,
+    PlanStep,
+    ScanShelfStep,
+    StepPlan,
+    StepStatus,
+    VerifyStep,
+    atom_cameras,
+    binding_key,
+    default_conditions,
+    goal_attempt,
+    iter_atoms,
+    make_effect_key,
+    make_exec_id,
+    make_plan_id,
+    make_verify_id,
+    plan_errors,
+    recovery_step_id,
+)
+from contracts.policy import (
+    ACTION_INSERTS,
+    ACTION_RERUNS_STEP,
+    COMMIT_ON_VERIFIED,
+    DEFAULT_RETRY_POLICY,
+    BreakerState,
+    EffectRecord,
+    LoopMetrics,
+    PlanOutcome,
+    PlanRunState,
+    RecoveryContext,
+    RecoveryDecision,
+    ReplanRequest,
+    RetryPolicy,
+    StepAttempt,
+    StepFailure,
+    decide_recovery,
+    failure_from_verdict,
+    failure_from_vla,
+)
+from contracts.services import exec_mode, run_vla_to_terminal
+from contracts.shopping import CartLine
+from contracts.sim import ItemInstance, RobotError
+from contracts.trust import ApprovalKind, ApprovalOption, ApprovalRequest, ApprovalResponse
+from contracts.verify import (
+    GroundingResult,
+    GroundRequest,
+    StateFacts,
+    Verdict,
+    VerifierUnavailableError,
+    VerifyBaseline,
+    VerifyRequest,
+    evaluate_on_state,
+    verdict_reason,
+    verify_deadline,
+)
+from contracts.vla import ERROR_TRAITS, VlaCapabilities, VlaRequest, VlaStatus, resolve_tier
+from utils.log import get_logger
+
+log = get_logger(__name__)
+
+AnswerFn = Callable[[ApprovalRequest], Awaitable[ApprovalResponse]]
+BrainStepHook = Callable[[BrainStep], None]
+DONE_ITEM_OK = ("in_basket", "online", "substituted", "declined", "skipped")
+
+
+async def _run_to_completion(coro: Awaitable[Any]) -> Any:
+    """Run ``coro`` (a short, motion-free commit) to the end even if the caller is cancelled meanwhile, then re-raise
+    the cancellation: a goal cancel can never leave record_pick done but the cart line / goal item missing."""
+    task = asyncio.ensure_future(coro)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await asyncio.wait({task})
+        raise
+
+
+async def auto_answer(request: ApprovalRequest) -> ApprovalResponse:
+    """Default answer when no TripController / ApprovalBroker is wired: approve; pick the first option."""
+    if request.options:
+        return ApprovalResponse(
+            approval_id=request.approval_id, decision="choice", choice=request.options[0].option_id, channel="system"
+        )
+    return ApprovalResponse(approval_id=request.approval_id, decision="approve", channel="system")
+
+
+class _Run:
+    def __init__(self, plan: StepPlan, policy: RetryPolicy) -> None:
+        self.plan = plan
+        self.policy = policy
+        self.mode = plan.mode
+        self.state = PlanRunState(
+            plan_id=plan.plan_id,
+            root_plan_id=plan.root_plan_id,
+            robot_id=plan.robot_id,
+            status=PlanStatus.RUNNING,
+            started_at=utcnow(),
+        )
+        self.metrics = LoopMetrics()
+        self.t0 = time.monotonic()
+        self.rule_failures: dict[str, dict[str, int]] = defaultdict(dict)
+        self.charged: Counter[str] = Counter()
+        self.unit_attempts: Counter[tuple[str | None, int | None]] = Counter()
+        self.next_tier: dict[str, Any] = {}
+        self.recoveries: Counter[str] = Counter()
+        self.held: ItemInstance | None = None
+        self.line_checked: set[str] = set()
+        self.approvals: dict[str, str] = {}
+        self.verify_ms: list[float] = []
+        self.caps: list[VlaCapabilities] | None = None
+        self.last_vla_emit: dict[str, float] = {}
+        self.last_vla_phase: dict[str, str] = {}
+        self.ledger: dict[str, EffectRecord] = {}
+        self.last_scan: dict[str, Any] = {}
+        self.outer: tuple[StepFailure, RecoveryDecision] | None = None
+        self.last_verdicts: dict[str, Verdict] = {}
+        self.slot_geom: dict[str, SlotTruth] | None = None
+        self.brain_no = 0
+        self.answers: dict[str, bool] = {}  # approval_id -> approved (approval_granted atoms)
+        self.stop_status: dict[str, str] = {}  # stop_id -> last status mirrored onto the trip route
+        self.scan_frames: dict[str, Any] = {}  # slot_id -> last BLURRED scan frame (pick_choice ranking)
+
+
+class PlanLoop:
+    def __init__(
+        self,
+        services: Any,
+        *,
+        policy: RetryPolicy = DEFAULT_RETRY_POLICY,
+        answer: AnswerFn | None = None,
+        emit_v02_events: bool = True,
+        mirror_brain_steps: bool = True,
+        vla_status_hz: float = 2.0,
+        heartbeat_s: float = DEFAULT_HEARTBEAT_S,
+        plan_timeout_s: float = DEFAULT_PLAN_TIMEOUT_S,
+        on_brain_step: BrainStepHook | None = None,
+    ) -> None:
+        self.s = services
+        self.on_brain_step = on_brain_step
+        """Called with every mirrored ``brain.step`` (the brain keeps them in its per-robot ring for recent_steps)."""
+        self.plan_timeout_s = plan_timeout_s
+        self.policy = policy
+        self.answer = answer or auto_answer
+        self.emit_v02_events = emit_v02_events
+        self.mirror_brain_steps = mirror_brain_steps
+        self.vla_status_hz = vla_status_hz
+        self.heartbeat_s = heartbeat_s
+        self._runs: dict[str, _Run] = {}
+        self._plans: dict[str, StepPlan] = {}
+        self._goal_plan: dict[str, str] = {}
+        self._tasks: dict[str, asyncio.Task[Any]] = {}
+        self._tool_runs: dict[str, _Run] = {}
+
+    # =================================================================================================================
+    # LoopRunner
+    # =================================================================================================================
+    async def run_goal(self, robot_id: str, goal: Goal) -> PlanOutcome:
+        plan = await self.s.require("planner").plan(PlanRequest(robot_id=robot_id, goal=goal))
+        return await self.run_plan(plan)
+
+    async def run_plan(self, plan: StepPlan, *, policy: RetryPolicy | None = None) -> PlanOutcome:
+        errors = plan_errors(plan)
+        if errors:
+            raise ValueError("invalid plan: " + "; ".join(e.message for e in errors))
+        plan = plan.model_copy(deep=True)
+        plan.status = PlanStatus.RUNNING
+        run = _Run(plan, policy or self.policy)
+        self._register(run)
+        task = asyncio.current_task()
+        if task is not None:
+            self._tasks[plan.root_plan_id] = task
+        await self._pub(run, "plan.created", plan=plan.model_copy(deep=True))
+        try:
+            status = await self._drive(run)
+        except asyncio.CancelledError:
+            await self._finish(run, "cancelled", "cancelled")
+            raise
+        except RobotError as exc:
+            await self._finish(run, "failed", f"escalated to the fleet: {exc.code}")
+            raise
+        return await self._finish(run, status)
+
+    async def run_tool_step(
+        self, robot_id: str, goal: Goal, tool_name: str, tool_input: Mapping[str, Any]
+    ) -> ToolStepOutcome:
+        root = f"{make_plan_id(goal.goal_id, goal_attempt(goal))}-tools"  # a reassigned goal never reuses ids
+        run = self._tool_runs.get(root)
+        if run is None:
+            plan = StepPlan(
+                plan_id=root,
+                root_plan_id=root,
+                goal_id=goal.goal_id,
+                robot_id=robot_id,
+                store_id=goal.store_id,
+                trip_id=goal.trip_id,
+                user_id=goal.user_id,
+                request_id=goal.request_id,
+                mode="tools",
+                title=goal.title,
+                planner=PlannerInfo(origin="tools"),
+                items=list(goal.items),
+                end_at=goal.end_at,
+                status=PlanStatus.RUNNING,
+            )
+            run = _Run(plan, self.policy)
+            self._tool_runs[root] = run
+            self._register(run)
+            await self._pub(run, "plan.created", plan=plan.model_copy(deep=True))
+        steps = await self.s.require("planner").expand_tool_call(run.plan, tool_name, tool_input)
+        start = len(run.plan.steps)
+        run.plan.steps.extend(steps)
+        run.outer = None
+        i = start
+        while i < len(run.plan.steps):
+            step = run.plan.steps[i]
+            if step.status in CLOSED_STEP_STATUSES:
+                i += 1
+                continue
+            res = await self._run_step(run, i)
+            if res in ("outer", "fail_goal", "cancelled", "replanned"):
+                failure, decision = run.outer if run.outer else (None, None)
+                new_steps = [s.model_copy(deep=True) for s in run.plan.steps[start:]]
+                if failure is None:
+                    failure = StepFailure(
+                        plan_id=run.plan.plan_id,
+                        step_id=step.step_id,
+                        step_kind=step.kind,
+                        attempt=max(step.attempts, 1),
+                        kind="vla_error",
+                        code="cancelled",
+                        message=res,
+                    )
+                return ToolStepOutcome(
+                    tool=tool_name,
+                    ok=False,
+                    steps=new_steps,
+                    failure=failure,
+                    decision=decision,
+                    error=brain_tool_error(failure, decision),
+                )
+            if res == "next":
+                i += 1
+        new = run.plan.steps[start:]
+        verdicts = [run.last_verdicts[s.step_id] for s in new if s.step_id in run.last_verdicts]
+        provisional = any(s.status == StepStatus.PROVISIONAL for s in new)
+        holding = await self._held_unit(run) if tool_name == "pick_item" else None
+        return ToolStepOutcome(
+            tool=tool_name,
+            ok=True,
+            steps=[s.model_copy(deep=True) for s in new],
+            verdicts=verdicts,
+            holding=holding,
+            verified=None if provisional else True,
+        )
+
+    async def cancel(self, plan_id: str, reason: str = "") -> PlanRunState:
+        run = self._runs[plan_id]
+        task = self._tasks.get(run.plan.root_plan_id)
+        vla = getattr(self.s, "vla", None)
+        if task is not None and not task.done() and task is not asyncio.current_task():
+            task.cancel(reason or "cancel")
+            await asyncio.wait({task})
+        elif vla is not None:
+            await vla.cancel_robot(run.plan.robot_id, reason)
+        return run.state.model_copy(deep=True)
+
+    async def get_plan(self, plan_id: str) -> StepPlan:
+        return self._plans[plan_id].model_copy(deep=True)
+
+    async def current_plan(self, goal_id: str) -> StepPlan | None:
+        pid = self._goal_plan.get(goal_id)
+        return self._plans[pid].model_copy(deep=True) if pid else None
+
+    async def run_state(self, plan_id: str) -> PlanRunState:
+        return self._runs[plan_id].state.model_copy(deep=True)
+
+    async def attempts(self, plan_id: str, step_id: str | None = None) -> list[StepAttempt]:
+        return [a for a in self._runs[plan_id].state.attempts if step_id is None or a.step_id == step_id]
+
+    # =================================================================================================================
+    # driver
+    # =================================================================================================================
+    def _register(self, run: _Run) -> None:
+        self._runs[run.plan.plan_id] = run
+        self._plans[run.plan.plan_id] = run.plan
+        self._goal_plan[run.plan.goal_id] = run.plan.plan_id
+
+    async def _drive(self, run: _Run) -> str:
+        i = 0
+        while i < len(run.plan.steps):
+            step = run.plan.steps[i]
+            if step.status in CLOSED_STEP_STATUSES:
+                i += 1
+                continue
+            res = await self._run_step(run, i)
+            if res in ("fail_goal", "cancelled"):
+                return "failed" if res == "fail_goal" else "cancelled"
+            if res == "replanned":
+                i = 0
+            elif res == "next":
+                i += 1
+        bad = [it for it in run.plan.items if not it.optional and it.status not in DONE_ITEM_OK]
+        return "failed" if any(it.status == "failed" for it in bad) else "completed"
+
+    async def _run_step(self, run: _Run, i: int) -> str:
+        plan, step = run.plan, run.plan.steps[i]
+        # mandate / budget gate before the FIRST unit of an item (plan mode; tools mode: the v0.2 executor does it)
+        if isinstance(step, GraspStep) and run.mode == "plan" and step.item_id and step.item_id not in run.line_checked:
+            gate = await self._check_line(run, step)
+            if gate == "deny":
+                step.status = StepStatus.FAILED
+                await self._close_item(run, step.item_id, "failed", "mandate denied")
+                await self._pub(
+                    run,
+                    "step.completed",
+                    plan_id=plan.plan_id,
+                    step_id=step.step_id,
+                    status=step.status,
+                    attempts=step.attempts,
+                    note="mandate denied",
+                )
+                return "next"
+            if gate == "ask":
+                plan.steps.insert(i, self._threshold_question(run, step))
+                return "again"
+        step.attempts += 1
+        attempt = step.attempts
+        step.status = StepStatus.RUNNING
+        is_vla = step.kind in VLA_STEP_KINDS
+        exec_id = make_exec_id(plan.plan_id, step.step_id, attempt) if is_vla else None
+        tier_pref = run.next_tier.get(step.step_id) or getattr(step, "tier", "auto")
+        planned = resolve_tier(tier_pref, await self._caps(run), step.kind, self._open_tiers(run)) if is_vla else None
+        att = StepAttempt(plan_id=plan.plan_id, step_id=step.step_id, attempt=attempt, exec_id=exec_id, tier=planned)
+        run.state.attempts.append(att)
+        run.state.current_step_id = step.step_id
+        run.metrics.attempts += 1
+        await self._pub(
+            run,
+            "step.started",
+            plan_id=plan.plan_id,
+            step=step.model_copy(deep=True),
+            attempt=attempt,
+            exec_id=exec_id,
+            tier=planned,
+            inserted_by=step.inserted_by,
+        )
+        ctx = ExecContext(
+            goal_id=plan.goal_id,
+            plan_id=plan.plan_id,
+            step_id=step.step_id,
+            step_kind=step.kind,
+            attempt=attempt,
+            item_id=step.item_id,
+            trip_id=plan.trip_id,
+        )
+
+        # 1. pre-check
+        if step.preconditions is not None:
+            pre_v = await self._verify(run, step, attempt, "pre", step.preconditions, ctx)
+            att.pre = pre_v
+            await self._pub(
+                run,
+                "step.verified",
+                plan_id=plan.plan_id,
+                step_id=step.step_id,
+                attempt=attempt,
+                phase="pre",
+                verdict=pre_v,
+            )
+            if not pre_v.passed:
+                f = failure_from_verdict(pre_v, plan_id=plan.plan_id, step=step, attempt=attempt, phase="pre")
+                assert f is not None
+                return await self._recover(run, i, f, att)
+
+        # 2. act
+        if isinstance(step, NavigateToStep) and step.stop_id:
+            await self._stop_status(run, step.stop_id, "navigating")
+        frames: list[Any] = []
+        not_before = None
+        baseline: VerifyBaseline | None = None
+        claimed = False
+        if is_vla:
+            if any(a.op in ("basket_delta",) for _, a in iter_atoms(step.postconditions)):
+                baseline = await self._baseline(run, step)
+            binding = getattr(step, "binding", None)
+            req = VlaRequest(
+                exec_id=exec_id or "",
+                robot_id=plan.robot_id,
+                store_id=plan.store_id,
+                step=step.model_copy(deep=True),
+                tier=planned or tier_pref,  # concrete: the VLA service does not know the runner's breakers
+                grounding=plan.bindings.get(binding) if binding else None,
+                deadline_s=step.effective_timeout_s(),
+                heartbeat_s=self.heartbeat_s,
+                capture_after=self._capture_cams(step),
+                context=ctx,
+            )
+            terminal = await run_vla_to_terminal(self.s.require("vla"), req, on_status=self._vla_cb(run, step))
+            att.vla_terminal = terminal
+            att.tier = terminal.tier or planned
+            claimed = terminal.phase == "succeeded"
+            att.vla_claimed_success = claimed
+            att.fault_ids = await self._fault_ids(run, step, attempt)
+            if terminal.phase == "cancelled":
+                step.status = StepStatus.CANCELLED
+                return "cancelled"
+            if not claimed:
+                f = failure_from_vla(terminal, plan_id=plan.plan_id, step=step, attempt=attempt)
+                assert f is not None
+                if f.code == "disconnected":
+                    run.caps = None
+                return await self._recover(run, i, f, att)
+            frames = list(terminal.outcome.frames) if terminal.outcome else []
+            not_before = (terminal.outcome.ended_at if terminal.outcome else None) or terminal.ts
+        elif isinstance(step, GroundTargetStep):
+            res = await self._ground(run, step, ctx)
+            if res.found and res.target is not None:
+                plan.bindings[step.binding] = res.target
+                await self._pub(
+                    run, "target.grounded", plan_id=plan.plan_id, step_id=step.step_id, grounding=res.target
+                )
+            else:
+                f = StepFailure(
+                    plan_id=plan.plan_id,
+                    step_id=step.step_id,
+                    step_kind=step.kind,
+                    attempt=attempt,
+                    kind="postcondition",
+                    code="target_not_grounded",
+                    message=res.reason,
+                    item_id=step.item_id,
+                )
+                return await self._recover(run, i, f, att)
+        elif isinstance(step, VerifyStep):
+            cond = self._audit_condition(run) if step.purpose == "audit" else step.condition
+            v = await self._verify(run, step, attempt, "verify", cond, ctx)
+            att.post = v
+            run.last_verdicts[step.step_id] = v
+            await self._pub(
+                run,
+                "step.verified",
+                plan_id=plan.plan_id,
+                step_id=step.step_id,
+                attempt=attempt,
+                phase="verify",
+                verdict=v,
+            )
+            if not v.passed:
+                f = failure_from_verdict(v, plan_id=plan.plan_id, step=step, attempt=attempt, phase="verify")
+                assert f is not None
+                return await self._recover(run, i, f, att)
+            if step.purpose == "audit":
+                run.state.provisional_open = False
+            return await self._succeed(run, step, att)
+        elif isinstance(step, ScanShelfStep):
+            count = await self._scan(run, step, attempt)
+            if count < step.min_count:
+                f = StepFailure(
+                    plan_id=plan.plan_id,
+                    step_id=step.step_id,
+                    step_kind=step.kind,
+                    attempt=attempt,
+                    kind="postcondition",
+                    code="atom:item_on_shelf",
+                    item_id=step.item_id,
+                    message=f"{count} x {step.expected_sku} on the shelf",
+                )
+                return await self._recover(run, i, f, att)
+            return await self._succeed(run, step, att)
+        elif isinstance(step, AskUserStep):
+            res2 = await self._ask_step(run, step)
+            await self._succeed(run, step, att)
+            return res2
+
+        # 3. post-check
+        if step.postconditions is not None:
+            post_v = await self._verify(
+                run,
+                step,
+                attempt,
+                "post",
+                step.postconditions,
+                ctx,
+                frames=frames,
+                baseline=baseline,
+                not_before=not_before,
+            )
+            att.post = post_v
+            run.last_verdicts[step.step_id] = post_v
+            caught = claimed and post_v.outcome == "fail"
+            await self._pub(
+                run,
+                "step.verified",
+                plan_id=plan.plan_id,
+                step_id=step.step_id,
+                attempt=attempt,
+                phase="post",
+                verdict=post_v,
+                caught_vla_false_success=caught,
+            )
+            if not post_v.passed:
+                f = failure_from_verdict(
+                    post_v,
+                    plan_id=plan.plan_id,
+                    step=step,
+                    attempt=attempt,
+                    phase="post",
+                    tier=att.tier,
+                    vla_claimed_success=claimed,
+                )
+                assert f is not None
+                return await self._recover(run, i, f, att, baseline=baseline)
+        # 4. commit
+        return await self._succeed(run, step, att)
+
+    # =================================================================================================================
+    # success / effects
+    # =================================================================================================================
+    async def _succeed(
+        self, run: _Run, step: PlanStep, att: StepAttempt, *, provisional: bool = False, note: str = ""
+    ) -> str:
+        if isinstance(step, GraspStep):
+            run.held = await self._held_unit(run)
+        effects = await _run_to_completion(self._commit(run, step, att, provisional)) if run.mode == "plan" else []
+        step.status = StepStatus.PROVISIONAL if provisional else StepStatus.SUCCEEDED
+        if provisional:
+            run.state.provisional_open = True
+        await self._complete(run, step, att, effects, note=note)
+        return "next"
+
+    async def _complete(
+        self, run: _Run, step: PlanStep, att: StepAttempt, effects: list[EffectRecord], note: str = ""
+    ) -> None:
+        att.effects = effects
+        att.ended_at = utcnow()
+        await self._pub(
+            run,
+            "step.completed",
+            plan_id=run.plan.plan_id,
+            step_id=step.step_id,
+            status=step.status,
+            attempts=step.attempts,
+            effects=effects,
+            note=note,
+        )
+        await self._mirror(
+            run, step, f"{step.status.value}" + (f" ({note})" if note else ""), ok=step.status != StepStatus.FAILED
+        )
+
+    async def _commit(self, run: _Run, step: PlanStep, att: StepAttempt, provisional: bool) -> list[EffectRecord]:
+        kinds = COMMIT_ON_VERIFIED.get(step.kind, ())
+        if isinstance(step, PlaceStep) and step.destination == "shelf":
+            kinds = ("return_to_shelf",)
+        out: list[EffectRecord] = []
+        for kind in kinds:
+            scope = (step.item_id or step.step_id) if kind == "add_cart_line" else step.step_id
+            key = make_effect_key(run.plan.root_plan_id, scope, kind)
+            if key in run.ledger:
+                continue
+            payload = await self._apply_effect(run, step, kind, provisional)
+            if payload is None:
+                continue
+            rec = EffectRecord(
+                effect_key=key,
+                kind=kind,
+                plan_id=run.plan.plan_id,
+                step_id=step.step_id,
+                item_id=step.item_id,  # type: ignore[arg-type]
+                exec_id=att.exec_id,
+                verify_id=att.post.verify_id if att.post else None,
+                provisional=provisional,
+                confidence=att.post.confidence if att.post else 1.0,
+                payload=payload,
+            )
+            run.ledger[key] = rec
+            run.state.effects.append(rec)
+            out.append(rec)
+        return out
+
+    async def _apply_effect(
+        self, run: _Run, step: PlanStep, kind: str, provisional: bool = False
+    ) -> dict[str, Any] | None:
+        plan = run.plan
+        item = plan.item(step.item_id)
+        if kind == "stop_arrived":
+            assert isinstance(step, NavigateToStep)
+            if step.stop_id:
+                await self._stop_status(run, step.stop_id, "arrived")
+            if step.slot_id or step.stop_id:
+                await self._pub02(
+                    run,
+                    "robot.arrived",
+                    stop_id=step.stop_id,
+                    slot_id=step.slot_id,
+                    goal_id=plan.goal_id,
+                    pose=step.goal_pose,
+                )
+            return {"slot_id": step.slot_id, "stop_id": step.stop_id}
+        if kind == "apply_scan":
+            return run.last_scan.get(step.step_id, {})
+        if kind == "record_pick":
+            assert isinstance(step, PlaceStep)
+            unit = run.held
+            slot_id = (unit.slot_id if unit else None) or (item.slot_id if item else None)
+            catalog = getattr(self.s, "catalog", None)
+            if catalog is not None and slot_id:
+                await catalog.record_pick(
+                    plan.store_id, slot_id, step.sku, 1, plan.trip_id, plan.robot_id, unit.lot_id if unit else None
+                )
+            await self._pub02(
+                run,
+                "item.picked",
+                sku=step.sku,
+                slot_id=slot_id,
+                instance_id=unit.instance_id if unit else None,
+                stop_id=item.stop_id if item else None,
+                goal_id=plan.goal_id,
+            )
+            payload = {
+                "sku": step.sku,
+                "slot_id": slot_id,
+                "instance_id": unit.instance_id if unit else None,
+                "lot_id": unit.lot_id if unit else None,
+            }
+            run.held = None
+            await self._basket_event(run)
+            return payload
+        if kind == "goal_item_progress":
+            if item is None:
+                return {}
+            if item.picked_qty >= item.qty:  # defence in depth: an extra unit never inflates the item / cart line
+                return {"picked_qty": item.picked_qty, "qty": item.qty, "extra_unit": True}
+            item.picked_qty += 1
+            if (
+                run.state.effects
+                and run.state.effects[-1].kind == "record_pick"
+                and run.state.effects[-1].payload.get("instance_id")
+            ):
+                item.instance_ids.append(run.state.effects[-1].payload["instance_id"])
+            item.robot_id = plan.robot_id
+            if item.picked_qty >= item.qty:
+                item.status = "in_basket"
+            await self._goal_update(run, item, note=step.title)
+            return {"picked_qty": item.picked_qty, "qty": item.qty}
+        if kind == "add_cart_line":
+            if item is None or item.picked_qty < item.qty:
+                return None
+            unsure = provisional or any(r.provisional and r.item_id == item.item_id for r in run.ledger.values())
+            return await self._add_line(run, item, item.qty, provisional=unsure)
+        if kind in ("unload_basket", "return_to_shelf"):
+            return {}
+        return {}
+
+    async def _add_line(self, run: _Run, item: Any, qty: int, *, provisional: bool = False) -> dict[str, Any]:
+        """Cart line for verified units. A line with any PROVISIONAL unit gets status 'picked' (not 'verified'): the
+        web app shows it as provisional and the pre-checkout basket audit must pass before the handoff."""
+        plan = run.plan
+        catalog = getattr(self.s, "catalog", None)
+        product = await catalog.get_product(item.sku) if catalog is not None and item.sku else None
+        line = CartLine(
+            line_id=f"line-{item.item_id}",
+            sku=item.sku or "",
+            name=item.name,
+            category=item.category or (product.category if product else "uncategorized"),
+            qty=qty,
+            unit_price_cents=item.price_cents or (product.price_cents if product else 0),
+            store_id=plan.store_id,
+            slot_id=item.slot_id,
+            rec_id=item.rec_id,
+            list_item_id=item.list_item_id,
+            instance_ids=list(item.instance_ids),
+            status="picked" if provisional else "verified",
+        )
+        trips = getattr(self.s, "trips", None)
+        if trips is not None and plan.trip_id:
+            res = await trips.add_line(plan.trip_id, line, approval_id=run.approvals.get(item.item_id))
+            item.line_id = getattr(getattr(res, "line", None), "line_id", line.line_id)
+        else:
+            run.state.local_cart.append(line)
+            item.line_id = line.line_id
+        return {
+            "line_id": item.line_id,
+            "qty": qty,
+            "total_cents": line.qty * line.unit_price_cents,
+            "line_status": line.status,
+        }
+
+    async def _close_item(self, run: _Run, item_id: str | None, status: str, reason: str) -> None:
+        if item_id is None:
+            return
+        for s in run.plan.steps:
+            if s.item_id == item_id and s.status not in CLOSED_STEP_STATUSES and s.status != StepStatus.RUNNING:
+                s.status = StepStatus.SKIPPED
+        item = run.plan.item(item_id)
+        if item is None:
+            return
+        item.status = status  # type: ignore[assignment]
+        item.notes = reason
+        if run.mode == "plan" and item.picked_qty > 0:
+            key = make_effect_key(run.plan.root_plan_id, item_id, "add_cart_line")
+            if key not in run.ledger:
+                payload = await self._add_line(run, item, item.picked_qty)
+                rec = EffectRecord(
+                    effect_key=key, kind="add_cart_line", plan_id=run.plan.plan_id, item_id=item_id, payload=payload
+                )
+                run.ledger[key] = rec
+                run.state.effects.append(rec)
+        if status == "unavailable" and run.mode == "plan":
+            trips = getattr(self.s, "trips", None)
+            if trips is not None and run.plan.trip_id and item.sku:
+                online = CartLine(
+                    line_id=f"online-{item_id}",
+                    sku=item.sku,
+                    name=item.name,
+                    category=item.category or "uncategorized",
+                    qty=max(item.qty - item.picked_qty, 1),
+                    unit_price_cents=item.price_cents or 0,
+                    source="online",
+                    store_id="online",
+                )
+                await trips.add_line(run.plan.trip_id, online)
+            item.status = "online"
+            key = make_effect_key(run.plan.root_plan_id, item_id, "online_line")
+            rec = EffectRecord(
+                effect_key=key, kind="online_line", plan_id=run.plan.plan_id, item_id=item_id, payload={"sku": item.sku}
+            )
+            run.ledger.setdefault(key, rec)
+            run.state.effects.append(rec)
+        await self._goal_update(run, item, note=reason)
+
+    async def _stop_status(self, run: _Run, stop_id: str, status: str, reason: str = "") -> None:
+        """v0.2 rule: mirror progress onto the trip route stop (trips.set_stop_status), once per stop + status."""
+        trips = getattr(self.s, "trips", None)
+        if trips is None or not run.plan.trip_id or run.stop_status.get(stop_id) == status:
+            return
+        run.stop_status[stop_id] = status
+        try:
+            await trips.set_stop_status(run.plan.trip_id, stop_id, status, reason)  # type: ignore[arg-type]
+        except (KeyError, ValueError):
+            pass
+
+    async def _goal_update(self, run: _Run, item: Any, note: str = "") -> None:
+        stop = ITEM_TO_STOP_STATUS.get(item.status)
+        if item.stop_id and stop is not None:
+            await self._stop_status(run, item.stop_id, stop, note)
+        fleet = getattr(self.s, "fleet", None)
+        if fleet is None or run.plan.goal_id.startswith("adhoc-"):
+            return
+        try:
+            await fleet.update_goal(
+                run.plan.goal_id,
+                GoalUpdate(
+                    items=[
+                        GoalItemUpdate(
+                            item_id=item.item_id,
+                            status=item.status,
+                            picked_qty=item.picked_qty,
+                            instance_ids=list(item.instance_ids),
+                            robot_id=item.robot_id,
+                            line_id=item.line_id,
+                        )
+                    ],
+                    progress=run.plan.progress,
+                    note=note,
+                ),
+            )
+        except (KeyError, ValueError):
+            pass
+
+    # =================================================================================================================
+    # recovery
+    # =================================================================================================================
+    async def _recover(
+        self, run: _Run, i: int, failure: StepFailure, att: StepAttempt, *, baseline: VerifyBaseline | None = None
+    ) -> str:
+        plan, step = run.plan, run.plan.steps[i]
+        policy = run.policy
+        att.failure = failure
+        att.ended_at = utcnow()
+        if failure.code == "cancelled":
+            step.status = StepStatus.CANCELLED
+            return "cancelled"
+        traits = ERROR_TRAITS.get(failure.code)
+        counts = traits.counts_attempt if traits is not None else True
+        if counts:
+            run.charged[step.step_id] += 1
+            if step.kind == "grasp":
+                run.unit_attempts[(step.item_id, step.unit)] += 1
+        tier = failure.tier
+        brk = run.state.breakers.get(tier) if tier else None
+        caps = await self._caps(run)
+        item = plan.item(step.item_id)
+        rctx = RecoveryContext(
+            failure=failure,
+            rule_failures=dict(run.rule_failures[step.step_id]),
+            failures_of_step=max(1, run.charged[step.step_id]),
+            unit_attempts=max(1, run.unit_attempts[(step.item_id, step.unit)]),
+            replans_used=run.state.replans,
+            questions_used=run.state.questions,
+            wall_s=time.monotonic() - run.t0,
+            tier_strikes=brk.strikes if brk else 0,
+            optional_step=step.optional or bool(item and item.optional),
+            available_tiers=[c.tier for c in caps if c.available] or ["t0_scripted"],
+            mode=run.mode,
+        )
+        decision = decide_recovery(policy, rctx)
+        rid = decision.rule_id or "_fallback"
+        run.rule_failures[step.step_id][rid] = run.rule_failures[step.step_id].get(rid, 0) + 1
+        att.decision = decision
+        if failure.caught_by_verifier:
+            run.metrics.verifier_catches += 1
+        left = max(0, policy.budget.max_step_attempts - run.charged[step.step_id])
+        await self._pub(
+            run,
+            "step.failed",
+            plan_id=plan.plan_id,
+            step_id=step.step_id,
+            failure=failure,
+            decision=decision,
+            attempts_left=left,
+        )
+        await self._breaker(run, failure, decision)
+        await self._mirror(run, step, decision.reason, ok=False)
+
+        action = decision.action
+        if run.mode == "tools" and not decision.inner and action != "escalate":
+            step.status = StepStatus.FAILED
+            run.outer = (failure, decision)
+            return "outer"
+        if action == "escalate":
+            step.status = StepStatus.FAILED
+            code = failure.code if failure.code in ("battery_low", "unknown_robot") else "unknown_robot"
+            raise RobotError(code, f"{failure.code}: {failure.message}")  # type: ignore[arg-type]
+        if action == "adopt_held":
+            return await self._succeed(run, step, att, note="already holding it")
+        if action in ACTION_RERUNS_STEP:
+            if decision.backoff_s:
+                await asyncio.sleep(decision.backoff_s)
+            if decision.next_tier:
+                run.next_tier[step.step_id] = decision.next_tier
+            held_unit = await self._held_unit(run) if action in ("return_item", "return_held") else None
+            inserts = self._inserts(run, i, decision.action, failure, held_unit)
+            plan.steps[i:i] = inserts
+            step.status = StepStatus.PENDING
+            run.metrics.retries += 1
+            return "again"
+        if action == "reverify":
+            return await self._reverify(run, i, failure, att, baseline)
+        if action == "accept_provisional":
+            return await self._succeed(run, step, att, provisional=True)
+        if action in ("ask_user", "substitute"):
+            return await self._ask_recovery(run, i, failure, decision)
+        if action == "replan":
+            return await self._replan(run, step, failure, decision)
+        if action == "mark_unavailable":
+            step.status = StepStatus.FAILED
+            await self._close_item(run, step.item_id, "unavailable", decision.reason)
+            await self._complete(run, step, att, [], note="ordering online")
+            return "next"
+        if action == "skip_item":
+            optional = bool(item and item.optional) or step.optional
+            step.status = StepStatus.SKIPPED if optional else StepStatus.FAILED
+            await self._close_item(run, step.item_id, "skipped" if optional else "failed", decision.reason)
+            await self._complete(run, step, att, [], note="item skipped")
+            return "next"
+        step.status = StepStatus.FAILED
+        await self._complete(run, step, att, [], note="goal failed")
+        return "fail_goal"
+
+    async def _reverify(
+        self, run: _Run, i: int, failure: StepFailure, att: StepAttempt, baseline: VerifyBaseline | None
+    ) -> str:
+        step = run.plan.steps[i]
+        phase = failure.verdict.phase if failure.verdict else "post"
+        if phase == "pre":
+            step.status = StepStatus.PENDING
+            return "again"
+        cond: Condition | None = step.condition if isinstance(step, VerifyStep) else step.postconditions
+        if isinstance(step, VerifyStep) and step.purpose == "audit":
+            cond = self._audit_condition(run)
+        assert cond is not None
+        ctx = ExecContext(
+            goal_id=run.plan.goal_id,
+            plan_id=run.plan.plan_id,
+            step_id=step.step_id,
+            step_kind=step.kind,
+            attempt=step.attempts,
+            item_id=step.item_id,
+            trip_id=run.plan.trip_id,
+        )
+        n = run.recoveries[step.step_id] = run.recoveries[step.step_id] + 1
+        v = await self._verify(run, step, step.attempts, f"reverify{n}", cond, ctx, baseline=baseline, alternate=True)
+        await self._pub(
+            run,
+            "step.verified",
+            plan_id=run.plan.plan_id,
+            step_id=step.step_id,
+            attempt=step.attempts,
+            phase="reverify",
+            verdict=v,
+            caught_vla_false_success=att.vla_claimed_success and v.outcome == "fail",
+        )
+        run.last_verdicts[step.step_id] = v
+        if v.passed:
+            att.post = v
+            return await self._succeed(run, step, att)
+        f = failure_from_verdict(
+            v,
+            plan_id=run.plan.plan_id,
+            step=step,
+            attempt=step.attempts,
+            phase="reverify",
+            tier=att.tier,
+            vla_claimed_success=att.vla_claimed_success,
+        )
+        assert f is not None
+        return await self._recover(run, i, f, att, baseline=baseline)
+
+    async def _ask_recovery(self, run: _Run, i: int, failure: StepFailure, decision: RecoveryDecision) -> str:
+        step = run.plan.steps[i]
+        item = run.plan.item(step.item_id)
+        run.state.questions += 1
+        run.metrics.asks += 1
+        name = (item.name or item.query) if item else step.title
+        picked = item.picked_qty if item else 0
+        # a substitute replaces the WHOLE item (sku + price of its single cart line), so it is offered only while no
+        # unit of the original is in the basket; otherwise the rest is ordered online (a partial line is kept)
+        sub = (
+            item.substitutes[0]
+            if (decision.action == "substitute" and item and item.substitutes and picked == 0)
+            else None
+        )
+        if decision.action == "substitute" and sub is None and item is not None and picked > 0:
+            question, kind = (
+                f"I got {picked} of {item.qty} {name}, the shelf is empty now. Order the other "
+                f"{item.qty - picked} online?",
+                "online_order",
+            )
+        elif decision.action == "substitute" and sub is None:
+            question, kind = (
+                f"I can't get {name} ({failure.message or failure.code}). Order it online instead?",
+                "online_order",
+            )
+        elif sub is not None:
+            question, kind = f"{name} is not available. Take {sub} instead?", "substitution"
+        else:
+            question, kind = (
+                f"I'm having trouble with '{step.title}' ({failure.message or failure.code}). Try again?",
+                "question",
+            )
+        resp = await self._ask(run, kind, question, [], item, step)
+        if resp.approved and sub is not None:
+            step.status = StepStatus.FAILED
+            return await self._replan(run, step, failure, decision, substitutions={item.item_id: sub} if item else {})
+        if resp.approved and decision.action == "substitute":
+            step.status = StepStatus.FAILED
+            await self._close_item(run, step.item_id, "unavailable", "shopper chose to order online")
+            return "next"
+        if resp.approved:
+            step.status = StepStatus.PENDING
+            return "again"
+        optional = bool(item and item.optional)
+        step.status = StepStatus.SKIPPED if optional else StepStatus.FAILED
+        await self._close_item(run, step.item_id, "skipped" if optional else "failed", "shopper said skip it")
+        await self._complete(run, step, run.state.attempts[-1], [], note="shopper said skip")
+        return "next"
+
+    async def _replan(
+        self,
+        run: _Run,
+        step: PlanStep,
+        failure: StepFailure,
+        decision: RecoveryDecision,
+        substitutions: dict[str, str] | None = None,
+    ) -> str:
+        planner = getattr(self.s, "planner", None)
+        if planner is None or run.mode == "tools":
+            step.status = StepStatus.FAILED
+            await self._close_item(run, step.item_id, "failed", "no planner to re-plan with")
+            return "next"
+        run.state.replans += 1
+        run.metrics.replans += 1
+        if step.status not in CLOSED_STEP_STATUSES:
+            step.status = StepStatus.FAILED
+        old = run.plan
+        robot_state = await self.s.require("robot").state(old.robot_id)
+        try:
+            new = await asyncio.wait_for(
+                planner.replan(
+                    ReplanRequest(
+                        plan=old,
+                        failure=failure,
+                        decision=decision,
+                        robot_state=robot_state,
+                        substitutions=substitutions or {},
+                        reason=decision.reason,
+                    )
+                ),
+                timeout=self.plan_timeout_s,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - a broken / slow re-plan ends this item, never the whole plan
+            await self._close_item(run, step.item_id, "failed", f"re-plan failed ({type(exc).__name__}: {exc})")
+            return "next"
+        old.status = PlanStatus.SUPERSEDED
+        new.status = PlanStatus.RUNNING
+        run.plan = new
+        run.state.plan_id = new.plan_id
+        self._register(run)
+        await self._pub(
+            run,
+            "plan.revised",
+            plan=new.model_copy(deep=True),
+            previous_plan_id=old.plan_id,
+            reason=decision.reason,
+            failure=failure,
+        )
+        return "replanned"
+
+    def _inserts(
+        self, run: _Run, i: int, action: str, failure: StepFailure, held_unit: ItemInstance | None = None
+    ) -> list[PlanStep]:
+        plan, step = run.plan, run.plan.steps[i]
+        kinds = ACTION_INSERTS.get(action, ())
+        if not kinds:
+            return []
+        n = run.recoveries[step.step_id] = run.recoveries[step.step_id] + 1
+        grasp = (
+            step
+            if isinstance(step, GraspStep)
+            else next(
+                (
+                    s
+                    for s in reversed(plan.steps[:i])
+                    if isinstance(s, GraspStep) and s.item_id == step.item_id and s.unit == step.unit
+                ),
+                None,
+            )
+        )
+        target = grasp.target if grasp else None
+        loc = (target.location if target else None) or getattr(step, "location", None)
+        common = {
+            "item_id": step.item_id,
+            "unit": step.unit,
+            "group_id": step.group_id,
+            "group_label": step.group_label,
+            "origin": "recovery",
+            "inserted_by": step.step_id,
+        }
+        held = held_unit.sku if held_unit is not None else None
+        if held is None and failure.verdict is not None:
+            held = next((a.observed.get("held_sku") for a in failure.verdict.atoms if a.observed.get("held_sku")), None)
+        # the shopper's unit (pick_choice) survives a re-ground of the SAME unit; a new unit is needed after a drop
+        keep_unit = action in ("reground", "realign", "renavigate")
+        out: list[PlanStep] = []
+        for k, kind in enumerate(kinds, start=1):
+            sid = recovery_step_id(step.step_id, n, k)
+            if kind == "ground_target":
+                if target is None:
+                    continue
+                bkey = grasp.binding if grasp and grasp.binding else binding_key(step.item_id, step.unit)
+                pre, post = default_conditions("ground_target", sku=target.sku, slot_id=target.slot_id, binding=bkey)
+                out.append(
+                    GroundTargetStep(
+                        step_id=sid,
+                        title=f"Find the {target.description} again",
+                        target=target if keep_unit else target.model_copy(update={"instance_id": None}),
+                        binding=bkey,
+                        camera="front" if n == 1 else "wrist",
+                        preconditions=pre,
+                        postconditions=post,
+                        **common,
+                    )
+                )
+            elif kind == "align" and loc is not None and not isinstance(step, AlignStep):
+                pre, post = default_conditions("align", slot_id=loc.slot_id, approach_pose=loc.approach_pose)
+                out.append(
+                    AlignStep(
+                        step_id=sid,
+                        title="Re-align to the shelf",
+                        slot_id=loc.slot_id,
+                        location=loc,
+                        lift_height_m=loc.lift_height_m,
+                        preconditions=pre,
+                        postconditions=post,
+                        **common,
+                    )
+                )
+            elif kind == "navigate_to" and loc is not None:
+                pre, post = default_conditions("navigate_to", goal_pose=loc.approach_pose)
+                out.append(
+                    NavigateToStep(
+                        step_id=sid,
+                        title="Drive back to the shelf",
+                        target="slot",
+                        slot_id=loc.slot_id,
+                        goal_pose=loc.approach_pose,
+                        preconditions=pre,
+                        postconditions=post,
+                        **common,
+                    )
+                )
+            elif kind == "scan_shelf" and loc is not None and not isinstance(step, ScanShelfStep):
+                out.append(
+                    ScanShelfStep(
+                        step_id=sid,
+                        title="Re-scan the shelf",
+                        slot_id=loc.slot_id,
+                        expected_sku=target.sku if target else None,
+                        location=loc,
+                        min_count=1,
+                        **common,
+                    )
+                )
+            elif kind == "grasp" and grasp is not None:
+                pre, post = default_conditions(
+                    "grasp",
+                    sku=grasp.target.sku,
+                    slot_id=grasp.target.slot_id,
+                    approach_pose=loc.approach_pose if loc else None,
+                )
+                out.append(
+                    GraspStep(
+                        step_id=sid,
+                        title=f"Grab another {grasp.target.description}",
+                        target=grasp.target.model_copy(update={"instance_id": None}),
+                        binding=grasp.binding,
+                        instruction=grasp.instruction,
+                        preconditions=pre,
+                        postconditions=post,
+                        **common,
+                    )
+                )
+            elif kind == "place":
+                sku = held or (target.sku if target else None) or getattr(step, "sku", None)
+                if sku is None:
+                    continue
+                if action in ("return_item", "return_held"):
+                    # back to the HELD unit's own slot (ItemInstance.slot_id), else a planned slot of that SKU
+                    slot = (held_unit.slot_id if held_unit is not None else None) or next(
+                        (s.target.slot_id for s in plan.steps if isinstance(s, GraspStep) and s.target.sku == sku),
+                        None,
+                    )
+                    out.append(
+                        PlaceStep(
+                            step_id=sid,
+                            title=f"Put the {sku} back",
+                            sku=sku,
+                            destination="shelf",
+                            slot_id=slot or (target.slot_id if target else None),
+                            preconditions=GripperHolding(sku=sku, note="holding the wrong item"),
+                            postconditions=GripperEmpty(note="put back"),
+                            **common,
+                        )
+                    )
+                else:
+                    pre, post = default_conditions("place", sku=sku)
+                    out.append(
+                        PlaceStep(
+                            step_id=sid,
+                            title=f"Put the held {sku} in the basket first",
+                            sku=sku,
+                            preconditions=pre,
+                            postconditions=post,
+                            **common,
+                        )
+                    )
+        return out
+
+    async def _breaker(self, run: _Run, failure: StepFailure, decision: RecoveryDecision) -> None:
+        tier = failure.tier
+        if tier in ("t1_pretrained", "t2_finetuned"):
+            traits = ERROR_TRAITS.get(failure.code)
+            if (traits is not None and traits.t1_strike) or failure.kind in ("postcondition", "stalled"):
+                b = run.state.breakers.setdefault(tier, BreakerState(tier=tier))
+                b.strikes += 1
+        if decision.open_breaker:
+            b = run.state.breakers.setdefault(decision.open_breaker, BreakerState(tier=decision.open_breaker))
+            b.open, b.opened_at, b.reason = True, utcnow(), decision.reason
+            run.metrics.tier_fallbacks += 1
+            await self._pub(
+                run,
+                "vla.tier_changed",
+                from_tier=decision.open_breaker,
+                to_tier=decision.next_tier if decision.next_tier not in (None, "auto") else "t0_scripted",
+                reason=decision.reason,
+                breaker=b.model_copy(),
+            )
+        elif decision.action == "downgrade_tier" and tier not in (None, "t0_scripted"):
+            run.metrics.tier_fallbacks += 1
+
+    def _open_tiers(self, run: _Run) -> set[str]:
+        return {t for t, b in run.state.breakers.items() if b.open}
+
+    # =================================================================================================================
+    # verification (+ degrade policy)
+    # =================================================================================================================
+    async def _verify(
+        self,
+        run: _Run,
+        step: PlanStep,
+        attempt: int,
+        phase: str,
+        cond: Condition,
+        ctx: ExecContext,
+        *,
+        frames: list[Any] | None = None,
+        baseline: VerifyBaseline | None = None,
+        not_before: Any = None,
+        alternate: bool = False,
+    ) -> Verdict:
+        plan = run.plan
+        vphase = "reverify" if phase.startswith("reverify") else phase
+        req = VerifyRequest(
+            verify_id=make_verify_id(plan.plan_id, step.step_id, attempt, phase),
+            robot_id=plan.robot_id,
+            store_id=plan.store_id,
+            phase=vphase,
+            condition=cond,
+            frames=list(frames or []),
+            baseline=baseline,
+            bindings=dict(plan.bindings),
+            approvals=dict(run.answers),
+            context=ctx,
+            not_before=not_before,
+            alternate_cameras=alternate,
+            deadline_s=verify_deadline(run.policy.degrade.verify_timeout_s),
+        )  # type: ignore[arg-type]
+        t0 = time.monotonic()
+        verifier = getattr(self.s, "verifier", None)
+        try:
+            if verifier is None:
+                raise VerifierUnavailableError("no verifier wired")
+            v = await asyncio.wait_for(verifier.verify(req), timeout=run.policy.degrade.verify_timeout_s)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - VerifierUnavailableError, TimeoutError, or a broken verifier
+            v = await self._degraded_verdict(run, req, f"{type(exc).__name__}: {exc}")
+        run.verify_ms.append((time.monotonic() - t0) * 1000)
+        if v.degraded:
+            run.metrics.degraded_checks += 1
+            if run.state.attempts:
+                run.state.attempts[-1].degraded = True
+        if v.provider is not None:
+            run.metrics.provider_calls[v.provider.provider] = run.metrics.provider_calls.get(v.provider.provider, 0) + 1
+        return v
+
+    async def _degraded_verdict(self, run: _Run, req: VerifyRequest, why: str) -> Verdict:
+        if run.policy.degrade.on_unavailable == "uncertain":
+            return Verdict(
+                verify_id=req.verify_id,
+                robot_id=req.robot_id,
+                phase=req.phase,
+                outcome="uncertain",
+                confidence=0.0,
+                reason=f"verifier unavailable ({why})",
+                decided_by="state",
+                degraded=True,
+                methods_tried=["state"],
+            )
+        facts = await self._facts(run)
+        outcome, conf, atoms = evaluate_on_state(req.condition, facts, baseline=req.baseline, bindings=req.bindings)
+        return Verdict(
+            verify_id=req.verify_id,
+            robot_id=req.robot_id,
+            phase=req.phase,
+            outcome=outcome,
+            confidence=conf,
+            reason=f"verifier unavailable ({why}); robot state: {verdict_reason(outcome, atoms)}",
+            atoms=atoms,
+            decided_by="state",
+            provider=ProviderCall(provider="state", call="robot_state"),
+            degraded=True,
+            methods_tried=["state"],
+        )
+
+    async def _facts(self, run: _Run) -> StateFacts:
+        robot = self.s.require("robot")
+        st = await robot.state(run.plan.robot_id)
+        held_sku = None
+        if st.holding:
+            units = await robot.list_instances(run.plan.robot_id)
+            held_sku = next((u.sku for u in units if u.instance_id == st.holding), None)
+        if run.slot_geom is None:
+            run.slot_geom = {}
+            catalog = getattr(self.s, "catalog", None)
+            if catalog is not None:
+                try:
+                    plano = await catalog.get_planogram(run.plan.store_id)
+                    run.slot_geom = {
+                        s.slot_id: SlotTruth(
+                            slot_id=s.slot_id, sku=s.sku, approach_pose=s.approach_pose, item_position=s.item_position
+                        )
+                        for s in plano.slots
+                    }
+                except KeyError:
+                    pass
+        return StateFacts(
+            robot_id=run.plan.robot_id,
+            pose=st.pose,
+            battery_pct=st.battery_pct,
+            holding_instance_id=st.holding,
+            holding_sku=held_sku,
+            basket_counts=dict(Counter(st.basket_skus)),
+            approvals=dict(run.answers),
+            slots=run.slot_geom,
+        )
+
+    async def _baseline(self, run: _Run, step: PlanStep) -> VerifyBaseline:
+        bid = f"{run.plan.plan_id}:{step.step_id}:a{step.attempts}:baseline"
+        verifier = getattr(self.s, "verifier", None)
+        if verifier is not None:
+            try:
+                return await asyncio.wait_for(
+                    verifier.baseline(run.plan.robot_id, step.postconditions, baseline_id=bid),
+                    timeout=run.policy.degrade.verify_timeout_s,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - fall back to robot state
+                pass
+        facts = await self._facts(run)
+        return VerifyBaseline(
+            baseline_id=bid,
+            robot_id=run.plan.robot_id,
+            basket_counts=facts.basket_counts,
+            holding_sku=facts.holding_sku,
+            holding_instance_id=facts.holding_instance_id,
+            decided_by="state",
+        )
+
+    async def _ground(self, run: _Run, step: GroundTargetStep, ctx: ExecContext) -> GroundingResult:
+        req = GroundRequest(
+            grounding_id=f"{run.plan.plan_id}:{step.step_id}:a{step.attempts}",
+            robot_id=run.plan.robot_id,
+            target=step.target,
+            camera=step.camera,
+            context=ctx,
+            deadline_s=verify_deadline(run.policy.degrade.verify_timeout_s),
+        )
+        verifier = getattr(self.s, "verifier", None)
+        try:
+            if verifier is None:
+                raise VerifierUnavailableError("no verifier wired")
+            return await asyncio.wait_for(verifier.ground(req), timeout=run.policy.degrade.verify_timeout_s)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - T0 can grasp from the slot alone: ground from the plan
+            st = await self.s.require("robot").state(run.plan.robot_id)
+            run.metrics.degraded_checks += 1
+            tgt = GroundedTarget(
+                grounding_id=req.grounding_id,
+                target=step.target,
+                confidence=0.5,
+                decided_by="state",
+                provider=ProviderCall(provider="state", call="planogram", error_code=type(exc).__name__),
+                robot_id=run.plan.robot_id,
+                robot_pose=st.pose,
+            )
+            return GroundingResult(
+                grounding_id=req.grounding_id,
+                found=True,
+                target=tgt,
+                degraded=True,
+                reason="verifier unavailable: grounded from the planogram slot (T0)",
+            )
+
+    def _audit_condition(self, run: _Run) -> Condition:
+        if run.mode == "plan":
+            counts = Counter(
+                r.payload.get("sku") for r in run.ledger.values() if r.kind == "record_pick" and r.payload.get("sku")
+            )
+        else:
+            counts = Counter(
+                s.sku
+                for s in run.plan.steps
+                if isinstance(s, PlaceStep)
+                and s.destination == "basket"
+                and s.status in (StepStatus.SUCCEEDED, StepStatus.PROVISIONAL)
+            )
+        return BasketContains(counts=dict(counts), note="basket matches what I picked")
+
+    def _capture_cams(self, step: PlanStep) -> list[Any]:
+        cams: list[Any] = []
+        for _, atom in iter_atoms(step.postconditions):
+            for kind in atom_cameras(atom)[:1]:
+                if kind not in cams:
+                    cams.append(kind)
+        return cams
+
+    # =================================================================================================================
+    # v0.2 paths: scan, ask, mandate
+    # =================================================================================================================
+    async def _scan(self, run: _Run, step: ScanShelfStep, attempt: int) -> int:
+        plan = run.plan
+        robot = self.s.require("robot")
+        frame = await robot.scan(plan.robot_id, step.slot_id)
+        perception = getattr(self.s, "perception", None)
+        if perception is not None:
+            blurred = await perception.blur_faces(frame)
+            run.scan_frames[step.slot_id] = blurred
+            report = await perception.identify(blurred, plan.store_id, step.slot_id, step.expected_sku)
+        else:
+            units = [u for u in frame.instances if step.expected_sku in (None, u.sku)]
+            report = ScanReport(
+                scan_id=f"scan-{plan.plan_id}-{step.step_id}-a{attempt}",
+                store_id=plan.store_id,
+                slot_id=step.slot_id,
+                expected_sku=step.expected_sku,
+                observed_count=len(units),
+                count_is_exact=True,
+                frame_id=frame.frame_id,
+                camera_id=frame.camera_id,
+                detections=[
+                    Detection(
+                        sku=u.sku, confidence=1.0, method="ground_truth", instance_id=u.instance_id, lot_id=u.lot_id
+                    )
+                    for u in units
+                ],
+                lot_counts=dict(Counter(u.lot_id for u in units if u.lot_id)),
+            )
+        report = report.model_copy(
+            update={
+                "robot_id": plan.robot_id,
+                "goal_id": plan.goal_id if not plan.goal_id.startswith("adhoc-") else None,
+                "trip_id": plan.trip_id,
+            }
+        )
+        catalog = getattr(self.s, "catalog", None)
+        applied = await catalog.apply_scan(report) if catalog is not None else None
+        await self._pub02(run, "scan.result", report=report)
+        run.last_scan[step.step_id] = {
+            "observed_count": report.observed_count,
+            "qty_after": getattr(applied, "qty_after", None),
+        }
+        return report.observed_count
+
+    async def _ask(
+        self,
+        run: _Run,
+        kind: str,
+        question: str,
+        options: list[ApprovalOption],
+        item: Any,
+        step: PlanStep,
+        *,
+        multi: bool = False,
+        on_request: Callable[[ApprovalRequest], Awaitable[None]] | None = None,
+    ) -> ApprovalResponse:
+        plan = run.plan
+        n = len(run.state.attempts)
+        amount = (
+            (item.price_cents or 0) * item.qty
+            if item is not None and kind in ("over_threshold", "recommendation", "substitution", "online_order")
+            else None
+        )
+        req = ApprovalRequest(
+            approval_id=f"apr-{plan.plan_id}-{step.step_id}-{n}",
+            trip_id=plan.trip_id,
+            goal_id=None if plan.goal_id.startswith("adhoc-") else plan.goal_id,
+            robot_id=plan.robot_id,
+            store_id=plan.store_id,
+            user_id=plan.user_id or STAFF_USER_ID,
+            kind=ApprovalKind(kind),
+            title=question,
+            amount_cents=amount,
+            sku=item.sku if item is not None else None,
+            rec_id=item.rec_id if item is not None else None,
+            options=options,
+            multi=multi,
+        )
+        if on_request is not None:
+            await on_request(req)
+        trips = getattr(self.s, "trips", None)
+        approvals = getattr(self.s, "approvals", None)
+        try:
+            if trips is not None and plan.trip_id:
+                resp = await trips.ask(plan.trip_id, req)
+            elif approvals is not None:
+                resp = await approvals.request(req)
+            else:
+                resp = await self.answer(req)
+        except asyncio.CancelledError:
+            # v0.2 rule: a cancelled run withdraws its pending question (no stale card in the web app / iMessage)
+            if approvals is not None:
+                try:
+                    await asyncio.shield(approvals.cancel(req.approval_id, "plan cancelled"))
+                except Exception:  # noqa: BLE001 - best effort while unwinding
+                    pass
+            raise
+        run.answers[req.approval_id] = resp.approved
+        return resp
+
+    async def _pick_choice(self, run: _Run, step: AskUserStep, item: Any) -> PickChoice:
+        """Freshness top-k for produce: v0.2 ``perception.rank_freshness`` on the last blurred scan frame (thumbnails +
+        reasons), else the sim ground truth ranking (deterministic)."""
+        k = min(3, PICK_CHOICE_MAX)
+        perception = getattr(self.s, "perception", None)
+        frame = run.scan_frames.get(item.slot_id)
+        if perception is not None and frame is not None:
+            try:
+                return await perception.rank_freshness(frame, item.slot_id, item.sku, k)
+            except Exception:  # noqa: BLE001 - fall back to ground truth below
+                pass
+        units = await self.s.require("robot").list_instances(run.plan.robot_id, item.slot_id)
+        ranked = sorted((u for u in units if u.sku == item.sku), key=lambda u: (-(u.freshness or 0), u.instance_id))[:k]
+        return PickChoice(
+            choice_id=f"choice-{run.plan.plan_id}-{step.step_id}",
+            slot_id=item.slot_id,
+            sku=item.sku,
+            candidates=[
+                FreshnessCandidate(
+                    instance_id=u.instance_id, sku=u.sku, score=u.freshness or 0.0, rank=r, reason="sim ground truth"
+                )
+                for r, u in enumerate(ranked, 1)
+            ],
+        )
+
+    async def _ask_step(self, run: _Run, step: AskUserStep) -> str:
+        item = run.plan.item(step.item_id)
+        options: list[ApprovalOption] = [ApprovalOption(option_id=o, label=o) for o in step.options]
+        multi = False
+        on_request = None
+        open_units: list[int] = []
+        if step.ask_kind == "pick_choice" and item is not None and item.slot_id and item.sku:
+            choice = await self._pick_choice(run, step, item)
+            options = [
+                ApprovalOption(
+                    option_id=c.instance_id,
+                    label=f"#{c.rank} freshness {c.score:.2f}",
+                    detail=c.reason or None,
+                    thumbnail_b64=c.thumbnail_b64,
+                )
+                for c in sorted(choice.candidates, key=lambda c: c.rank)
+            ]
+            open_units = sorted(
+                {
+                    s.unit or 1
+                    for s in run.plan.steps
+                    if s.item_id == step.item_id and isinstance(s, GraspStep) and s.status not in CLOSED_STEP_STATUSES
+                }
+            )
+            multi = len(open_units) > 1  # 3 avocados: the shopper may pick one unit per remaining unit
+
+            async def on_request(req: ApprovalRequest) -> None:  # v0.2 event the web app's produce chooser renders
+                await self._pub02(run, "pick.choices", choice=choice, approval_id=req.approval_id)
+
+        run.metrics.asks += 1
+        resp = await self._ask(
+            run, step.ask_kind, step.question, options, item, step, multi=multi, on_request=on_request
+        )
+        if step.ask_kind == "pick_choice" and resp.approved and resp.chosen():
+            # chosen unit k -> the k-th remaining unit, on BOTH its ground_target and its grasp (a re-ground keeps it)
+            for unit, choice_id in zip(open_units, resp.chosen(), strict=False):
+                for s in run.plan.steps:
+                    if (
+                        s.item_id == step.item_id
+                        and (s.unit or 1) == unit
+                        and isinstance(s, GraspStep | GroundTargetStep)
+                        and s.status not in CLOSED_STEP_STATUSES
+                    ):
+                        s.target = s.target.model_copy(update={"instance_id": choice_id})
+        if step.ask_kind == "over_threshold" and resp.approved and step.item_id:
+            run.line_checked.add(step.item_id)
+            run.approvals[step.item_id] = resp.approval_id
+            for s in run.plan.steps:
+                if s.item_id == step.item_id and isinstance(s, GraspStep):
+                    s.approval_id = resp.approval_id
+        if not resp.approved:
+            if step.on_decline == "fail_goal":
+                return "fail_goal"
+            if step.on_decline == "skip_item":
+                await self._close_item(
+                    run,
+                    step.item_id,
+                    "declined" if step.ask_kind == "recommendation" else "skipped",
+                    f"shopper declined ({step.ask_kind})",
+                )
+        return "next"
+
+    async def _check_line(self, run: _Run, step: GraspStep) -> str:
+        plan = run.plan
+        item = plan.item(step.item_id)
+        if item is None:
+            return "ok"
+        if step.approval_id:
+            run.line_checked.add(item.item_id)
+            return "ok"
+        trips = getattr(self.s, "trips", None)
+        if trips is not None and plan.trip_id:
+            line = CartLine(
+                line_id=f"line-{item.item_id}",
+                sku=item.sku or step.target.sku,
+                name=item.name,
+                category=item.category or "uncategorized",
+                qty=item.qty,
+                unit_price_cents=item.price_cents or 0,
+                store_id=plan.store_id,
+                slot_id=item.slot_id,
+            )
+            decision = await trips.check_line(plan.trip_id, line)
+            verdict = getattr(decision.verdict, "value", decision.verdict)
+            if verdict == "deny":
+                return "deny"
+            if verdict == "needs_approval":
+                return "ask"
+        elif plan.budget_cents is not None:
+            projected = run.state.local_cart_cents + sum(
+                (i.price_cents or 0) * (i.qty - i.picked_qty)
+                for i in plan.items
+                if i.item_id in run.line_checked and i.status != "in_basket"
+            )
+            if projected + (item.price_cents or 0) * item.qty > plan.budget_cents:
+                return "ask"
+        run.line_checked.add(item.item_id)
+        return "ok"
+
+    def _threshold_question(self, run: _Run, step: GraspStep) -> AskUserStep:
+        item = run.plan.item(step.item_id)
+        name = (item.name or item.query) if item else step.target.sku
+        total = (item.price_cents or 0) * item.qty if item else 0
+        return AskUserStep(
+            step_id=f"{step.step_id}.ask",
+            title=f"Confirm {name}",
+            ask_kind="over_threshold",
+            question=f"{name} (${total // 100}.{total % 100:02d}) needs your OK (spending rules / budget). Add it?",
+            sku=step.target.sku,
+            item_id=step.item_id,
+            group_id=step.group_id,
+            group_label=step.group_label,
+            on_decline="skip_item",
+            origin="recovery",
+            inserted_by=step.step_id,
+        )
+
+    # =================================================================================================================
+    # misc
+    # =================================================================================================================
+    async def _caps(self, run: _Run) -> list[VlaCapabilities]:
+        if run.caps is None:
+            vla = getattr(self.s, "vla", None)
+            try:
+                run.caps = await vla.capabilities(run.plan.robot_id) if vla is not None else []
+            except KeyError:
+                run.caps = []
+        return run.caps
+
+    async def _held_unit(self, run: _Run) -> ItemInstance | None:
+        truth = getattr(self.s, "truth", None)
+        if truth is not None:
+            try:
+                return (await truth.truth(run.plan.robot_id)).holding
+            except Exception:  # noqa: BLE001
+                pass
+        robot = self.s.require("robot")
+        st = await robot.state(run.plan.robot_id)
+        if not st.holding:
+            return None
+        return next((u for u in await robot.list_instances(run.plan.robot_id) if u.instance_id == st.holding), None)
+
+    async def _fault_ids(self, run: _Run, step: PlanStep, attempt: int) -> list[str]:
+        faults = getattr(self.s, "faults", None)
+        if faults is None:
+            return []
+        key = f"{run.plan.plan_id}:{step.step_id}"
+        return [
+            f.fault_id for f in await faults.firings() if f.context.step_key == key and f.context.attempt == attempt
+        ]
+
+    def _vla_cb(self, run: _Run, step: PlanStep) -> Callable[[VlaStatus], Awaitable[None]]:
+        period = 1.0 / self.vla_status_hz if self.vla_status_hz > 0 else 0.0
+
+        async def cb(status: VlaStatus) -> None:
+            now = time.monotonic()
+            changed = run.last_vla_phase.get(status.exec_id) != status.phase
+            last = run.last_vla_emit.get(status.exec_id)
+            if status.phase == "running" and not changed and last is not None and now - last < period:
+                return
+            run.last_vla_emit[status.exec_id] = now
+            run.last_vla_phase[status.exec_id] = status.phase
+            await self._pub(run, "vla.status", plan_id=run.plan.plan_id, step_id=step.step_id, status=status)
+
+        return cb
+
+    async def _basket_event(self, run: _Run) -> None:
+        if not self.emit_v02_events:
+            return
+        st = await self.s.require("robot").state(run.plan.robot_id)
+        expected = Counter(r.payload.get("sku") for r in run.ledger.values() if r.kind == "record_pick")
+        await self._pub02(run, "basket.verified", check=BasketCheck.compare(expected, Counter(st.basket_skus)))
+
+    async def _finish(self, run: _Run, status: str, summary: str = "") -> PlanOutcome:
+        plan = run.plan
+        plan.status = {
+            "completed": PlanStatus.COMPLETED,
+            "failed": PlanStatus.FAILED,
+            "cancelled": PlanStatus.CANCELLED,
+        }[status]
+        run.state.status = plan.status
+        run.state.updated_at = utcnow()
+        m = run.metrics
+        m.steps_total = len(plan.steps)
+        m.steps_succeeded = sum(1 for s in plan.steps if s.status == StepStatus.SUCCEEDED)
+        m.steps_provisional = sum(1 for s in plan.steps if s.status == StepStatus.PROVISIONAL)
+        m.steps_skipped = sum(1 for s in plan.steps if s.status == StepStatus.SKIPPED)
+        m.steps_failed = sum(1 for s in plan.steps if s.status == StepStatus.FAILED)
+        m.duration_s = round(time.monotonic() - run.t0, 3)
+        m.mean_verify_ms = round(sum(run.verify_ms) / len(run.verify_ms), 2) if run.verify_ms else None
+        m.ground_truth_agreement = 1.0 if run.verify_ms else None
+        if status != "completed":  # cancelled mid-grasp / escalated: report an uncommitted unit left in the gripper
+            try:
+                held = await self._held_unit(run)
+            except Exception:  # noqa: BLE001 - best effort while unwinding
+                held = None
+            run.state.holding_instance_id = held.instance_id if held is not None else None
+        in_basket = [i for i in plan.items if i.status == "in_basket"]
+        total = sum(r.payload.get("total_cents", 0) for r in run.ledger.values() if r.kind == "add_cart_line")
+        if not summary:
+            online = [i for i in plan.items if i.status == "online"]
+            summary = f"Got {len(in_basket)} of {len(plan.items)} items" + (
+                f"; {len(online)} ordered online" if online else ""
+            )
+            summary += (
+                f" · {m.verifier_catches} verifier catch(es) · {m.retries} retr{'y' if m.retries == 1 else 'ies'}"
+            )
+        await self._pub(
+            run, "plan.completed", plan_id=plan.plan_id, status=status, summary=summary, stats=m.model_copy()
+        )
+        return PlanOutcome(
+            plan=plan.model_copy(deep=True),
+            run=run.state.model_copy(deep=True),
+            status=status,
+            summary=summary,  # type: ignore[arg-type]
+            item_status={i.item_id: i.status for i in plan.items},
+            metrics=m.model_copy(),
+            total_cents=total,
+        )
+
+    async def _pub(self, run: _Run, type_: str, **payload: Any) -> None:
+        if getattr(self.s, "events", None) is None:
+            return
+        await self._publish(make_event(type_, source="agent", **plan_envelope(run.plan), **payload))
+
+    async def _pub02(self, run: _Run, type_: str, **payload: Any) -> None:
+        if getattr(self.s, "events", None) is None or not self.emit_v02_events or run.mode != "plan":
+            return
+        await self._publish(make_event(type_, source="agent", **plan_envelope(run.plan), **payload))
+
+    async def _publish(self, event: Any) -> None:
+        """A broken event bus never kills a run (the effects already happened; the event is only the UI's view)."""
+        try:
+            await self.s.events.publish(event)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            log.warning("publish %s failed: %s", getattr(event, "type", "?"), exc)
+
+    async def _mirror(self, run: _Run, step: PlanStep, text: str, *, ok: bool = True) -> None:
+        """One ``brain.step(kind='status')`` per step transition, so the v0.2 brain view keeps telling the story."""
+        events = getattr(self.s, "events", None)
+        if events is None or not self.mirror_brain_steps:
+            return
+        run.brain_no += 1
+        bs = mirror_brain_step(run.plan, step, text, step_no=run.brain_no, ok=ok)
+        if self.on_brain_step is not None:
+            try:
+                self.on_brain_step(bs)
+            except Exception as exc:  # noqa: BLE001 - the brain's ring is a view; it never stops a run
+                log.warning("on_brain_step hook failed: %s", exc)
+        await self._publish(make_event("brain.step", source="agent", **plan_envelope(run.plan), step=bs))
+
+
+# =====================================================================================================================
+# settings + the kill switch (read at call time; PICKY_* fields land in utils.config.Settings with the utils PR)
+# =====================================================================================================================
+def setting(name: str, default: Any = None) -> Any:
+    """``utils.config.settings.<name>``. Until the utils PR adds the 0.2.1 loop fields to ``Settings``, a missing
+    field falls back to the process env var of the same name, so the kill switch (PICKY_EXEC_MODE=direct) always
+    works."""
+    import os
+
+    from utils.config import get_settings
+
+    s = get_settings()
+    if name in type(s).model_fields:
+        value = getattr(s, name)
+        return default if value is None or value == "" else value
+    raw = os.environ.get(name.upper())
+    return default if raw is None or raw.strip() == "" else raw.strip()
+
+
+def _float_setting(name: str, default: float) -> float:
+    try:
+        value = float(setting(name, default))
+    except (TypeError, ValueError):
+        log.warning("%s is not a number; using %s", name.upper(), default)
+        return default
+    return value if value > 0 else default
+
+
+def plan_timeout_from_settings() -> float:
+    """PICKY_PLAN_TIMEOUT_S (default 20 s): the LLM draft call and the runner's replan call."""
+    return _float_setting("picky_plan_timeout_s", DEFAULT_PLAN_TIMEOUT_S)
+
+
+def policy_from_settings(base: RetryPolicy = DEFAULT_RETRY_POLICY) -> RetryPolicy:
+    """DEFAULT_RETRY_POLICY with PICKY_VERIFY_TIMEOUT_S applied (the verifier then gets deadline_s = that - 1 s)."""
+    timeout = _float_setting("picky_verify_timeout_s", base.degrade.verify_timeout_s)
+    if timeout == base.degrade.verify_timeout_s:
+        return base
+    return base.model_copy(update={"degrade": base.degrade.model_copy(update={"verify_timeout_s": timeout})})
+
+
+def configured_exec_mode(services: Any) -> str:
+    """PICKY_EXEC_MODE as configured: 'direct' | 'plan' | 'tools'. Unset / 'auto' = 'plan' when the VLA and the
+    verifier are wired (the lead's default), else 'direct'."""
+    raw = str(setting("picky_exec_mode", "auto")).strip().lower()
+    if raw in ("", "auto"):
+        wired = getattr(services, "vla", None) is not None and getattr(services, "verifier", None) is not None
+        return "plan" if wired else "direct"
+    return raw
+
+
+def resolve_exec_mode(services: Any) -> ExecMode:
+    """THE switch the brain consults per goal: ``contracts.services.exec_mode`` over ``configured_exec_mode`` (plan /
+    tools only when planner, runner, vla and verifier are all wired; anything else is 'direct' = exact v0.2)."""
+    return exec_mode(services, configured_exec_mode(services))
+
+
+def build_runner(services: Any, **kw: Any) -> PlanLoop:
+    """The runner with settings applied (policy verify timeout, plan timeout). Same class for real and fake."""
+    kw.setdefault("policy", policy_from_settings())
+    kw.setdefault("plan_timeout_s", plan_timeout_from_settings())
+    return PlanLoop(services, **kw)
