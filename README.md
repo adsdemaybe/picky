@@ -235,8 +235,9 @@ PICKY_REAL_ARMS=routing,trust make demo         # a real arm that can't start fa
 make db-up && make seed                         # local Postgres + pgvector, seeded from data/ (catalog extra)
 ```
 
-Keys go in `.env` (see [`.env.example`](.env.example)): `ANTHROPIC_API_KEY` switches the agent and robot brains to
-Claude (blank = deterministic fakes); also `STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`. The web
+Keys go in `.env` (see [`.env.example`](.env.example)): `GEMINI_API_KEY` switches the agent and robot brains to
+Gemini (needs `uv sync --extra agent`; `PICKY_LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY` for Claude; blank =
+deterministic fakes); also `STRIPE_SECRET_KEY` (test mode), `PHOTON_*`, `DEEPGRAM_API_KEY`. The web
 app reads its own `arms/frontend/.env.local`.
 `make setup` removes extras, so re-run `uv sync --extra <arm>` after it.
 
@@ -346,8 +347,8 @@ Honest snapshot. Each arm's README has the detailed checklist.
 - Synthetic data only: fictional stores, retailers, prices, devices and users.
 - No login in the demo; the app opens as a fictional user (Maya; the account menu says "Demo account (fictional
   data)"). The browser never queries the DB, only the gateway.
-- We don't claim a privacy mode: model calls go to the Claude API, and faces are blurred before any frame leaves the
-  pipeline.
+- We don't claim a privacy mode: model calls go to the Gemini API (Claude if configured), and faces are blurred before any
+  frame leaves the pipeline.
 
 ## Contributing
 

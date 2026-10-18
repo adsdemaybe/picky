@@ -32,7 +32,8 @@ perception = [
 # Isaac itself (isaacsim[all,extscache]==6.2.0.0, torch cu128) is installed by hand on the GPU host; see arms/sim/README.md.
 sim = ["opencv-python-headless>=4.10,<5", "pillow>=10.4"]
 routing = ["ortools>=9.10", "scipy>=1.13", "scikit-image>=0.24"]
-agent = ["deepgram-sdk>=7.13"]
+# agent: google-genai = the default LLM provider for utils.llm (Gemini); deepgram = voice.
+agent = ["deepgram-sdk>=7.13", "google-genai>=2.31,<3"]
 recommender = ["sentence-transformers>=6.1", "pgvector>=0.5.1"]
 trust = ["stripe>=10.0"]
 messaging = ["photonhq-api==0.5.0"]

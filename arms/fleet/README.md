@@ -71,7 +71,7 @@ so it calls `execute_trip` by itself, and the fleet runs the in-store part on a 
 uv run pytest arms/fleet                 # base deps only, ~0.5 s
 make demo                                # all fakes: the demo goes through POST /api/requests -> fleet
 PICKY_REAL_ARMS=fleet make demo          # real fleet (interpretation via the agent arm; fake agent = keyword rules)
-PICKY_REAL_ARMS=fleet,agent make demo    # + Claude interpretation (needs ANTHROPIC_API_KEY)
+PICKY_REAL_ARMS=fleet,agent make demo    # + LLM interpretation (needs GEMINI_API_KEY)
 ```
 Options (kwargs to `create` / `create_fake`, settable from the gateway's fake_opts): `robots` (spec list/dict),
 `throttle_s` (1.0), `robot_wait_s` (60: how long a manual goal waits for a robot before `no_robot`), `robot_poll_s`,

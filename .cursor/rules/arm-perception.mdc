@@ -41,7 +41,7 @@ Pipeline position (CLAUDE.md §2, SHOP): `robot.scan` → **`perception.blur_fac
 - [x] **P0** `observe` fake: ground-truth description (instances → items, counts, shelf tag, mispricing note, freshness;
       empty aimed slot; planogram near the robot when the frame has no instances) + keyword question answering (fake)
 - [ ] **P1** `observe` real: `claude-haiku-5-5` vision on the blurred JPEG via `utils.llm`, ground truth as hints and
-      fallback (built + unit-tested with a mocked client; not run live: no `ANTHROPIC_API_KEY` yet)
+      fallback (built + unit-tested with a mocked client; not run live: no `GEMINI_API_KEY` yet)
 
 ## Contract
 - Implements `contracts.services.PerceptionService` (`blur_faces`, `identify`, `rank_freshness`, `verify_basket`).
@@ -86,7 +86,7 @@ undecodable frame becomes a placeholder card. `observe` sends only blurred frame
 
 ## Files
 - `__init__.py` — `create` → `RealPerception`, `create_fake` → `FakePerception`, `create_cameras` → `RealCameras`
-  (raises without `ANTHROPIC_API_KEY` so the gateway uses the fake), `create_cameras_fake` → `FakeCameras`
+  (raises without `GEMINI_API_KEY` so the gateway uses the fake), `create_cameras_fake` → `FakeCameras`
 - `cameras.py` — Cameras API (registry, snapshot / stream / observe, frame helpers, placeholder renderer)
 - `fake.py` — ground-truth bypass (base deps only), helpers `is_synthetic_frame`, `freshness_reason`
 - `service.py` — YuNet blur + cascade skeleton (barcode done; SigLIP/VLM TODO) over the ground-truth report
@@ -102,7 +102,7 @@ uv sync --extra perception                          # opencv, pillow, zxing-cpp 
 curl -L -o models/face_detection_yunet_2023mar.onnx \
   https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
 PICKY_REAL_ARMS=perception make demo                # real blur + cascade, ground truth fills the gaps
-PICKY_REAL_ARMS=cameras make dev                    # real observe (needs ANTHROPIC_API_KEY); the rest stays fake
+PICKY_REAL_ARMS=cameras make dev                    # real observe (needs GEMINI_API_KEY); the rest stays fake
 curl -s localhost:8000/api/cameras | jq '.[].camera_id'
 curl -s -o pico.jpg 'localhost:8000/api/cameras/rover-ave-1.front/snapshot.jpg?w=320'
 curl -s -XPOST localhost:8000/api/cameras/rover-ave-1.front/observe -d '{"question":"is the mild salsa here?"}'

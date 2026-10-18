@@ -29,6 +29,7 @@ from contracts.common import BBox, Point3, Pose2D, Rect2D
 from contracts.planogram import Fixture, Planogram, Slot
 from contracts.services import CameraService, Services
 from contracts.sim import CameraFrame, ItemInstance, SimStatus, SimWorkerStatus
+from utils import llm
 
 STORE = "store_ave"
 
@@ -459,14 +460,14 @@ async def test_real_observe_uses_vision_with_ground_truth_counts(no_data):
     services = Services(catalog=StubCatalog(), robot=StubRobot(SALSA, "S_SALSA"))
     c = RealCameras(services, client=client, data_root=no_data)
     obs = await c.observe("rover-ave-1.front", "Is the mild salsa in stock?")
-    assert obs.method == "vlm" and obs.model == "claude-haiku-5-5" and obs.people == 1
+    assert obs.method == "vlm" and obs.model == llm.model("fast") and obs.people == 1
     assert obs.answer.startswith("Yes, the mild salsa")
     salsa, mystery = obs.items
     assert (salsa.sku, salsa.count, salsa.shelf_tag_cents, salsa.slot_id) == ("salsa_mild", 4, 399, "S_SALSA")
     assert mystery.sku is None and mystery.confidence == 1.0
 
     [call] = messages.calls
-    assert call["model"] == "claude-haiku-5-5"
+    assert call["model"] == llm.model("fast")  # gemini-3.8-flash by default (PICKY_LLM_PROVIDER)
     content = call["messages"][0]["content"]
     assert content[0]["type"] == "image" and content[1]["type"] == "text"  # image before text
     assert "sku=salsa_mild" in content[1]["text"] and "Is the mild salsa in stock?" in content[1]["text"]

@@ -69,7 +69,7 @@ Stop ids: mandatory `item:<sku>` (mid-trip duplicates `item:<sku>:<item_id>`), o
 ```bash
 make demo                                   # all fakes, ~8 s, exits non-zero on failure
 uv run python -m arms.gateway.demo --no-staff --quiet
-PICKY_REAL_ARMS=brain make demo             # real robot brain (needs ANTHROPIC_API_KEY), everything else fake
+PICKY_REAL_ARMS=brain make demo             # real robot brain (needs GEMINI_API_KEY), everything else fake
 make dev                                    # API on :8000 → open http://localhost:8000/debug
 uv run python -m arms.gateway.export_schemas   # or: make gen-types
 uv run pytest arms/gateway

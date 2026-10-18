@@ -3,8 +3,9 @@
 Shared helpers that **two or more arms** use and that contain **no business logic**. Anything that knows about
 trips, carts, mandates, SKUs or routes belongs in an arm (or, if it is an interface, in `contracts/`).
 
-Base deps only (pydantic, pydantic-settings, pyyaml, numpy, httpx, anthropic). `utils` never imports `contracts`
-or any arm, and `import utils` is free (no eager submodule imports, no env reads, no network).
+Base deps only (pydantic, pydantic-settings, pyyaml, numpy, httpx, anthropic; `google-genai` is a lazy import from
+the `agent` extra). `utils` never imports `contracts` or any arm, and `import utils` is free (no eager submodule
+imports, no env reads, no network).
 
 ## Module index
 
@@ -17,7 +18,7 @@ or any arm, and `import utils` is free (no eager submodule imports, no env reads
 | `geometry.py` | World-frame math on tuples / `Pose` NamedTuple / anything with `.x .y [.theta]` (so contracts `Pose2D` works): `distance`, `heading`, `wrap_angle`, `angle_diff`, `polyline_length`, `interpolate_polyline`, `resample_polyline`, `to_local`/`to_world`, `rect_corners`, `point_in_rect(..., yaw, margin)`, `bbox`. (Grid frames: use `contracts.routing.GridSpec`.) |
 | `ids.py` | `new_id("trip") -> "trip_k3f9x2ab"`; `seed_ids(42)` or env `PICKY_ID_SEED` (process env only, not `.env`) for deterministic runs; `IdFactory(seed)` for an independent stream (fakes). |
 | `events.py` | `EventBus`: `await bus.publish(ev)` (pydantic model or dict with `type`; stamps monotonically increasing `seq` and empty `ts`), `bus.subscribe("route" \| ["robot", "trip.state"] \| None, trip_id=..., replay=...)` -> async-iterable `Subscription` with bounded queue + drop-oldest, `bus.recent(after_seq=...)` for websocket catch-up. |
-| `llm.py` | `get_client()` (lazy `AsyncAnthropic`; `LLMNotConfigured` without `ANTHROPIC_API_KEY`), `model("brain"\|"fast"\|"smart")` / `MODEL_BRAIN`..., `complete_json(prompt, Model)` (structured output + pydantic validation + 1 retry; tool-forcing fallback), `run_tool_loop(messages, tools, handlers, max_iters=8)`, `cached_system` / `cached_tools` (prompt caching), `extract_json`, `tool_from_model`. Every call takes `client=` for tests. |
+| `llm.py` | Provider-pluggable LLM access (`PICKY_LLM_PROVIDER`: `gemini` default via `google-genai` in the `agent` extra + `GEMINI_API_KEY`; `anthropic` optional via `ANTHROPIC_API_KEY`). One Anthropic-Messages-shaped API for both: `get_client()` (lazy; `GeminiMessages` adapter or `AsyncAnthropic`; `LLMNotConfigured` without key/SDK), `provider()`, `model("brain"\|"fast"\|"smart")` / `MODEL_BRAIN`... (blank `PICKY_MODEL_*` = provider default: gemini-3.8-flash / gemini-3.8-flash / gemini-4-argon), `is_configured()` / `not_configured_reason()`, `complete_json(prompt, Model, effort=)` (JSON-schema structured output + pydantic validation + 1 repair retry; tool-forcing fallback on a 400), `run_tool_loop(messages, tools, handlers, max_iters=8)` (Gemini: function-call ids and thought signatures echoed), `cached_system` / `cached_tools`, `extract_json`, `tool_from_model`, `to_gemini_request` / `from_gemini_response`. Every call takes `client=` (Anthropic-shaped fake or raw `google.genai.Client`) for tests; `set_client` too. |
 | `signing.py` | `canonical_json(obj, exclude=...)` (sorted keys, compact, pydantic-aware), `sha256_hex(obj)` (cart hash), `sign(obj, key=PICKY_SIGNING_KEY)` / `verify(obj, sig)` (HMAC-SHA256, constant-time). |
 | `fsm.py` | `StateMachine(transitions, initial, any_to=[FAILED], terminal=[...], on_transition=cb)`: `transition(dst, reason)` raises `IllegalTransition`; `can`, `allowed`, `history`, `path()`. Used by the gateway's `TripState`. |
 | `data.py` | Loaders for `data/` YAML (products, planograms, online store, users). Owned by the contracts author. |
