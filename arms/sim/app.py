@@ -7,6 +7,7 @@ Runs on the GPU host "vhagar" (arms/sim/DEPLOY.md) and connects OUTBOUND to the 
     /data/$USER/isaacsim/python.sh -m arms.sim.app                  # Isaac 5.x/6.x, headless, every store in data/
     uv run python -m arms.sim.app --backend sketch                   # no Isaac: same protocol, Pillow-rendered frames
     uv run python -m arms.sim.app --backend null                     # no rendering at all (grey frames)
+    uv run --extra mujoco python -m arms.sim.app --backend mujoco    # no Isaac / GPU: MuJoCo offscreen render (Mac)
 
 Threads: the websocket thread (``GatewayLink``) ONLY parses + enqueues commands into ``inbox`` and sends what the main
 loop queues; it never touches USD. The main loop owns Isaac: drain inbox -> ``WorkerCore.submit``, ``WorkerCore.tick``
@@ -1488,6 +1489,13 @@ def make_backend(kind: str, args: argparse.Namespace, assets: SkuAssets | None =
         sim_app = SimulationApp({"headless": not args.no_headless, "width": args.width, "height": args.height})
         _quiet_kit_logging()
         return sim_app, IsaacBackend(sim_app, label_dir=args.label_dir, so101_urdf=args.so101_urdf, assets=assets)
+    if kind == "mujoco":
+        from arms.sim.mujoco_backend import MujocoBackend, MujocoUnavailable
+
+        try:
+            return None, MujocoBackend()
+        except MujocoUnavailable as exc:
+            raise IsaacUnavailable(str(exc)) from exc
     if kind in ("sketch", "kinematic"):
         from arms.sim.sketch import SketchBackend
 
@@ -1504,7 +1512,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--store", default=None, help="legacy single store (same as --stores <id>)")
     ap.add_argument("--gateway-url", default=settings.picky_gateway_url)
     ap.add_argument("--token", default=settings.picky_sim_token)
-    ap.add_argument("--backend", choices=["isaac", "sketch", "kinematic", "null"], default="isaac")
+    ap.add_argument("--backend", choices=["isaac", "mujoco", "sketch", "kinematic", "null"], default="isaac")
     ap.add_argument("--width", type=int, default=1280, help="Isaac app window (cameras use their mount size)")
     ap.add_argument("--height", type=int, default=720)
     ap.add_argument("--no-headless", action="store_true", help="open the Isaac UI (needs a display)")
@@ -1559,7 +1567,7 @@ def main(argv: list[str] | None = None) -> int:
     loaded = core.load_stores(store_ids)
     log.info("hosting stores %s, robots %s", loaded, sorted(core.rovers))
 
-    sim_version = {"isaac": "isaacsim", "null": "null"}.get(args.backend, "sketch")
+    sim_version = {"isaac": "isaacsim", "mujoco": "mujoco", "null": "null"}.get(args.backend, "sketch")
     url = gateway_ws_url(args.gateway_url, args.token)
     link = GatewayLink(url, lambda: core.hello(args.token, args.worker_id, sim_version))
     link.start()
