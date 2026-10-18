@@ -30,6 +30,17 @@ from .scene import CameraModel, best_roll, box_long_axis_yaw
 
 GRIP_CLOSED = 5.0  # stalls on the object; LeRobot drops the gripper to reduced torque when it does
 GRIP_OPEN = 98.0
+HOLDING_MIN = 8.0  # gripper reading when closed on the gum pack ~12-13; on nothing ~1-5
+CARRY_STEPS = ("lift straight up", "lift high", "transit", "over destination", "lower")
+
+
+MAX_ATTEMPTS = 3  # grasp retries when the gripper comes up empty
+
+
+class GripLost(RuntimeError):
+    """The object is not (or no longer) in the gripper."""
+
+
 MAX_REACH = 0.36  # m, horizontal; nothing beyond this solves at grasp/carry heights
 
 
@@ -95,6 +106,7 @@ class ScenePlan:
     waypoints: list[Waypoint] = field(default_factory=list)
     frame_path: str = "last_scene.jpg"
     error: str | None = None
+    target_box_center: tuple[float, float] | None = None
 
 
 def plan(
@@ -131,6 +143,7 @@ def plan(
         return p
 
     h = object_height
+    p.target_box_center = dets[target].center_px
     t = cam.pixel_to_world(*dets[target].center_px, h / 2, size)
     t = t + np.array([st["grasp_dx"], st["grasp_dy"], 0.0])
     jaw = box_long_axis_yaw(cam, dets[target].box_px, h / 2, size) + math.pi / 2  # close across the thin side
@@ -143,7 +156,7 @@ def plan(
         p.error = f"{target} at ({t[0]:.2f}, {t[1]:.2f}) is out of reach: {e}"
         return p
     p.roll = max(-175.0, min(175.0, best_roll(kin, q_hover, jaw) + st["roll"]))
-    hang = h - 0.02  # the object hangs this far below the fingertip (gripped 2 cm below its top)
+    hang = h - 0.03  # the object hangs this far below the fingertip (gripped 3 cm below its top)
     lower_z = 0.01 + hang + 0.01  # object bottom ~1 cm above the plate when released
     # Transit must clear a plate/bowl rim with margin for arm error and the object slipping in the jaws:
     # object bottom >= ~6 cm above the table -> fingertip >= hang + 0.06.
@@ -173,7 +186,7 @@ def plan(
         return p
     p.waypoints = [
         Waypoint("hover over target", hover, GRIP_OPEN),
-        Waypoint("straddle", (t[0], t[1], h - 0.02 + st["grasp_dz"]), GRIP_OPEN),
+        Waypoint("straddle", (t[0], t[1], h - 0.03 + st["grasp_dz"]), GRIP_OPEN),
         Waypoint("close", None, GRIP_CLOSED),
         Waypoint("lift straight up", (t[0], t[1], h + 0.03), GRIP_CLOSED),
         Waypoint("lift high", (t[0], t[1], lift_z), GRIP_CLOSED),
@@ -201,25 +214,40 @@ def execute(
     log=print,
     cfg: RigConfig | None = None,
     snap_after: tuple[str, ...] = ("lift high", "release"),
+    on_step=None,
 ) -> list[dict]:
     """Runs the plan; returns the joint trajectory actually commanded (for recipes / exact replay)."""
     traj: list[dict] = []
     for w in p.waypoints:
+        if on_step:
+            on_step(w.name)
         if step:
             input(f"  next: {w.name} - Enter to run, Ctrl-C to stop ")
         pose, grip = read_pose(robot)
         if w.xyz is None:
             move(robot, pose, w.gripper, seconds=1.5)
-            log(f"  {w.name}: gripper -> {read_pose(robot)[1]:.0f}")
+            g = read_pose(robot)[1]
+            log(f"  {w.name}: gripper -> {g:.0f}")
+            if w.name == "close" and g < HOLDING_MIN:
+                raise GripLost(f"gripper closed to {g:.0f}: nothing between the jaws")
             traj.append({"name": w.name, "joints": None, "gripper": w.gripper})
             _snap(cfg, w.name, snap_after, log)
             continue
         q = kin.ik(w.xyz, pose)
         q["wrist_roll"] = p.roll
         jump = max(abs(q[j] - pose[j]) for j in ARM_JOINTS)
-        move(robot, q, w.gripper, seconds=max(1.5, jump / 15.0), steps=60)
+        carrying = w.name in CARRY_STEPS
+        secs = max(2.5, jump / 10.0) if carrying else max(1.5, jump / 15.0)  # gentle while holding the object
+        move(robot, q, w.gripper, seconds=secs, steps=80)
         err = settle(robot, q, w.gripper)
         log(f"  {w.name}: settled to {err:.1f} deg")
+        if carrying:
+            g = read_pose(robot)[1]
+            if g < HOLDING_MIN:
+                raise GripLost(f"lost the object during '{w.name}' (gripper closed to {g:.0f})")
+            if w.name == "lift high" and cfg is not None and p.target_box_center is not None:
+                if _target_still_on_table(cfg, p):
+                    raise GripLost(f"camera still sees the {p.target} where it was - it was not lifted")
         traj.append({"name": w.name, "joints": {j: round(float(q[j]), 2) for j in ARM_JOINTS}, "gripper": w.gripper})
         _snap(cfg, w.name, snap_after, log)
     return traj
@@ -258,6 +286,18 @@ def replay(robot, name: str, log=print) -> None:
         move(robot, q, step["gripper"], seconds=1.5 if step["joints"] is None else max(1.5, jump / 15.0), steps=60)
         err = settle(robot, q, step["gripper"]) if step["joints"] else 0.0
         log(f"  {step['name']}: settled to {err:.1f} deg, gripper {read_pose(robot)[1]:.0f}")
+
+
+def _target_still_on_table(cfg: RigConfig, p: ScenePlan, tol_px: float = 18.0) -> bool:
+    """After lifting: is the target still detected at its original image position (i.e. not in the gripper)?"""
+    try:
+        d = detect_named(grab_frame(cfg), p.target, cfg.perceptron_model)
+    except RuntimeError:
+        return False
+    if d is None:
+        return False
+    (u, v), (u0, v0) = d.center_px, p.target_box_center
+    return math.hypot(u - u0, v - v0) < tol_px
 
 
 def _snap(cfg: RigConfig | None, name: str, which: tuple[str, ...], log) -> None:
@@ -318,10 +358,30 @@ def main() -> None:
     ap.add_argument("--height", type=float, default=0.05, help="object height in metres (standing gum pack: 0.05)")
     ap.add_argument("--save", metavar="NAME", help="after the run, save it as a replayable recipe")
     ap.add_argument("--replay", metavar="NAME", help="re-run a saved recipe exactly (no camera / planning)")
+    ap.add_argument(
+        "--record",
+        nargs="?",
+        const="auto",
+        metavar="PATH",
+        help="record the overhead camera to an MP4 (default ~/picky_runs/videos/<time>.mp4)",
+    )
     args = ap.parse_args()
     cfg = RigConfig()
     kin = SO101Kinematics(cfg)
     cam = CameraModel.load()
+    rec = None
+    if args.record:
+        from .camera import start_recording
+
+        vid = (
+            Path(args.record)
+            if args.record != "auto"
+            else (Path.home() / "picky_runs" / "videos" / f"{time.strftime('%Y%m%d-%H%M%S')}.mp4")
+        )
+        vid.parent.mkdir(parents=True, exist_ok=True)
+        rec = start_recording(cfg, str(vid), title=f'Picky  |  "{args.command or args.replay}"')
+        rec.caption = "connecting"
+        print(f"recording to {vid}")
     robot = connect_robot(cfg)
     try:
         set_limits_from_calibration(kin, robot)
@@ -335,18 +395,48 @@ def main() -> None:
 
         policy = SteeringPolicy.load()
         steer = dict(policy.mean)  # run what has been learned from successes so far (no exploration here)
-        scene = grab_frame(cfg)
-        p = plan(cfg, kin, cam, args.command, rest, args.height, frame=scene.copy(), steer=steer)
-        print(describe(p))
-        print(f"annotated camera frame: {p.frame_path}")
-        if p.error or args.dry:
-            return
-        traj = execute(robot, kin, p, step=args.step, cfg=cfg)
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            scene = grab_frame(cfg)
+            p = plan(cfg, kin, cam, args.command, rest, args.height, frame=scene.copy(), steer=steer)
+            print(describe(p))
+            print(f"annotated camera frame: {p.frame_path}")
+            if p.error or args.dry:
+                return
+            if rec:
+                rec.caption = f"found {p.target} and {p.dest} - planning done" + (
+                    f" (attempt {attempt})" if attempt > 1 else ""
+                )
+            try:
+                traj = execute(
+                    robot,
+                    kin,
+                    p,
+                    step=args.step,
+                    cfg=cfg,
+                    on_step=(lambda name: setattr(rec, "caption", name)) if rec else None,
+                )
+                break
+            except GripLost as e:
+                print(f"attempt {attempt}: {e}")
+                if attempt == MAX_ATTEMPTS:
+                    raise
+                print("not holding it - opening the gripper, going home and looking for it again")
+                if rec:
+                    rec.caption = f"missed the {p.target} - looking again"
+                go_home(robot, rest, GRIP_OPEN)
+                time.sleep(1.0)  # let the object settle before the next camera frame
+        if rec:
+            rec.caption = "returning home"
         go_home(robot, rest, GRIP_OPEN)
         save_recipe("last_run", p, traj, rest)  # every run is replayable; --save keeps a named copy
         if args.save:
             print(f"saved recipe: {save_recipe(args.save, p, traj, rest)}")
         guess, after = looks_successful(cfg, p.target, p.dest)
+        if rec:
+            rec.caption = {True: f"done: {p.target} is on the {p.dest}", False: "done", None: "done"}[guess]
+            time.sleep(2.0)  # hold the final shot
+            print(f"video saved: {rec.stop()}  ({rec.frames} frames)")
+            rec = None
         hint = {True: "looks like a SUCCESS", False: "looks like a FAILURE", None: "can't tell from the camera"}[guess]
         default = {True: "s", False: "f", None: ""}[guess]
         label = ""
@@ -361,7 +451,7 @@ def main() -> None:
         cv2.imwrite(str(ep / "scene.jpg"), scene)
         if after is not None:
             cv2.imwrite(str(ep / "after.jpg"), after)
-        rec = {
+        record = {
             "command": args.command,
             "success": success,
             "auto_guess": guess,
@@ -372,7 +462,7 @@ def main() -> None:
             "trajectory": traj,
             "waypoints": [{"name": w.name, "xyz": w.xyz, "gripper": w.gripper} for w in p.waypoints],
         }
-        (ep / "episode.json").write_text(json.dumps(rec, indent=1, default=float))
+        (ep / "episode.json").write_text(json.dumps(record, indent=1, default=float))
         if success:
             save_recipe(f"success_{ep.name}", p, traj, rest)
         print(
@@ -382,6 +472,8 @@ def main() -> None:
     finally:
         go_home(robot, dict(cfg.home_deg), GRIP_OPEN)
         robot.disconnect()
+        if rec:
+            print(f"video saved: {rec.stop()}  ({rec.frames} frames)")
 
 
 if __name__ == "__main__":

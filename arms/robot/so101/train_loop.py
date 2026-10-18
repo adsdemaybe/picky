@@ -31,7 +31,7 @@ from .camera import grab_frame
 from .config import RigConfig
 from .kinematics import SO101Kinematics
 from .pick_place import connect_robot, read_pose
-from .pick_routine import GRIP_OPEN, describe, execute, go_home, plan, save_recipe
+from .pick_routine import GRIP_OPEN, GripLost, describe, execute, go_home, plan, save_recipe
 from .scene import CameraModel
 
 DATA_DIR = Path.home() / "picky_runs"
@@ -150,6 +150,9 @@ def main() -> None:
                             label = kk
                         elif kk == "q":
                             raise KeyboardInterrupt
+            except GripLost as e:  # empty gripper: an automatic failure, no need to ask
+                print(f"{e} - counting this run as a failure", flush=True)
+                label = "f"
             finally:
                 go_home(robot, rest, GRIP_OPEN)  # reset pose
             try:

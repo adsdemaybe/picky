@@ -103,7 +103,78 @@ def _grab_msmf(cfg: RigConfig) -> np.ndarray | None:
     return frame if ok else None
 
 
+class Recorder:
+    """Owns the camera for the duration of a run: writes every frame to a video (with an optional caption) and
+    serves the latest clean frame to grab_frame, so recording and perception can share one webcam (Windows only
+    lets a single client open it)."""
+
+    def __init__(self, cfg: RigConfig, path: str, fps: float = 20.0, title: str = ""):
+        import threading
+
+        self.cap = open_camera(cfg.camera_index)
+        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, cfg.frame_w)
+        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, cfg.frame_h)
+        ok, frame = self.cap.read()
+        if not ok:
+            raise RuntimeError(f"recorder: camera {cfg.camera_index} returned no frame (open in another app?)")
+        h, w = frame.shape[:2]
+        self.path, self.fps, self.title, self.caption = path, fps, title, ""
+        self.writer = cv2.VideoWriter(path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+        self.latest, self.frames, self._stop = frame, 0, False
+        self.index = cfg.camera_index
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        period = 1.0 / self.fps
+        nxt = time.time()
+        while not self._stop:
+            ok, frame = self.cap.read()
+            if not ok:
+                continue
+            self.latest = frame
+            out = frame.copy()
+            if self.title:
+                cv2.rectangle(out, (0, 0), (out.shape[1], 30), (0, 0, 0), -1)
+                cv2.putText(out, self.title, (10, 21), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+            if self.caption:
+                y = out.shape[0]
+                cv2.rectangle(out, (0, y - 32), (out.shape[1], y), (0, 0, 0), -1)
+                cv2.putText(
+                    out, self.caption, (10, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (80, 255, 120), 2, cv2.LINE_AA
+                )
+            now = time.time()
+            if now >= nxt:  # keep real-time pacing even if the camera delivers faster
+                self.writer.write(out)
+                self.frames += 1
+                nxt += period
+                if now - nxt > 1.0:
+                    nxt = now
+
+    def stop(self) -> str:
+        global _ACTIVE
+        self._stop = True
+        self._thread.join(timeout=3)
+        self.writer.release()
+        self.cap.release()
+        if _ACTIVE is self:
+            _ACTIVE = None
+        return self.path
+
+
+_ACTIVE: Recorder | None = None
+
+
+def start_recording(cfg: RigConfig, path: str, title: str = "") -> Recorder:
+    global _ACTIVE
+    _ACTIVE = Recorder(cfg, path, title=title)
+    return _ACTIVE
+
+
 def grab_frame(cfg: RigConfig) -> np.ndarray:
+    if _ACTIVE is not None and str(_ACTIVE.index) == str(cfg.camera_index):
+        time.sleep(0.3)  # a fresh frame after any motion
+        return _ACTIVE.latest.copy()
     frame = _grab_direct(cfg)
     if frame is None and sys.platform == "darwin":
         frame = _grab_via_terminal(cfg)
