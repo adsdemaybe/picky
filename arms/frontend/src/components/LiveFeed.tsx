@@ -1,13 +1,15 @@
 "use client";
 // Robot camera views. Every camera can come from three sources (see lib/feed.ts):
 //   sim      drawn in the browser from the trip replay + store layout
-//   gateway  latest face-blurred JPEG per camera from WS /ws/frames
+//   gateway  latest face-blurred JPEG per camera from WS /ws/frames, or, for a bound gateway trip, the robot's
+//            MJPEG stream (one per page) and polled snapshots (thumbnails, insets); the gateway blurs every frame
 //   stream   a direct URL per camera (MJPEG in <img>, MP4/WebM in <video>)
 import { ExternalLink, Radio, VideoOff } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { STORES, productBySku, slotsOf, type Slot, type StoreId } from "@/lib/data";
 import { CAMERA_LABEL, useFeed, type Camera } from "@/lib/feed";
+import { cameraUrl, robotCameraId } from "@/lib/gateway/client";
 import { useTrip } from "@/lib/trip";
 import { cn as cx } from "@/lib/utils";
 import { StoreMap } from "./StoreMap";
@@ -21,6 +23,8 @@ export function CameraView({ camera, inset = false, compact = false }: { camera:
   const url = useFeed((s) => s.streams[camera]);
   const conn = useFeed((s) => s.conn);
   const telemetry = useFeed((s) => s.telemetry);
+  const robotId = useFeed((s) => s.robotId);
+  const gatewayUrl = useFeed((s) => s.gatewayUrl);
 
   if (mode === "sim") {
     if (camera === "head") return <SimCamera basketInset={inset} />;
@@ -41,12 +45,13 @@ export function CameraView({ camera, inset = false, compact = false }: { camera:
     // eslint-disable-next-line @next/next/no-img-element
     return <img src={frame.src} alt={`${CAMERA_LABEL[camera]} (faces blurred)`} className="absolute inset-0 h-full w-full object-cover" />;
   }
-  if (camera === "overview" && telemetry)
+  if (camera === "overview" && (telemetry || robotId))
     return (
       <div className="absolute inset-0 grid place-items-center bg-[#f7f8f6] p-3">
-        <StoreMap compact poseOverride={telemetry.pose} />
+        <StoreMap compact poseOverride={telemetry?.pose} />
       </div>
     );
+  if (robotId && camera !== "overview") return <GatewayCamera camera={camera} robotId={robotId} base={gatewayUrl} compact={compact} inset={inset} />;
   return (
     <NoSignal
       compact={compact}
@@ -85,6 +90,91 @@ function UrlStream({ url }: { url: string }) {
   // MJPEG streams render natively in <img>
   // eslint-disable-next-line @next/next/no-img-element
   return <img src={url} alt="Robot camera stream" className="absolute inset-0 h-full w-full object-cover" />;
+}
+
+/** A bound gateway trip's robot camera: MJPEG for the big view, polled snapshots for thumbnails and insets. */
+function GatewayCamera({ camera, robotId, base, compact, inset }: { camera: Exclude<Camera, "overview">; robotId: string; base: string; compact: boolean; inset: boolean }) {
+  const id = robotCameraId(robotId, camera);
+  const label = `${CAMERA_LABEL[camera]} (faces blurred)`;
+  if (compact) return <PolledSnapshot src={cameraUrl(id, "snapshot", { w: 320 }, base)} every={1500} alt={label} />;
+  return (
+    <>
+      <MjpegStream src={cameraUrl(id, "stream", { fps: 5, w: 960 }, base)} alt={label} />
+      {inset && camera === "head" && (
+        <div className="pointer-events-none absolute top-3 right-3 flex w-[26%] max-w-[220px] flex-col gap-2">
+          {(["wrist", "basket"] as const).map((c) => (
+            <div key={c} className="relative aspect-[4/3] overflow-hidden rounded-lg bg-black/60 ring-1 ring-white/25">
+              <PolledSnapshot src={cameraUrl(robotCameraId(robotId, c), "snapshot", { w: 240 }, base)} every={2000} alt={`${CAMERA_LABEL[c]} (faces blurred)`} />
+              <span className="absolute bottom-1 left-1 rounded bg-black/60 px-1.5 py-0.5 font-mono text-[10px] tracking-wide text-white">{c.toUpperCase()}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
+/** MJPEG renders natively in <img>; on error show a reconnect state and retry every 2 s.
+ *  The src is attached in an effect so a hidden (kept-alive) route lets go of its stream connection. */
+function MjpegStream({ src, alt }: { src: string; alt: string }) {
+  const ref = useRef<HTMLImageElement>(null);
+  const [attempt, setAttempt] = useState(0);
+  const [failed, setFailed] = useState(false);
+  const url = attempt ? `${src}&r=${attempt}` : src;
+  useEffect(() => {
+    const img = ref.current;
+    if (!img || failed) return;
+    img.src = url;
+    return () => img.removeAttribute("src");
+  }, [url, failed]);
+  useEffect(() => {
+    if (!failed) return;
+    const t = setTimeout(() => {
+      setFailed(false);
+      setAttempt((a) => a + 1);
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [failed]);
+  if (failed) return <NoSignal title="Reconnecting to the robot camera" body="The picture comes back as soon as the gateway answers." pulse />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img ref={ref} alt={alt} onError={() => ref.current?.getAttribute("src") && setFailed(true)} className="absolute inset-0 h-full w-full object-cover" />
+  );
+}
+
+/** snapshot.jpg polling (≤ 6 connections per host, so only one MJPEG per page). Preloads, so no flicker. */
+function PolledSnapshot({ src, every, alt }: { src: string; every: number; alt: string }) {
+  const [shown, setShown] = useState<string | null>(null);
+  const [errors, setErrors] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    let errs = 0;
+    const tick = () => {
+      const url = `${src}${src.includes("?") ? "&" : "?"}t=${Date.now()}`;
+      const img = new Image();
+      img.onload = () => {
+        if (!alive) return;
+        errs = 0;
+        setErrors(0);
+        setShown(url);
+      };
+      img.onerror = () => {
+        if (!alive) return;
+        setErrors(++errs); // 503 = no frame yet
+      };
+      img.src = url;
+    };
+    tick();
+    const id = setInterval(tick, every);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, [src, every]);
+  if (errors >= 3) return <NoSignal compact title="No frame from this camera yet" body="" />;
+  if (!shown) return <NoSignal compact title="Waiting for the first frame" body="" pulse />;
+  // eslint-disable-next-line @next/next/no-img-element
+  return <img src={shown} alt={alt} className="absolute inset-0 h-full w-full object-cover" />;
 }
 
 /** The trip page's camera panel: head camera plus a link to the full Live section. */
@@ -297,7 +387,7 @@ export function SimCamera({ basketInset = true }: { basketInset?: boolean }) {
       last = { x: robot.x, y: robot.y };
       const t = (now - statusSince) / 1000;
       const stop = activeStop ? stops[activeStop] : null;
-      const atShelf = stop?.sku && (robot.status === "scanning" || robot.status === "picking" || robot.status === "waiting");
+      const atShelf = stop?.sku && slotsOf(s.storeId)[stop.sku] && (robot.status === "scanning" || robot.status === "picking" || robot.status === "waiting");
 
       if (phase === "idle" || phase === "waiting_login") drawDock(ctx, W, H, now, s.storeId);
       else if (atShelf && stop?.sku) drawShelf(ctx, W, H, s.storeId, stop.sku, robot.status, t * s.speed, now);

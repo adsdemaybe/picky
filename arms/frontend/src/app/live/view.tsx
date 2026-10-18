@@ -2,7 +2,8 @@
 import { Activity, Bot, Camera as CameraIcon, ChevronDown, Expand, MonitorPlay, Plug, PlugZap, Radio, Server, Unplug } from "lucide-react";
 import { AnimatePresence, motion } from "motion/react";
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { BindTripFromUrl } from "@/components/GatewayBits";
 import { CameraView } from "@/components/LiveFeed";
 import { Panel } from "@/components/picky";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { productBySku } from "@/lib/data";
+import { GATEWAY_URL } from "@/lib/gateway/client";
 import { CAMERAS, CAMERA_HELP, CAMERA_LABEL, useFeed, type Camera, type Conn, type Mode } from "@/lib/feed";
 import { useTrip } from "@/lib/trip";
 import { cn } from "@/lib/utils";
@@ -36,14 +38,20 @@ export default function LivePage() {
   const approval = useTrip((s) => s.approval);
 
   // restore this browser's saved connection settings, and start the simulated feed by default
+  // (a followed gateway trip keeps the feed bound to its robot; see lib/gateway/tripSource.ts)
   useEffect(() => {
     useFeed.getState().hydrate();
-    if (useFeed.getState().conn === "idle" && useFeed.getState().mode === "sim") useFeed.getState().connect();
+    const t = useTrip.getState();
+    if (t.source === "gateway" && t.tripId && t.robotId) useFeed.getState().bindTrip({ tripId: t.tripId, robotId: t.robotId, gatewayUrl: GATEWAY_URL });
+    else if (useFeed.getState().conn === "idle" && useFeed.getState().mode === "sim") useFeed.getState().connect();
   }, []);
 
   const conn = CONN_STYLE[feed.conn];
   return (
     <div className="flex flex-col gap-6">
+      <Suspense fallback={null}>
+        <BindTripFromUrl />
+      </Suspense>
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-[36px] leading-[1.05] font-bold md:text-[46px]">Live feed</h1>
@@ -78,7 +86,7 @@ export default function LivePage() {
               <span className="flex items-center gap-1.5 rounded-full bg-tomato px-2.5 py-0.5 text-[12px] font-bold">
                 <span className="live-dot size-1.5 rounded-full bg-white" /> {CAMERA_LABEL[main]}
               </span>
-              {feed.mode === "gateway" && feed.frames[main] && <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11.5px]">Faces blurred</span>}
+              {feed.mode === "gateway" && (feed.frames[main] || feed.robotId) && <span className="rounded-full bg-white/15 px-2 py-0.5 text-[11.5px]">Faces blurred</span>}
             </div>
             <Button
               size="icon-sm"
@@ -153,6 +161,8 @@ function Telemetry() {
   const cart = useTrip((s) => s.cart);
   const stops = useTrip((s) => s.stops);
   const activeStop = useTrip((s) => s.activeStop);
+  const tripSource = useTrip((s) => s.source);
+  const lastThought = useTrip((s) => s.steps.findLast((st) => st.kind === "thought" || st.kind === "message")?.text);
   const sim = { robot, cart, stops, activeStop };
   const [now, setNow] = useState(0); // set on the client; reading the clock during prerender is not allowed
   useEffect(() => {
@@ -160,7 +170,8 @@ function Telemetry() {
     return () => clearInterval(id);
   }, []);
 
-  const live = mode === "sim";
+  // the store's robot pose comes from the replay, or from a followed gateway trip's robot.state when no WS frames arrive
+  const live = mode === "sim" || (!tel && tripSource === "gateway");
   const pose = live ? sim.robot : tel?.pose;
   const status = live ? sim.robot.status : tel?.status;
   const holding = live ? (sim.robot.status === "picking" && sim.activeStop ? sim.stops[sim.activeStop]?.sku : null) : tel?.holding;
@@ -198,7 +209,15 @@ function Telemetry() {
           <dt className="text-muted-foreground">In the basket</dt>
           <dd className="font-medium">{basket} items</dd>
         </div>
-        {mode === "gateway" && (
+        {tripSource === "gateway" && lastThought && (
+          <div className="flex justify-between gap-3">
+            <dt className="shrink-0 text-muted-foreground">Thinking</dt>
+            <dd className="truncate font-medium" title={lastThought}>
+              {lastThought}
+            </dd>
+          </div>
+        )}
+        {mode === "gateway" && tel && (
           <>
             <div className="flex justify-between">
               <dt className="text-muted-foreground">Frames</dt>
@@ -256,7 +275,7 @@ function Connection() {
           <Field label="Gateway URL" hint="The FastAPI gateway, e.g. http://192.168.1.20:8000">
             <Input value={f.gatewayUrl} onChange={(e) => f.setConfig({ gatewayUrl: e.target.value })} placeholder="http://localhost:8000" />
           </Field>
-          <Field label="Trip ID" hint="Optional. Leave empty to see every robot frame.">
+          <Field label="Trip ID" hint="Trip id, or a robot id like rover-ave-1.">
             <Input value={f.tripId} onChange={(e) => f.setConfig({ tripId: e.target.value })} placeholder={trip === "idle" ? "trip_…" : "trip id from the gateway"} />
           </Field>
           <Button onClick={f.connect}>
@@ -324,10 +343,11 @@ function IntegrationNotes() {
       {open && (
         <div className="border-t border-border p-4 text-[13px]">
           <p className="mb-2">
-            Open <code className="rounded bg-muted px-1">WS /ws/frames?trip_id=…</code> on the gateway. Each message is one JSON event:
+            Open <code className="rounded bg-muted px-1">WS /ws/frames?trip_id=…</code> or <code className="rounded bg-muted px-1">?robot_id=…</code> on the gateway. Each
+            message is one JSON event:
           </p>
-          <pre className="overflow-x-auto rounded-xl bg-foreground p-3 text-[11.5px] leading-relaxed text-background">{`{"type":"frame","frame":{
-  "camera":"head",        // head | wrist | basket | overview
+          <pre className="overflow-x-auto rounded-xl bg-foreground p-3 text-[11.5px] leading-relaxed text-background">{`{"type":"camera.frame","camera_id":"rover-ave-1.front","frame":{
+  "camera":"front",       // front | wrist | basket | ceiling
   "jpeg_b64":"/9j/4AAQ…", // no data: prefix
   "w":960,"h":540,
   "blurred":true,         // frames without this are dropped
@@ -344,7 +364,9 @@ function IntegrationNotes() {
           <p className="mt-2 text-muted-foreground">
             Shapes come from <code className="rounded bg-muted px-1">contracts/sim.py</code> (CameraFrame, RobotState) and{" "}
             <code className="rounded bg-muted px-1">contracts/events.py</code>. GET <code className="rounded bg-muted px-1">/health</code> fills the status box.
-            The gateway must allow CORS from this app. For quick tests, any MJPEG URL works under Direct streams.
+            The gateway must allow CORS from this app. A trip sent from the Robot page follows its robot here automatically (MJPEG{" "}
+            <code className="rounded bg-muted px-1">/api/cameras/&lt;id&gt;/stream.mjpg</code> for the big view, snapshots for the thumbnails). For quick tests, any MJPEG URL
+            works under Direct streams.
           </p>
         </div>
       )}
