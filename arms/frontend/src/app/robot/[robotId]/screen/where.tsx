@@ -7,7 +7,9 @@ import { Footprints, Loader2, MapPin, Search, ShoppingBasket, X } from "lucide-r
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { Ingredients } from "@/components/Ingredients";
 import { Money, ProductTile } from "@/components/picky";
+import { productBySku } from "@/lib/data";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -246,6 +248,7 @@ function Location({ found, robot, speech, onClose }: { found: Found; robot: Robo
             <Fact label="On the shelf" value={`${offer.qty}`} />
           </div>
           {section && <p className="mt-2 text-[14px] text-muted-foreground">{section}</p>}
+          {productBySku[p.sku] && <Ingredients p={productBySku[p.sku]} compact />}
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button size="lg" onClick={guide} disabled={sending || going || !!busyReason}>
               {sending ? <Loader2 className="animate-spin" /> : <Footprints />} {going ? "On my way, follow me" : "Take me there"}

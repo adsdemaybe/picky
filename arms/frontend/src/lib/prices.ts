@@ -153,7 +153,8 @@ export function searchProducts(q: string, limit = 12) {
   if (!terms.length) return [];
   return allProducts
     .map((p) => {
-      const hay = `${p.name} ${p.brand ?? ""} ${p.category} ${p.subcategory ?? ""} ${p.tags.join(" ")}`.toLowerCase();
+      const hay =
+        `${p.name} ${p.brand ?? ""} ${p.category} ${p.subcategory ?? ""} ${p.tags.join(" ")} ${(p.ingredients ?? []).join(" ")}`.toLowerCase();
       const score = terms.reduce((s, t) => s + (hay.includes(t) ? (p.name.toLowerCase().includes(t) ? 2 : 1) : 0), 0);
       return { p, score };
     })

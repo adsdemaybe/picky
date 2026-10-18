@@ -23,6 +23,12 @@ export type Product = {
   label_color: string;
   shape: string;
   dims_m: number[];
+  description?: string;
+  allergens?: string[];
+  /** Real ingredient list of a matched similar product (Open Food Facts), or the item itself for fresh produce. */
+  ingredients?: string[];
+  ingredients_text?: string | null;
+  ingredients_source?: { name: string; url: string | null; matched: string | null } | null;
 };
 
 export type Lot = { lot_id: string; qty: number; expiry: string | null; freshness: number | null };

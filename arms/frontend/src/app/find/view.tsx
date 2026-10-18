@@ -12,6 +12,7 @@ import { useAsk } from "@/lib/assistant/store";
 import { TODAY, allProducts, mostBought, productBySku, type Product } from "@/lib/data";
 import { fmt } from "@/lib/money";
 import { alternativesFor, effective, historyFor, offersFor, robotStoreFor, searchProducts, upcomingFor, verdictFor } from "@/lib/prices";
+import { Ingredients } from "@/components/Ingredients";
 import { usePurchases } from "@/lib/usePurchases";
 import { cn } from "@/lib/utils";
 
@@ -257,6 +258,8 @@ function Detail({ sku, onPick }: { sku: string; onPick: (s: string) => void }) {
           </div>
         </div>
       </div>
+
+      <Ingredients p={p} />
 
       <div className="p-5">
         <h3 className="mb-2 text-[16px] font-semibold">Every store we checked</h3>

@@ -19,6 +19,13 @@ const write = (name, obj) => writeFileSync(join(out, name), JSON.stringify(obj, 
 
 // ---- products ----
 const { products } = load("data/products.yaml");
+// real ingredient lists (scripts/fetch_ingredients.py, Open Food Facts, ODbL); optional until fetched
+let ingredients = {};
+try {
+  ingredients = load("data/ingredients.yaml").ingredients ?? {};
+} catch {
+  ingredients = {};
+}
 write(
   "products.json",
   products.map((p) => ({
@@ -36,6 +43,17 @@ write(
     label_color: p.asset?.label_color ?? "#cccccc",
     shape: p.asset?.shape ?? "box",
     dims_m: p.asset?.dims_m ?? [0.15, 0.08, 0.2],
+    description: p.description ?? "",
+    allergens: [...new Set([...(p.allergens ?? []), ...(ingredients[p.sku]?.allergens ?? [])])],
+    ingredients: ingredients[p.sku]?.ingredients ?? [],
+    ingredients_text: ingredients[p.sku]?.ingredients_text ?? null,
+    ingredients_source: ingredients[p.sku]
+      ? {
+          name: ingredients[p.sku].source,
+          url: ingredients[p.sku].source_url ?? null,
+          matched: ingredients[p.sku].matched_product ?? null,
+        }
+      : null,
   })),
 );
 const bySku = Object.fromEntries(products.map((p) => [p.sku, p]));
