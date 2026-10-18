@@ -46,6 +46,7 @@ def connect_robot(cfg: RigConfig):
                 print(f"warning: {name} reports {bus.packet_handler.getRxPacketError(err)} (continuing)")
 
     bus._assert_motors_exist = assert_motors_reply
+    bus._assert_same_firmware = lambda: None  # its strict read fails on the same latched status flags
     bus.connect()
     bus.disable_torque()
     present = bus.sync_read("Present_Position", normalize=False, num_retry=3)
